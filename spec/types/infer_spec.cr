@@ -295,3 +295,153 @@ describe "Types::Infer modifiers" do
     type_of_local(r, "c").should eq "String"
   end
 end
+
+# Type of the local *name* where it is read on the line containing *marker*
+# (`# here` comments mark the probe).
+private def type_at(r, name : String, marker : String) : String
+  inf, body, src, table = r
+  line_start = src.index!(marker)
+  line_start = (src.rindex('\n', line_start) || -1) + 1
+  line_end = src.index('\n', line_start) || src.size
+  # Last read on the line (`a && a.size` probes the right-hand `a`).
+  e = body.exprs.select do |x|
+    x.kind.local_ref? && x.name == name && x.range.start >= line_start && x.range.end <= line_end
+  end.max_by?(&.range.start) || raise "no read of #{name} on #{marker} line"
+  table.to_s(inf.type_of(e.id))
+end
+
+describe "Types::Infer control flow" do
+  it "is flow-sensitive across reassignments" do
+    r = infer(<<-CR)
+      def m
+        x = 1
+        x # a
+        x = "s"
+        x # b
+      end
+      CR
+    type_at(r, "x", "# a").should eq "Int32"
+    type_at(r, "x", "# b").should eq "String"
+    type_of_local(r, "x").should eq "Int32 | String"
+  end
+
+  it "joins branches, adding Nil for one-sided assignments" do
+    r = infer(<<-CR)
+      def m(c : Bool)
+        if c
+          a = 1
+          b = 1
+        else
+          b = "s"
+        end
+        a # p
+        b # p
+      end
+      CR
+    type_at(r, "a", "a # p").should eq "Int32?"
+    type_at(r, "b", "b # p").should eq "String | Int32"
+  end
+
+  it "drops paths that exit early, also mid-branch" do
+    r = infer(<<-CR)
+      def m(x : String?, c : Bool)
+        if x.nil?
+          puts 1
+          return
+        end
+        x # a
+        y = nil
+        if c
+          y = 1
+        else
+          raise "no"
+          y = "dead"
+        end
+        y # b
+      end
+      CR
+    type_at(r, "x", "x # a").should eq "String"
+    type_at(r, "y", "y # b").should eq "Int32"
+  end
+
+  it "narrows with &&, ||, !, and falsy edges" do
+    r = infer(<<-CR)
+      def m(a : String?, b : Int32?)
+        if a && b
+          a # t1
+          b # t1
+        end
+        if !a || !b
+          a # e1
+        else
+          a # t2
+          b # t2
+        end
+        a && a.size # rhs
+        return unless a
+        a # t3
+      end
+      CR
+    type_at(r, "a", "a # t1").should eq "String"
+    type_at(r, "b", "b # t1").should eq "Int32"
+    type_at(r, "a", "a # e1").should eq "String?"
+    type_at(r, "a", "a # t2").should eq "String"
+    type_at(r, "b", "b # t2").should eq "Int32"
+    type_at(r, "a", "a.size # rhs").should eq "String"
+    type_at(r, "a", "a # t3").should eq "String"
+  end
+
+  it "reaches a fixed point in loops" do
+    r = infer(<<-CR)
+      def m(c : Bool)
+        x = 1
+        while c
+          x # in
+          y = x
+          x = "s" if c
+          x = nil if c
+        end
+        x # out
+      end
+      CR
+    type_at(r, "x", "x # in").should eq "Int32 | String | Nil"
+    type_at(r, "x", "x # out").should eq "Int32 | String | Nil"
+  end
+
+  it "models break and next in loops" do
+    r = infer(<<-CR)
+      def m(c : Bool)
+        x = nil
+        while c
+          x = 1
+          break if c
+          x = "s"
+          next
+          x = :dead
+        end
+        x # out
+      end
+      CR
+    type_at(r, "x", "x # out").should eq "Int32 | String | Nil"
+  end
+
+  it "flows outer reassignments through call blocks" do
+    r = infer(<<-CR)
+      def m(xs : Array(String))
+        acc = nil
+        xs.each do |s|
+          acc # in
+          acc = s
+        end
+        acc # out
+      end
+      CR
+    type_at(r, "acc", "acc # in").should eq "String?"
+    type_at(r, "acc", "acc # out").should eq "String?"
+  end
+
+  it "keeps analysing code after an exit" do
+    r = infer("def m(s : String)\n  return\n  t = s.size\n  t # dead\nend")
+    type_at(r, "t", "t # dead").should eq "Int32"
+  end
+end

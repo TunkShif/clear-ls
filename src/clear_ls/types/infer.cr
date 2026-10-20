@@ -1,4 +1,5 @@
 require "../hir"
+require "../flow"
 require "../workspace/index"
 require "./type_expr"
 
@@ -9,12 +10,24 @@ module ClearLS::Types
   # Candidate methods for a call on a receiver type.
   record MethodMatch, site : Semantics::Site, owner : Semantics::TypeId, bindings : Hash(String, TyId)
 
-  # Phase-3 local type inference over one body.
+  # Flow-sensitive local type inference over one body.
   #
-  # A single forward pass with an environment `HIR::BindingId → TyId`:
-  # assignments update it, `if`/`case`/`while` join branch environments as
-  # unions (no CFG yet: see Phase 4), and blocks are analysed in place with
-  # block args typed from the called method's block restriction.
+  # Forward dataflow on the body's `Flow::CFG`: the state is an environment
+  # `HIR::BindingId → TyId` per block entry, solved with a worklist in
+  # reverse postorder. Joins union the incoming types; a binding missing on
+  # one incoming path was not yet assigned there and becomes nilable
+  # (Crystal semantics). Branch edges refine locals (truthiness, `nil?`,
+  # `is_a?`); an edge whose refinement leaves a local with no possible type
+  # is infeasible. Expressions of type NoReturn (a `raise`, a call declared
+  # `: NoReturn`, an `if` whose branches all return) end the reachable part
+  # of their block.
+  #
+  # Unreachable code (after `return`, ...) is analysed afterwards in a
+  # separate pass, starting from the state of the code it follows, so
+  # editing it still gets completion; it never flows into reachable code.
+  #
+  # Block args are typed from the called method's block restriction or
+  # yield summary when the closure body is entered.
   #
   # Sources of types: literals, `T.new` (and `T.new` overloads with declared
   # return types), parameter restrictions, defaults, `as`/`uninitialized`,
@@ -29,6 +42,11 @@ module ClearLS::Types
     getter yield_types = [] of Array(TyId)
 
     MAX_UNION = 8
+    # Times a block's entry state may change before changed bindings widen
+    # to unknown.
+    MAX_VISITS = 8
+
+    alias Env = Hash(HIR::BindingId, TyId)
 
     # Loads a def's source (body lowering for yield summaries). Provided by
     # the caller; returns nil when the file cannot be read.
@@ -38,6 +56,22 @@ module ClearLS::Types
     property summary_depth = 1
 
     @env = {} of HIR::BindingId => TyId
+
+    getter! cfg : Flow::CFG
+    # Block entry states: reachable blocks, then unreachable ones (second pass).
+    @in = {} of Int32 => Env
+    # State at each analysed block's end, also when its end is unreachable
+    # (rescue dispatch and dead code start from it).
+    @end_env = {} of Int32 => Env
+    # Blocks whose end is reachable.
+    @live_out = Set(Int32).new
+    @visits = Hash(Int32, Int32).new(0)
+    @pending = [] of Bool
+    @rank = [] of Int32
+    @by_rank = [] of Int32
+    @main_pass = true
+    # Consumer of each expression's value (`HIR` parent).
+    @parent = {} of HIR::ExprId => HIR::ExprId
 
     def initialize(@body : HIR::Body, @ctx : DefContext, @table : TypeTable)
       @types = {} of HIR::ExprId => TyId
@@ -49,10 +83,33 @@ module ClearLS::Types
     end
 
     def run : self
+      @cfg = Flow::Builder.build(@body)
+      @body.exprs.each do |e|
+        e.receiver.try { |r| @parent[r] = e.id }
+        e.children.each { |c| @parent[c] = e.id }
+        e.named_args.each { |(_, v)| @parent[v] = e.id }
+        e.block.try { |b| @parent[b] = e.id }
+      end
       seed_params
-      visit(@body.root)
+      solve(@env.dup)
+      @main_pass = false
+      @reached = @in.keys.to_set
+      solve_dead
       self
     end
+
+    # Entry state of a reachable or analysed-unreachable block.
+    def block_entry(b : Flow::BlockId) : Env?
+      @in[b.value]?
+    end
+
+    # Was the block reached by the main (reachable-code) analysis?
+    def reachable?(b : Flow::BlockId) : Bool
+      @reached.includes?(b.value)
+    end
+
+    @reachable_count = 0
+    @reached = Set(Int32).new
 
     def type_of(id : HIR::ExprId) : TyId
       @types[id]? || @table.unknown
@@ -116,23 +173,221 @@ module ClearLS::Types
       @table.members(u).size > MAX_UNION ? @table.unknown : u
     end
 
-    # Joins branch environments. A binding missing from some branch but not
-    # defined before the branches was first assigned in another branch, so
-    # it may be Nil afterwards (Crystal semantics).
-    private def join_envs(envs : Array(Hash(HIR::BindingId, TyId)), before : Hash(HIR::BindingId, TyId)) : Hash(HIR::BindingId, TyId)
-      keys = envs.flat_map(&.keys).uniq
+    # Joins two incoming states. A binding missing on one side was not
+    # assigned on that path yet: it may be Nil.
+    private def join_env(a : Env, b : Env) : Env
+      return a if a == b
       result = {} of HIR::BindingId => TyId
-      keys.each do |k|
-        ts = envs.map { |e| e[k]? }
-        t = ts.compact.reduce { |a, b| join(a, b) }
-        result[k] = ts.any?(&.nil?) && !before.has_key?(k) ? join(t, @table.named!("Nil")) : t
+      a.each do |k, t|
+        result[k] = (o = b[k]?) ? join(t, o) : join(t, nil_t)
+      end
+      b.each do |k, t|
+        result[k] = join(t, nil_t) unless a.has_key?(k)
       end
       result
     end
 
+    private def nil_t : TyId
+      @table.named!("Nil")
+    end
+
+    # -- dataflow -----------------------------------------------------------------
+
+    # Reverse postorder over normal and exception edges; unreachable blocks
+    # follow in id order (roughly lexical).
+    private def compute_order : Nil
+      n = cfg.blocks.size
+      @rank = Array(Int32).new(n, -1)
+      post = [] of Int32
+      seen = Array(Bool).new(n, false)
+      # Iterative DFS: {block, next successor index}.
+      stack = [{0, 0}]
+      seen[0] = true
+      while top = stack.last?
+        b, i = top
+        blk = cfg.blocks[b]
+        succs = blk.succs
+        nexts = blk.handler ? succs + [blk.handler.not_nil!] : succs
+        if i < nexts.size
+          stack[-1] = {b, i + 1}
+          s = nexts[i].value
+          unless seen[s]
+            seen[s] = true
+            stack << {s, 0}
+          end
+        else
+          post << b
+          stack.pop
+        end
+      end
+      @by_rank = post.reverse
+      @reachable_count = @by_rank.size
+      n.times { |b| @by_rank << b unless seen[b] }
+      @by_rank.each_with_index { |b, r| @rank[b] = r }
+      @pending = Array(Bool).new(n, false)
+    end
+
+    private def solve(entry : Env) : Nil
+      compute_order
+      @in[0] = entry
+      @pending[0] = true
+      while r = @pending.index(true)
+        @pending[r] = false
+        b = cfg.blocks[@by_rank[r]]
+        alive = transfer(b, @in[b.id.value])
+        propagate(b, alive)
+      end
+    end
+
+    private def enqueue(b : Int32) : Nil
+      @pending[@rank[b]] = true
+    end
+
+    # Runs a block's operations from *env*. Returns whether its end is
+    # reachable.
+    private def transfer(b : Flow::Block, env : Env) : Bool
+      @env = env.dup
+      alive = true
+      b.ops.each do |op|
+        if op.kind.enter?
+          enter(op.expr)
+          next
+        end
+        prev = @types[op.expr]?
+        t = eval_expr(op.expr)
+        if t == @table.no_return && alive
+          k = @body.expr(op.expr).kind
+          alive = false unless k.local_ref? || k.return? || k.break? || k.next?
+        end
+        notify_consumer(op.expr, b.id) if @main_pass && prev && prev != t
+      end
+      @end_env[b.id.value] = @env
+      @live_out << b.id.value if alive && @main_pass
+      alive
+    end
+
+    # A value read by an expression in another block changed (a closure's
+    # value, a branch value of an `if`): reanalyse that block.
+    private def notify_consumer(id : HIR::ExprId, from : Flow::BlockId) : Nil
+      cur = @parent[id]?
+      while c = cur
+        if blk = cfg.eval_block[c]?
+          enqueue(blk.value) if blk != from && @in.has_key?(blk.value)
+          return
+        end
+        cur = @parent[c]?
+      end
+    end
+
+    private def propagate(b : Flow::Block, alive : Bool) : Nil
+      out_env = @end_env[b.id.value]
+      if alive
+        b.succs.each_with_index do |s, i|
+          env = refine(out_env, b, i) || next
+          merge_into(s.value, env)
+        end
+      end
+      if h = b.handler
+        # An exception may occur anywhere in the block.
+        merge_into(h.value, join_env(@in[b.id.value], out_env))
+      end
+    end
+
+    private def merge_into(s : Int32, env : Env) : Nil
+      old = @in[s]?
+      new = old ? join_env(old, env) : env
+      return if old == new
+      @visits[s] += 1
+      if old && @visits[s] > MAX_VISITS
+        new = new.to_h { |k, t| {k, old[k]? == t ? t : @table.unknown} }
+        return if old == new
+      end
+      @in[s] = new
+      enqueue(s)
+    end
+
+    # State along successor *i* of *b* (0 = true edge of a branch), or nil
+    # when the edge is infeasible.
+    private def refine(env : Env, b : Flow::Block, i : Int32) : Env?
+      return env unless b.terminator == Flow::Terminator::Branch
+      test = b.test || return env
+      @env = env
+      facts = edge_facts(test, i == 0)
+      return env if facts.empty?
+      refined = env.dup
+      facts.each do |k, t|
+        return nil if t == @table.no_return
+        refined[k] = t
+      end
+      refined
+    end
+
+    private def edge_facts(test : Flow::Test, truthy : Bool) : Env
+      case test.kind
+      in .truthy?    then narrowing(test.cond, truthy)
+      in .case_when? then {} of HIR::BindingId => TyId
+      end
+    end
+
+    # Blocks the main pass never reached (after jumps, behind infeasible
+    # edges), in rank order: start from analysed predecessors, else from the
+    # block they follow lexically, else from the rescued blocks, else empty.
+    private def solve_dead : Nil
+      @by_rank.each do |bi|
+        next if @in.has_key?(bi)
+        b = cfg.blocks[bi]
+        env = nil.as(Env?)
+        b.preds.each do |p|
+          e = @end_env[p.value]? || next
+          e = refine(e, cfg[p], cfg[p].succs.index!(b.id)) || e
+          env = env ? join_env(env, e) : e
+        end
+        if env.nil? && (f = b.fallback)
+          env = @end_env[f.value]?
+        end
+        if env.nil?
+          b.exc_preds.each do |p|
+            e = @end_env[p.value]? || next
+            env = env ? join_env(env, e) : e
+          end
+        end
+        env ||= {} of HIR::BindingId => TyId
+        @in[bi] = env
+        transfer(b, env)
+      end
+    end
+
+    # Value of a join expression from its reachable sources.
+    private def merge_type(id : HIR::ExprId) : TyId
+      srcs = cfg.merges[id]? || return @table.unknown
+      live = srcs.select { |s| @live_out.includes?(s.block.value) }
+      live = srcs.select { |s| @end_env.has_key?(s.block.value) } if live.empty? && !@main_pass
+      ts = live.compact_map { |s| source_type(s) }
+      @table.union(ts)
+    end
+
+    private def source_type(s : Flow::Source) : TyId?
+      t = s.expr.try { |x| operand(x) } || nil_t
+      case s.filter
+      in .none?   then t
+      in .truthy? then @table.without_nil(t)
+      in .falsy?
+        return t if @table.unknown?(t)
+        falsy = @table.members(t).select { |m| @table.nil_type?(m) || bool?(m) }
+        falsy.empty? ? nil : @table.union(falsy)
+      end
+    end
+
+    # Type computed by an earlier operation.
+    private def operand(id : HIR::ExprId) : TyId
+      @types[id]? || @table.unknown
+    end
+
     # -- visitor ---------------------------------------------------------------
 
-    private def visit(id : HIR::ExprId) : TyId
+    # Transfer function of one `Eval` operation; operands were evaluated by
+    # earlier operations.
+    private def eval_expr(id : HIR::ExprId) : TyId
       e = @body.expr(id)
       ty = case e.kind
            when .literal?      then literal(e)
@@ -147,22 +402,18 @@ module ClearLS::Types
            when .op_assign?    then visit_op_assign(e)
            when .type_decl?    then visit_type_decl(e)
            when .call?         then visit_call(e)
-           when .if?, .unless? then visit_if(e)
-           when .case?         then visit_case(e)
-           when .while?, .until? then visit_loop(e)
-           when .seq?          then visit_seq(e)
-           when .and?          then visit_and_or(e, and: true)
-           when .or?           then visit_and_or(e, and: false)
-           when .not?          then e.children.each { |c| visit(c) }; @table.named!("Bool")
+           when .if?, .unless?, .case?, .begin?, .and?, .or?
+             merge_type(id)
+           when .while?, .until? then nil_t
+           when .seq?          then e.children.last?.try { |c| operand(c) } || nil_t
+           when .not?          then @table.named!("Bool")
            when .collection?   then collection(e)
-           when .proc_literal? then visit_proc(e)
-           when .block?        then visit_children(e); @table.unknown
-           when .begin?        then visit_begin(e)
+           when .proc_literal? then eval_proc(e)
+           when .block?        then merge_type(id)
            when .return?, .break?, .next?
-             e.children.each { |c| visit(c) }
              @table.no_return
            when .yield?
-             ts = e.children.map { |c| visit(c) }
+             ts = e.children.map { |c| operand(c) }
              ts.each_with_index do |t, i|
                (@yield_types[i]? || (@yield_types << [] of TyId; @yield_types[i])) << t
              end
@@ -171,32 +422,16 @@ module ClearLS::Types
              if e.syntax.uninitialized_var?
                e.type_text.try { |t| parse_type(t) } || @table.unknown
              else
-               visit_children(e)
                @table.unknown
              end
            else
-             visit_children(e)
              @table.unknown
            end
       @types[id] = ty
       ty
     end
 
-    private def visit_children(e : HIR::Expr) : Nil
-      e.receiver.try { |r| visit(r) }
-      e.children.each { |c| visit(c) }
-      e.named_args.each { |(_, v)| visit(v) }
-      e.block.try { |b| visit(b) }
-    end
-
-    private def visit_seq(e : HIR::Expr) : TyId
-      last = @table.named!("Nil")
-      e.children.each { |c| last = visit(c) }
-      last
-    end
-
     private def literal(e : HIR::Expr) : TyId
-      e.children.each { |c| visit(c) } # interpolations
       case e.syntax
       when .integer?        then int_literal(e.text || "")
       when .float_node?     then (e.text || "").ends_with?("f32") ? @table.named!("Float32") : @table.named!("Float64")
@@ -228,8 +463,8 @@ module ClearLS::Types
     end
 
     private def collection(e : HIR::Expr) : TyId
-      elems = e.children.map { |c| visit(c) }
-      named = e.named_args.map { |(n, v)| {n, visit(v)} }
+      elems = e.children.map { |c| operand(c) }
+      named = e.named_args.map { |(n, v)| {n, operand(v)} }
       case e.syntax
       when .array_node?
         elem = e.type_text.try { |t| parse_type(t) } || (elems.empty? ? @table.unknown : union_or_unknown(elems))
@@ -387,7 +622,7 @@ module ClearLS::Types
 
     private def visit_assign(e : HIR::Expr) : TyId
       target, value = e.children[0]?, e.children[1]?
-      ty = value ? visit(value) : @table.unknown
+      ty = value ? operand(value) : @table.unknown
       write_target(target, ty) if target
       ty
     end
@@ -395,7 +630,7 @@ module ClearLS::Types
     private def visit_multi_assign(e : HIR::Expr) : TyId
       n = e.children.size // 2
       targets = e.children[0, n]
-      values = e.children[n..].map { |v| visit(v) }
+      values = e.children[n..].map { |v| operand(v) }
       if values.size == 1 && targets.size > 1
         # `a, b = tuple`: element types when the value is a tuple.
         t = @table[values[0]]
@@ -411,9 +646,10 @@ module ClearLS::Types
 
     private def visit_op_assign(e : HIR::Expr) : TyId
       target, value = e.children[0], e.children[1]
-      vt = visit(value)
+      vt = operand(value)
       tgt = @body.expr(target)
-      current = tgt.binding.try { |b| @env[b]? } || @table.unknown
+      # Locals from the environment; `@x ||= v` from the evaluated target.
+      current = tgt.kind.local_ref? ? (tgt.binding.try { |b| @env[b]? } || @table.unknown) : operand(target)
       ty = case e.name
            when "||=" then @table.unknown?(current) ? vt : join(@table.without_nil(current), vt)
            when "&&=" then join(current, vt)
@@ -427,7 +663,7 @@ module ClearLS::Types
     end
 
     private def visit_type_decl(e : HIR::Expr) : TyId
-      value = e.children[0]?.try { |c| visit(c) }
+      value = e.children[0]?.try { |c| operand(c) }
       b = e.binding
       declared = b.try { |bid| @body.binding(bid).restriction }.try { |r| parse_type(r) }
       ty = declared || value || @table.unknown
@@ -443,37 +679,24 @@ module ClearLS::Types
       end
     end
 
-    # -- control flow (structured; CFG arrives in Phase 4) ------------------------
-
-    private def visit_if(e : HIR::Expr) : TyId
-      cond, then_b, else_b = e.children[0]?, e.children[1]?, e.children[2]?
-      cond.try { |c| visit(c) }
-      before = @env.dup
-      narrowed = cond ? narrowing(cond, truthy: !e.kind.unless?) : {} of HIR::BindingId => TyId
-      @env.merge!(narrowed)
-      then_t = then_b ? visit(then_b) : @table.named!("Nil")
-      then_env = @env
-      @env = before.dup
-      else_narrow = cond ? narrowing(cond, truthy: e.kind.unless?) : {} of HIR::BindingId => TyId
-      @env.merge!(else_narrow)
-      else_t = else_b ? visit(else_b) : @table.named!("Nil")
-      else_env = @env
-      envs = [] of Hash(HIR::BindingId, TyId)
-      envs << then_env unless then_t == @table.no_return
-      envs << else_env unless else_t == @table.no_return
-      @env = envs.empty? ? before : join_envs(envs, before)
-      @table.union([then_t, else_t])
-    end
+    # -- narrowing ----------------------------------------------------------------
 
     # Narrowing facts for a condition on simple locals: `x` (truthy → not
-    # nil), `x.nil?`, `x.is_a?(T)`, `!cond`, `a && b`.
+    # nil, falsy → its Nil/Bool part), `x.nil?`, `x.is_a?(T)`, `!cond`,
+    # `a && b`, `a || b`, `x = v`. Reads `@env` (the state at the end of the
+    # condition's block).
     private def narrowing(cond : HIR::ExprId, truthy : Bool) : Hash(HIR::BindingId, TyId)
       e = @body.expr(cond)
       result = {} of HIR::BindingId => TyId
       case e.kind
       when .local_ref?
-        if (b = e.binding) && (t = @env[b]?) && truthy
-          result[b] = @table.without_nil(t)
+        if (b = e.binding) && (t = @env[b]?) && !@table.unknown?(t)
+          if truthy
+            result[b] = @table.without_nil(t)
+          else
+            falsy = @table.members(t).select { |m| @table.nil_type?(m) || bool?(m) }
+            result[b] = @table.union(falsy) unless falsy.empty?
+          end
         end
       when .not?
         e.children[0]?.try { |c| result.merge!(narrowing(c, !truthy)) }
@@ -489,7 +712,7 @@ module ClearLS::Types
         e.children.last?.try { |c| result.merge!(narrowing(c, truthy)) }
       when .assign?
         # `if x = foo`: x is truthy in the then-branch.
-        if truthy && (tgt = e.children[0]?) && (b = @body.expr(tgt).binding) && (t = @env[b]?)
+        if truthy && (tgt = e.children[0]?) && (b = @body.expr(tgt).binding) && (t = @env[b]?) && !@table.unknown?(t)
           result[b] = @table.without_nil(t)
         end
       when .call?
@@ -532,84 +755,79 @@ module ClearLS::Types
       map.ancestors(ta.def_id.not_nil!).includes?(tb.def_id.not_nil!)
     end
 
-    private def visit_case(e : HIR::Expr) : TyId
-      subject = e.children[0]?
-      sub_t = subject ? visit(subject) : nil
-      before = @env.dup
-      branch_types = [] of TyId
-      envs = [] of Hash(HIR::BindingId, TyId)
-      has_else = false
-      e.children[1..]?.try &.each do |c|
-        @env = before.dup
-        branch = @body.expr(c)
-        has_else = true if branch.syntax.else?
-        branch_types << visit(c)
-        envs << @env
-      end
-      branch_types << @table.named!("Nil") unless has_else
-      envs << before unless has_else
-      @env = envs.empty? ? before : join_envs(envs, before)
-      @table.union(branch_types)
-    end
-
-    private def visit_loop(e : HIR::Expr) : TyId
-      before = @env.dup
-      # Two passes approximate the loop fixed point for simple cases.
-      2.times { e.children.each { |c| visit(c) } }
-      @env = join_envs([before, @env], before)
-      @table.named!("Nil")
-    end
-
-    private def visit_and_or(e : HIR::Expr, and : Bool) : TyId
-      ts = [] of TyId
-      saved = @env.dup
-      e.children.each_with_index do |c, i|
-        if and && i > 0
-          @env.merge!(narrowing(e.children[i - 1], true))
-        end
-        ts << visit(c)
-      end
-      @env = saved.merge(@env) { |_, a, b| join(a, b) }
-      if and
-        # `a && b`: falsy a, or b.
-        first = ts.first? || @table.unknown
-        falsy = @table.members(first).select { |m| @table.nil_type?(m) || bool?(m) }
-        @table.union(falsy + [ts.last? || @table.unknown])
-      else
-        @table.union(ts[0...-1].map { |t| @table.without_nil(t) } + [ts.last? || @table.unknown])
-      end
-    end
-
     private def bool?(t : TyId) : Bool
       ty = @table[t]
       ty.kind.named? && map[ty.def_id.not_nil!].full_name == "Bool"
     end
 
-    private def visit_begin(e : HIR::Expr) : TyId
-      ts = e.children.map { |c| visit(c) }
-      ts.first? || @table.unknown
+    private def eval_proc(e : HIR::Expr) : TyId
+      blk = e.children[0]?.try { |c| @body.expr(c) } || return @table.unknown
+      ret = @types[blk.id]? || @table.unknown
+      params = block_args(blk).map { |b| @body.binding(b).restriction.try { |r| parse_type(r) } || @table.unknown }
+      @table.proc(params, ret)
     end
 
-    private def visit_proc(e : HIR::Expr) : TyId
-      blk = e.children[0]?.try { |c| @body.expr(c) }
-      ret = blk ? visit_block(blk, [] of TyId) : @table.unknown
-      @types[e.children[0]] = @table.unknown if blk
-      params = blk ? block_args(blk).map { |b| @env[b]? || @table.unknown } : [] of TyId
-      @table.proc(params, ret)
+    # Entering a closure body (block params) or a rescue clause.
+    private def enter(id : HIR::ExprId) : Nil
+      e = @body.expr(id)
+      if e.kind.rescue?
+        e.binding.try { |b| assign(b, e.type_text.try { |t| parse_type(t) } || @table.unknown) }
+        return
+      end
+      own = own_scope?(e)
+      if own
+        # Locals first assigned inside the block are fresh per iteration.
+        @env.reject! { |k, _| k_in_scope?(k, e.scope) }
+      end
+      owner = cfg.closure_owner[id]?.try { |o| @body.expr(o) }
+      param_types = owner && owner.kind.call? ? closure_param_types(owner) : [] of TyId
+      args = block_args(e)
+      if param_types.size == 1 && args.size > 1 && @table[param_types[0]].kind.tuple?
+        param_types = @table[param_types[0]].args
+      end
+      args.each_with_index do |b, i|
+        r = @body.binding(b).restriction
+        assign(b, r ? parse_type(r) : (param_types[i]? || @table.unknown))
+      end
+    end
+
+    private def k_in_scope?(b : HIR::BindingId, scope : HIR::ScopeId) : Bool
+      sid = @body.binding(b).scope.as(HIR::ScopeId?)
+      while s = sid
+        return true if s == scope
+        sid = @body.scope(s).parent
+      end
+      false
+    end
+
+    # Blocks from `do |x| ... end` / `{ ... }` / proc literals open a scope
+    # covering exactly the block; `&.foo` / `&block` arguments do not.
+    private def own_scope?(blk : HIR::Expr) : Bool
+      blk.scope.value != 0 && @body.scope(blk.scope).range == blk.range && @body.scope(blk.scope).kind.block?
+    end
+
+    # Block arg types for a call's block.
+    private def closure_param_types(call : HIR::Expr) : Array(TyId)
+      name = call.name || return [] of TyId
+      recv_t = call.receiver.try { |r| operand(r) }
+      return [] of TyId if name.in?("as", "as?")
+      return [@table.without_nil(recv_t)] if name == "try" && recv_t
+      receiver_type = recv_t || @ctx.self_type
+      matches = methods_for(receiver_type, name, call.children.size, true)
+      block_types_for(matches, receiver_type)
     end
 
     # -- calls --------------------------------------------------------------------
 
     private def visit_call(e : HIR::Expr) : TyId
-      recv_t = e.receiver.try { |r| visit(r) }
-      args = e.children.map { |c| visit(c) }
-      e.named_args.each { |(_, v)| visit(v) }
-      name = e.name || return visit_block_opt(e, [] of TyId) || @table.unknown
+      recv_t = e.receiver.try { |r| operand(r) }
+      args = e.children.map { |c| operand(c) }
+      block_ret = e.block.try { |b| @types[b]? }
+      name = e.name || return block_ret || @table.unknown
 
       # Built-in pseudo-methods.
       case name
       when "as"
-        visit_block_opt(e, [] of TyId)
         return e.type_text.try { |t| parse_type(t) } || @table.unknown
       when "as?"
         return e.type_text.try { |t| @table.nilable(parse_type(t)) } || @table.unknown
@@ -625,14 +843,13 @@ module ClearLS::Types
 
       if name == "try" && recv_t && e.block
         # `x.try { |v| ... }`: v is x without Nil; result is block value or Nil.
-        inner = visit_block_opt(e, [@table.without_nil(recv_t)]) || @table.unknown
+        inner = block_ret || @table.unknown
         return @table.unknown?(inner) ? inner : @table.nilable(inner)
       end
 
       receiver_type = recv_t || @ctx.self_type
       matches = methods_for(receiver_type, name, args.size, !e.block.nil?)
-      block_param_types = block_types_for(matches, receiver_type)
-      block_ret = visit_block_opt(e, block_param_types)
+      matches = top_level_methods(name, args.size, !e.block.nil?) if matches.empty? && recv_t.nil?
 
       if name == "new" && matches.empty?
         # `Foo.new` without an explicit `self.new`: instance of Foo.
@@ -644,35 +861,9 @@ module ClearLS::Types
       ret
     end
 
-    private def visit_block_opt(e : HIR::Expr, param_types : Array(TyId)) : TyId?
-      blk = e.block.try { |b| @body.expr(b) } || return nil
-      visit_block(blk, param_types)
-    end
-
-    # Types block args (positionally; a single tuple param type is splatted
-    # over several args), visits the body, returns its last expression type.
-    private def visit_block(blk : HIR::Expr, param_types : Array(TyId)) : TyId
-      args = block_args(blk)
-      if param_types.size == 1 && args.size > 1 && @table[param_types[0]].kind.tuple?
-        param_types = @table[param_types[0]].args
-      end
-      args.each_with_index do |b, i|
-        r = @body.binding(b).restriction
-        t = r ? parse_type(r) : (param_types[i]? || @table.unknown)
-        assign(b, t)
-      end
-      saved_outer = @env.dup
-      ret = @table.unknown
-      blk.children.each { |c| ret = visit(c) }
-      @types[blk.id] = ret
-      # Block-local bindings disappear; outer reassignments may or may not
-      # have happened: join with the pre-block environment.
-      @env = saved_outer.merge(@env.select { |k, _| saved_outer.has_key?(k) }) { |_, a, b| join(a, b) }
-      ret
-    end
-
     private def block_args(blk : HIR::Expr) : Array(HIR::BindingId)
       # The block expression lives in its own scope (see LowerBody#lower_block).
+      return [] of HIR::BindingId unless own_scope?(blk)
       @body.bindings.select { |b| b.scope == blk.scope && b.kind.block_arg? }.map(&.id)
     end
 
@@ -708,6 +899,16 @@ module ClearLS::Types
       end
       fitting = result.select { |m| arity_ok?(m.site.item, nargs, with_block) }
       fitting.empty? ? result : fitting
+    end
+
+    # Receiverless calls not found on `self`: top-level defs (`raise`,
+    # `puts`).
+    def top_level_methods(name : String, nargs : Int32, with_block : Bool) : Array(MethodMatch)
+      sites = map.program.members[name]? || return [] of MethodMatch
+      all = sites.select { |s| s.item.kind.def? || s.item.kind.macro? }
+        .map { |s| MethodMatch.new(s, Semantics::DefMap::PROGRAM, {} of String => TyId) }
+      fitting = all.select { |m| arity_ok?(m.site.item, nargs, with_block) }
+      fitting.empty? ? all : fitting
     end
 
     # The ancestor that declares *site* (for parsing its types).

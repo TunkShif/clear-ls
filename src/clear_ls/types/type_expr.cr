@@ -203,6 +203,8 @@ module ClearLS::Types
       if !path.includes?("::") && @type_params.includes?(path)
         return @table.type_param(path)
       end
+      # Built in, not declared in the stdlib.
+      return @table.no_return if path.in?("NoReturn", "::NoReturn") && args.empty?
       def_id = @table.def_map.lookup_path(path, @ns) || return @table.unknown
       @table.named(def_id, args)
     end

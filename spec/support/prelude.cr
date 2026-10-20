@@ -98,6 +98,13 @@ PRELUDE = <<-CR
     def puts(*objects) : Nil
     end
   end
+  class Exception
+    def message : String?
+    end
+  end
+  class IO::Error < Exception; end
+  def raise(message : String) : NoReturn
+  end
   CR
 
 # The prelude split into stdlib-like files for feature specs.
