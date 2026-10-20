@@ -286,9 +286,14 @@ module ClearLS::HIR
           end
           if a.kind.named_expr?
             value = a.named_children.find { |c| c != a.field(Syntax::Field::Name) }
-            named << {a.field_text(Syntax::Field::Name) || "?", value ? lower(value) : add(ExprKind::Missing, a.range)}
+            key = a.field(Syntax::Field::Name)
+            key_text = key.try { |k| k.kind.string_node? ? k.named_children.join(&.text) : k.text } || "?"
+            named << {key_text, value ? lower(value) : add(ExprKind::Missing, a.range)}
           elsif a.kind.block_argument?
-            block = lower_children(a, ExprKind::Block)
+            block = lower_block_argument(a)
+          elsif a.kind.splat? || a.kind.double_splat?
+            inner = a.named_child(0).try { |x| lower(x) } || add(ExprKind::Missing, a.range)
+            args << add(a.kind.splat? ? ExprKind::Splat : ExprKind::DoubleSplat, a.range, children: [inner])
           else
             args << lower(a)
           end
@@ -315,6 +320,17 @@ module ClearLS::HIR
       n.kind.constant? || n.kind.generic_instance_type? || n.kind.union_type? || n.kind.nilable_type? ||
         n.kind.tuple_type? || n.kind.named_tuple_type? || n.kind.proc_type? || n.kind.pointer_type? ||
         n.kind.class_type? || n.kind.static_array_type?
+    end
+
+    # `&.foo` (a block with an implicit receiver) or `&proc` / `&->foo`
+    # (passes a proc; no block scope, the value is evaluated once).
+    private def lower_block_argument(node : Syntax::Node) : ExprId
+      inner = node.named_children.find { |c| !c.kind.comment? }
+      if inner && inner.kind.implicit_object_call?
+        add(ExprKind::Block, node.range, syntax: Syntax::Kind::ImplicitObjectCall, children: [lower(inner)])
+      else
+        add(ExprKind::Block, node.range, syntax: Syntax::Kind::BlockArgument, children: inner ? [lower(inner)] : [] of ExprId)
+      end
     end
 
     private def lower_block(node : Syntax::Node, params : Syntax::Node?) : ExprId

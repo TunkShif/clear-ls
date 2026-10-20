@@ -510,7 +510,11 @@ module ClearLS::Types
            when .not?          then @table.named!("Bool")
            when .collection?   then collection(e)
            when .proc_literal? then eval_proc(e)
-           when .block?        then merge_type(id)
+           when .block?
+             # `&proc` passes a value; literal and `&.foo` blocks merge
+             # their exits.
+             e.syntax.block_argument? ? (e.children.first?.try { |c| operand(c) } || @table.unknown) : merge_type(id)
+           when .splat?, .double_splat? then e.children.first?.try { |c| operand(c) } || @table.unknown
            when .return?, .break?, .next?
              @table.no_return
            when .yield?

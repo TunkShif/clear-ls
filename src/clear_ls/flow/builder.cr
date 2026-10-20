@@ -146,7 +146,14 @@ module ClearLS::Flow
       e.receiver.try { |r| lower(r) }
       e.children.each { |c| lower(c) }
       e.named_args.each { |(_, v)| lower(v) }
-      e.block.try { |b| lower_closure(b, e) }
+      e.block.try do |b|
+        if @body.expr(b).syntax.block_argument?
+          # `&proc`: an argument value, evaluated once.
+          lower_generic(@body.expr(b))
+        else
+          lower_closure(b, e)
+        end
+      end
       eval(e.id)
     end
 

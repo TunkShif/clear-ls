@@ -232,3 +232,15 @@ describe "HIR::LowerBody control-flow shapes" do
     body.binding(resc.binding.not_nil!).name.should eq "e"
   end
 end
+
+describe "HIR::LowerBody call arguments" do
+  it "distinguishes splats, block passes, and implicit-object blocks" do
+    body, _ = body_of("def m(xs, f)\n  foo(1, *xs, **xs, k: 2, \"s\": 3, &f)\n  xs.each(&.size)\nend")
+    call = body.exprs.find! { |e| e.kind.call? && e.name == "foo" }
+    call.children.map { |c| body.expr(c).kind.to_s.downcase }.should eq ["literal", "splat", "doublesplat"]
+    call.named_args.map(&.[0]).should eq ["k", "s"]
+    body.expr(call.block.not_nil!).syntax.should eq Syntax::Kind::BlockArgument
+    each = body.exprs.find! { |e| e.kind.call? && e.name == "each" }
+    body.expr(each.block.not_nil!).syntax.should eq Syntax::Kind::ImplicitObjectCall
+  end
+end

@@ -80,7 +80,7 @@ module ClearLS::HIR
     OpAssign
     MultiAssign
     Call        # also identifiers that are not locals (`foo` → self.foo)
-    Block
+    Block       # literal block, `&.foo` (syntax ImplicitObjectCall), or `&proc` pass (syntax BlockArgument)
     ProcLiteral
     If          # children: cond, then, else (Nop when absent)
     Unless
@@ -100,6 +100,8 @@ module ClearLS::HIR
     Not
     TypeDecl
     Collection  # array, hash, tuple, named tuple, range
+    Splat       # `*xs` call argument
+    DoubleSplat # `**opts` call argument
     Other       # recognised but not modelled further (lowered children only)
   end
 
