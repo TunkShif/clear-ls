@@ -123,6 +123,7 @@ module ClearLS::Syntax
         end
       ensure
         LibTreeSitter.ts_tree_cursor_delete(pointerof(cursor))
+        Syntax.keep_alive(@tree)
       end
     end
 
@@ -165,6 +166,7 @@ module ClearLS::Syntax
         end
       ensure
         LibTreeSitter.ts_tree_cursor_delete(pointerof(cursor))
+        Syntax.keep_alive(@tree)
       end
     end
 

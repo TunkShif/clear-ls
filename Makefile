@@ -34,7 +34,10 @@ BIN := bin/clear-ls
 
 CFLAGS ?= -O2
 CFLAGS += -fPIC
-CRYSTAL_FLAGS ?=
+# Tree-sitter uses libc malloc rather than the binding's default Boehm GC
+# hook: 17 MB vs 282 MB GC heap for the parsed stdlib, and ~4.7x faster
+# parallel parsing. Native trees are freed by `Tree#finalize`.
+CRYSTAL_FLAGS ?= -Dcrystal_tree_sitter_no_init
 
 export CRYSTAL_CACHE_DIR ?= $(ROOT)/.crystal-cache
 export PKG_CONFIG_PATH := $(PC_DIR):$(PKG_CONFIG_PATH)

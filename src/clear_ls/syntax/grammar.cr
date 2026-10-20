@@ -25,6 +25,19 @@ module ClearLS::Syntax
     {% end %}
   end
 
+  # Optimisation barrier that keeps *obj* reachable up to this point.
+  #
+  # Native Tree-sitter handles (`TSNode`, `TSTreeCursor`) do not keep the
+  # Crystal wrapper that owns the native tree alive. In optimised builds the
+  # wrapper can become unreachable while a long loop still uses raw handles,
+  # and with multi-threaded GC its finalizer (`ts_tree_delete`) may run
+  # mid-loop. Call this after the last raw use.
+  @[AlwaysInline]
+  def self.keep_alive(obj : Reference) : Nil
+    ptr = obj.as(Void*)
+    asm("" :: "r"(ptr) : "memory" : "volatile")
+  end
+
   # The Crystal language plus lookup tables between grammar IDs and the
   # generated `Kind`/`Field` enums.
   module Grammar
