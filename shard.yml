@@ -1,0 +1,20 @@
+name: clear_ls
+version: 0.1.0
+
+authors:
+  - Tristan Yang <tunkshif@foxmail.com>
+
+description: Experimental Crystal language server built on Tree-sitter
+
+crystal: ">= 1.22.0"
+
+license: MIT
+
+dependencies:
+  tree_sitter:
+    github: crystal-lang-tools/crystal-tree-sitter
+    commit: 1d46ca231a641b30b8e7fbbae7eba050f7717a9f
+
+targets:
+  clear-ls:
+    main: src/main.cr

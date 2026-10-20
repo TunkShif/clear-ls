@@ -1,0 +1,6 @@
+version: 2.0
+shards:
+  tree_sitter:
+    git: https://github.com/crystal-lang-tools/crystal-tree-sitter.git
+    version: 0.1.0+git.commit.1d46ca231a641b30b8e7fbbae7eba050f7717a9f
+
