@@ -17,11 +17,12 @@ module ClearLS::IDE
       hit = Locals.new(@state, @bodies).binding_at(offset) || return nil
       body, b, ref = hit
       _, inf = @typing.infer_at(@state, @bodies, offset) || return nil
-      # Type at this reference (flow-sensitive within Phase 3 limits), else
-      # the join of all assignments.
+      # Flow-sensitive: a read shows the type at its program point, a write
+      # the assigned type; params and block args (no expression) show their
+      # declared/joined type.
       expr = body.exprs.find { |e| e.range == ref.range && e.binding == b.id }
       t = expr.try { |e| inf.types[e.id]? } || inf.binding_type(b.id)
-      t = inf.binding_type(b.id) if table.unknown?(t)
+      t = inf.binding_type(b.id) if table.unknown?(t) && !(ref.kind.read? && expr)
       ty = table.unknown?(t) ? b.restriction : table.to_s(t)
       md = "```crystal\n#{b.name}#{ty ? " : #{ty}" : ""}\n```\n\n#{KIND_NAMES[b.kind]}"
       {md, ref.range}
@@ -104,7 +105,10 @@ module ClearLS::IDE
           next if in_type_body?(b.name_range.start)
           decl = b.name_range
           next unless range.touches?(decl.start) && seen.add?(decl.end)
-          t = inf.binding_type(b.id)
+          # The type assigned at the declaration, not the join of all writes
+          # (`x = 1; x = "s"` hints `x : Int32`).
+          decl_e = body.exprs.find { |e| e.range == decl && e.binding == b.id && e.kind.local_ref? }
+          t = decl_e.try { |e| inf.types[e.id]? } || inf.binding_type(b.id)
           next if table.unknown?(t)
           next if b.kind.local? && obvious?(body, b)
           hints << InlayHint.new(decl.end, ": #{table.to_s(t)}", :type)

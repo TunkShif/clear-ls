@@ -115,10 +115,75 @@ module ClearLS::Types
       @types[id]? || @table.unknown
     end
 
-    # Join of every type assigned to *b* in this body (hover on the
-    # declaration, inlay hints).
+    # Join of every type assigned to *b* in this body.
     def binding_type(b : HIR::BindingId) : TyId
       @binding_types[b]? || @table.unknown
+    end
+
+    # -- program points -----------------------------------------------------------
+
+    # Environment right before *id* is evaluated (`ProgramPoint` Before),
+    # by replaying its block from the block's entry state. Expressions
+    # without an operation of their own (assignment targets) use the
+    # operation of their parent: in `x = foo` the target sees the state
+    # before the assignment.
+    def env_before(id : HIR::ExprId) : Env?
+      op_expr = id.as(HIR::ExprId?)
+      while (x = op_expr) && !cfg.eval_block.has_key?(x)
+        op_expr = @parent[x]?
+      end
+      target = op_expr || return nil
+      blk = cfg[cfg.eval_block[target]]
+      entry = @in[blk.id.value]? || return nil
+      replay(blk, entry) { |op| op.kind.eval? && op.expr == target }
+    end
+
+    # Environment at a cursor *offset*: before the smallest expression
+    # covering it. Between statements this is the state after the
+    # preceding statement.
+    def env_at(offset : UInt32) : Env?
+      if e = @body.expr_at(offset)
+        unless e.kind.seq? || e.kind.nop? || e.kind.missing?
+          return env_before(e.id)
+        end
+      end
+      # Whitespace: after the last operation that ends at or before offset.
+      best = nil.as({Flow::Block, Int32}?)
+      best_end = 0_u32
+      cfg.blocks.each do |b|
+        next unless @in.has_key?(b.id.value)
+        b.ops.each_with_index do |op, i|
+          r = @body.expr(op.expr).range
+          next unless r.end <= offset && r.end >= best_end
+          next if @body.expr(op.expr).kind.seq?
+          best, best_end = {b, i}, r.end
+        end
+      end
+      bb, idx = best || return nil
+      entry = @in[bb.id.value]
+      count = -1
+      replay(bb, entry) { (count += 1) > idx }
+    end
+
+    # Type of *b* at *offset*, or nil when not known there.
+    def binding_type_at(b : HIR::BindingId, offset : UInt32) : TyId?
+      env_at(offset).try(&.[b]?)
+    end
+
+    @replaying = false
+
+    private def replay(blk : Flow::Block, entry : Env, & : Flow::Op -> Bool) : Env
+      saved_env = @env
+      @replaying = true
+      @env = entry.dup
+      blk.ops.each do |op|
+        break if yield op
+        op.kind.enter? ? enter(op.expr) : eval_expr(op.expr)
+      end
+      @env
+    ensure
+      @env = saved_env.not_nil!
+      @replaying = false
     end
 
     # -- params ---------------------------------------------------------------
@@ -450,6 +515,7 @@ module ClearLS::Types
              @table.no_return
            when .yield?
              ts = e.children.map { |c| operand(c) }
+             ts = [] of TyId if @replaying
              ts.each_with_index do |t, i|
                (@yield_types[i]? || (@yield_types << [] of TyId; @yield_types[i])) << t
              end

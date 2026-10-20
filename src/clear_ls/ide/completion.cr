@@ -257,7 +257,11 @@ module ClearLS::IDE
           _, inf = @typing.infer_at(state, bodies, at) || {nil, nil}
           body.visible_bindings(at).each do |b|
             next unless b.name.starts_with?(prefix) && b.name != PLACEHOLDER && seen.add?(b.name)
-            detail = inf.try { |i| t = i.binding_type(b.id); @typing.table.unknown?(t) ? nil : @typing.table.to_s(t) }
+            # Type at the cursor (flow-sensitive), else the join of writes.
+            detail = inf.try do |i|
+              t = i.binding_type_at(b.id, at) || i.binding_type(b.id)
+              @typing.table.unknown?(t) ? nil : @typing.table.to_s(t)
+            end
             items << CompletionItem.new(b.name, CompletionKind::Variable, detail: detail, sort_text: "0#{b.name}")
           end
         end
