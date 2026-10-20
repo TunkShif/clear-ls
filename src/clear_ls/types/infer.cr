@@ -2,13 +2,12 @@ require "../hir"
 require "../flow"
 require "../workspace/index"
 require "./type_expr"
+require "./call_resolver"
 
 module ClearLS::Types
   # Where a def lives, for return-type parsing and `self`.
   record DefContext, ns : Semantics::TypeId, self_type : TyId, type_params : Array(String)
 
-  # Candidate methods for a call on a receiver type.
-  record MethodMatch, site : Semantics::Site, owner : Semantics::TypeId, bindings : Hash(String, TyId)
 
   # Flow-sensitive local type inference over one body.
   #
@@ -1005,6 +1004,84 @@ module ClearLS::Types
       end
       fitting = result.select { |m| arity_ok?(m.site.item, nargs, with_block) }
       fitting.empty? ? result : fitting
+    end
+
+    @resolver : CallResolver? = nil
+
+    def resolver : CallResolver
+      @resolver ||= CallResolver.new(@table)
+    end
+
+    # Overload resolution of a call expression with the argument types
+    # inferred for it.
+    def resolve_call(call : HIR::Expr) : CallResolution
+      name = call.name || return CallResolution.unresolved
+      recv_t = call.receiver.try { |r| type_of(r) }
+      receiver = recv_t || @ctx.self_type
+      groups = method_groups(receiver, name)
+      if groups.empty? && recv_t.nil?
+        top = top_level_sites(name)
+        groups = [{@table.unknown, top}] unless top.empty?
+      end
+      resolver.resolve(groups, call_site(call))
+    end
+
+    # Call shape with argument types from this inference.
+    def call_site(call : HIR::Expr) : CallSite
+      args = [] of CallArg
+      dsplat = false
+      call.children.each do |c|
+        a = @body.expr(c)
+        case a.kind
+        when .splat?        then args << CallArg.new(@table.unknown, splat: true)
+        when .double_splat? then dsplat = true
+        else
+          args << CallArg.new(type_of(c), literal: a.kind.literal? ? a.syntax : nil)
+        end
+      end
+      named = call.named_args.map do |(n, v)|
+        a = @body.expr(v)
+        {n, CallArg.new(type_of(v), literal: a.kind.literal? ? a.syntax : nil)}
+      end
+      CallSite.new(args, named, dsplat, !call.block.nil?)
+    end
+
+    # Methods named *name* per receiver member type: instance methods for
+    # instance types, `self.` methods for metaclasses.
+    def method_groups(receiver_type : TyId, name : String) : Array({TyId, Array(MethodMatch)})
+      groups = [] of {TyId, Array(MethodMatch)}
+      @table.members(receiver_type).each do |member|
+        t = @table[member]
+        ms = [] of MethodMatch
+        case t.kind
+        when .named?
+          def_id = t.def_id.not_nil!
+          bindings = generic_bindings(def_id, t.args)
+          map.lookup_member(def_id, name).each do |site|
+            next unless site.item.kind.def? || site.item.kind.macro?
+            ms << MethodMatch.new(site, owner_of(def_id, site), bindings)
+          end
+        when .metaclass?
+          inst = @table[t.args[0]]
+          next unless inst.kind.named?
+          def_id = inst.def_id.not_nil!
+          bindings = generic_bindings(def_id, inst.args)
+          sites = map.lookup_member(def_id, "self.#{name}")
+          map.extends(def_id).each { |ext| sites += map.lookup_member(ext, name) }
+          sites.each do |site|
+            next unless site.item.kind.def? || site.item.kind.macro?
+            ms << MethodMatch.new(site, owner_of(def_id, site), bindings)
+          end
+        end
+        groups << {self_for(member), ms} unless ms.empty?
+      end
+      groups
+    end
+
+    private def top_level_sites(name : String) : Array(MethodMatch)
+      sites = map.program.members[name]? || return [] of MethodMatch
+      sites.select { |s| s.item.kind.def? || s.item.kind.macro? }
+        .map { |s| MethodMatch.new(s, Semantics::DefMap::PROGRAM, {} of String => TyId) }
     end
 
     # Receiverless calls not found on `self`: top-level defs (`raise`,

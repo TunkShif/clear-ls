@@ -12,6 +12,9 @@ PRELUDE = <<-CR
   class Reference; end
   struct Value; end
   struct Struct; end
+  abstract struct Number; end
+  abstract struct Int < Number; end
+  abstract struct Float < Number; end
   struct Nil
     def to_s : String
     end
@@ -19,7 +22,7 @@ PRELUDE = <<-CR
   struct Bool; end
   struct Char; end
   struct Symbol; end
-  struct Int32
+  struct Int32 < Int
     def +(other : Int32) : Int32
     end
     def times(& : Int32 ->) : Nil
@@ -29,13 +32,13 @@ PRELUDE = <<-CR
     def abs : Int32
     end
   end
-  struct Int64
+  struct Int64 < Int
     def +(other : Int64) : Int64
     end
   end
-  struct UInt8; end
-  struct Float64; end
-  struct Float32; end
+  struct UInt8 < Int; end
+  struct Float64 < Float; end
+  struct Float32 < Float; end
   class String
     def size : Int32
     end
@@ -93,7 +96,15 @@ PRELUDE = <<-CR
     include Enumerable(T)
   end
   class IO
-    def gets : String?
+    def gets(chomp : Bool = true) : String?
+    end
+    def gets(limit : Int, chomp : Bool = false) : String?
+    end
+    def gets(delimiter : Char, chomp : Bool = false) : String?
+    end
+    def gets(delimiter : Char, limit : Int, chomp = false) : String?
+    end
+    def gets(delimiter : String, chomp = false) : String?
     end
     def puts(*objects) : Nil
     end
