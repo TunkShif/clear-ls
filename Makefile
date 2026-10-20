@@ -1,6 +1,7 @@
 # clear-ls build
 #
 #   make            build bin/clear-ls (fetches and compiles pinned deps)
+#   make release    optimised build (use this for editor use)
 #   make spec       run specs
 #   make verify-static   check no dynamic Tree-sitter dependency
 #   make grammar-check   parse the Crystal stdlib, list grammar failures
@@ -44,7 +45,7 @@ export PKG_CONFIG_PATH := $(PC_DIR):$(PKG_CONFIG_PATH)
 
 SOURCES := $(shell find src -name '*.cr' 2>/dev/null)
 
-.PHONY: all build deps spec verify-static grammar-check syntax-gen clean distclean
+.PHONY: all build release deps spec verify-static grammar-check syntax-gen clean distclean
 
 all: build
 
@@ -55,6 +56,10 @@ deps: lib/tree_sitter $(TS_PC) $(GRAMMAR_PC)
 $(BIN): deps $(SOURCES)
 	@mkdir -p bin
 	$(CRYSTAL) build $(CRYSTAL_FLAGS) src/main.cr -o $(BIN)
+
+release: deps
+	@mkdir -p bin
+	$(CRYSTAL) build --release $(CRYSTAL_FLAGS) src/main.cr -o $(BIN)
 
 spec: deps
 	$(CRYSTAL) spec $(CRYSTAL_FLAGS)

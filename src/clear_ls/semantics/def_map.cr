@@ -102,6 +102,8 @@ module ClearLS::Semantics
     # Adds every visible item of one file.
     def add_file(file : FileId, tree : Items::ItemTree) : Nil
       @ancestors_cache.clear
+      @namespace_sites = nil
+      @path_cache.clear
       tree.items.each { |item| add_item(file, item, PROGRAM) }
     end
 
@@ -175,7 +177,15 @@ module ClearLS::Semantics
 
     # Resolves a type path as written (e.g. `Foo::Bar`, `::IO`, `Array(T)`)
     # from the namespace *from*. Generic arguments are ignored.
+    @path_cache = {} of {String, TypeId} => TypeId?
+
     def lookup_path(text : String, from : TypeId = PROGRAM) : TypeId?
+      key = {text, from}
+      return @path_cache[key] if @path_cache.has_key?(key)
+      @path_cache[key] = lookup_path_uncached(text, from)
+    end
+
+    private def lookup_path_uncached(text : String, from : TypeId) : TypeId?
       path = DefMap.strip_generics(text)
       global = path.starts_with?("::")
       names = path.lchop("::").split("::")
@@ -289,16 +299,28 @@ module ClearLS::Semantics
     def namespace_at(file : FileId, offset : UInt32) : TypeId
       best = PROGRAM
       best_size = UInt32::MAX
-      @types.each do |t|
-        t.sites.each do |s|
-          next unless s.file == file && s.item.range.touches?(offset)
-          size = s.item.range.size
-          if size < best_size && t.kind != TypeKind::Alias && t.kind != TypeKind::TypeDef
-            best, best_size = t.id, size
-          end
+      namespace_sites(file).each do |(range, id)|
+        next unless range.touches?(offset)
+        if range.size < best_size
+          best, best_size = id, range.size
         end
       end
       best
+    end
+
+    @namespace_sites : Hash(FileId, Array({TextRange, TypeId}))? = nil
+
+    # Namespace declaration ranges per file (built on first use).
+    private def namespace_sites(file : FileId) : Array({TextRange, TypeId})
+      index = @namespace_sites ||= begin
+        h = Hash(FileId, Array({TextRange, TypeId})).new { |hh, k| hh[k] = [] of {TextRange, TypeId} }
+        @types.each do |t|
+          next if t.kind.alias? || t.kind.type_def?
+          t.sites.each { |site| h[site.file] << {site.item.range, t.id} }
+        end
+        h
+      end
+      index[file]? || [] of {TextRange, TypeId}
     end
 
     # Members named *name* visible on *id*, nearest ancestor first.

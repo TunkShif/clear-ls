@@ -15,7 +15,8 @@ See [docs/roadmap.md](docs/roadmap.md) for the plan and design docs.
 Requires Crystal ≥ 1.22, a C compiler, `git`, and `make`.
 
 ```sh
-make            # fetch pinned deps into vendor/, build bin/clear-ls
+make            # fetch pinned deps into vendor/, build bin/clear-ls (debug)
+make release    # optimised build; use this one in the editor
 make spec       # run specs
 make verify-static
 ```
