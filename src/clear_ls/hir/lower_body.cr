@@ -109,7 +109,9 @@ module ClearLS::HIR
       when .not?
         lower_children(node, ExprKind::Not)
       when .array_node?, .hash_node?, .tuple_node?, .named_tuple?, .range_node?, .array_like?, .hash_like?
-        lower_children(node, ExprKind::Collection)
+        lower_collection(node)
+      when .uninitialized_var?
+        add(ExprKind::Other, node.range, syntax: node.kind, type_text: node.named_child(0).try(&.text))
       when .error?, .unknown?
         # Keep going inside recovered regions so locals still resolve.
         lower_children(node, ExprKind::Missing)
@@ -130,19 +132,53 @@ module ClearLS::HIR
       end
     end
 
+    private def lower_collection(node : Syntax::Node) : ExprId
+      kids = [] of ExprId
+      names = [] of {String, ExprId}
+      of1 = node.field_text(Syntax::Field::Of) || node.field_text(Syntax::Field::OfKey)
+      of2 = node.field_text(Syntax::Field::OfValue)
+      type_name = node.kind.array_like? || node.kind.hash_like? ? node.field_text(Syntax::Field::Name) : nil
+      skip = [node.field(Syntax::Field::Of), node.field(Syntax::Field::OfKey), node.field(Syntax::Field::OfValue), node.field(Syntax::Field::Name)].compact
+      node.named_children.each do |c|
+        next if c.kind.comment? || c.kind.operator? || skip.includes?(c)
+        if c.kind.named_expr?
+          key = c.field(Syntax::Field::Name)
+          value = c.named_children.find { |x| x != key }
+          name = key.try { |k| k.kind.string_node? ? k.named_children.join(&.text) : k.text } || "?"
+          names << {name, value ? lower(value) : add(ExprKind::Missing, c.range)}
+        elsif c.kind.hash_entry?
+          c.named_children.each { |x| kids << lower(x) unless x.kind.operator? }
+        elsif (c.kind.tuple_node? || c.kind.array_node?) && type_name
+          # `Set{1, 2}`: values arrive wrapped.
+          c.named_children.each { |x| kids << lower(x) }
+        else
+          kids << lower(c)
+        end
+      end
+      add(ExprKind::Collection, node.range, syntax: node.kind, children: kids, named_args: names,
+        type_text: type_name || of1, type_text2: of2, text: node.field_text(Syntax::Field::Operator))
+    end
+
     private def lower_children(node : Syntax::Node, kind : ExprKind) : ExprId
       kids = [] of ExprId
       node.named_children.each do |c|
         next if c.kind.comment? || c.kind.operator?
         kids << lower(c)
       end
-      add(kind, node.range, children: kids)
+      add(kind, node.range, syntax: node.kind, children: kids)
     end
 
     # -- names ----------------------------------------------------------------
 
+    # The grammar parses `x || return` / `x || return 1` with `return` as an
+    # identifier / call (see docs/tree-sitter-grammar-notes.md).
+    JUMP_WORDS = {"return" => ExprKind::Return, "next" => ExprKind::Next, "break" => ExprKind::Break}
+
     private def lower_identifier(node : Syntax::Node) : ExprId
       name = node.text
+      if jump = JUMP_WORDS[name]?
+        return add(jump, node.range, syntax: node.kind)
+      end
       if b = lookup(name)
         record_ref(b, node.range, RefKind::Read)
         add(ExprKind::LocalRef, node.range, name: name, name_range: node.range, binding: b)
@@ -162,7 +198,7 @@ module ClearLS::HIR
         end
         true
       end
-      add(ExprKind::Literal, node.range, children: kids)
+      add(ExprKind::Literal, node.range, syntax: node.kind, text: node.kind.integer? || node.kind.float_node? ? node.text : nil, children: kids)
     end
 
     # -- assignments ----------------------------------------------------------
@@ -223,14 +259,30 @@ module ClearLS::HIR
     # -- calls and blocks -----------------------------------------------------
 
     private def lower_call(node : Syntax::Node) : ExprId
+      if node.field(Syntax::Field::Receiver).nil? && (jump = JUMP_WORDS[node.field_text(Syntax::Field::Method) || ""]?)
+        args = node.field(Syntax::Field::Arguments).try(&.named_children.map { |a| lower(a) }) || [] of ExprId
+        return add(jump, node.range, syntax: node.kind, children: args)
+      end
       receiver = node.field(Syntax::Field::Receiver).try { |r| lower(r) }
       method = node.field(Syntax::Field::Method)
       name = method.try(&.text).try(&.lchop('.'))
+      if node.kind.index_call?
+        close = node.children.reverse_each.find { |c| !c.named? && c.type.starts_with?(']') }
+        name = "[]#{close.try(&.type.lchop(']'))}"
+        name += "=" if node.parent.try { |pp| pp.kind.assign? && pp.field(Syntax::Field::Lhs) == node }
+      elsif node.kind.assign_call? && name
+        name += "="
+      end
       args = [] of ExprId
       named = [] of {String, ExprId}
       block = nil
+      type_arg = nil
       if list = node.field(Syntax::Field::Arguments)
         list.named_children.each do |a|
+          if TYPE_ARG_METHODS.includes?(name) && type_node?(a)
+            type_arg = a.text
+            next
+          end
           if a.kind.named_expr?
             value = a.named_children.find { |c| c != a.field(Syntax::Field::Name) }
             named << {a.field_text(Syntax::Field::Name) || "?", value ? lower(value) : add(ExprKind::Missing, a.range)}
@@ -252,8 +304,16 @@ module ClearLS::HIR
       if b = node.field(Syntax::Field::Block)
         block = lower_block(b, nil)
       end
-      add(ExprKind::Call, node.range, name: name, name_range: method.try(&.range),
-        receiver: receiver, children: args, named_args: named, block: block)
+      add(ExprKind::Call, node.range, syntax: node.kind, name: name, name_range: method.try(&.range),
+        receiver: receiver, children: args, named_args: named, block: block, type_text: type_arg)
+    end
+
+    TYPE_ARG_METHODS = %w(as as? is_a? nilable? responds_to?).to_set
+
+    private def type_node?(n : Syntax::Node) : Bool
+      n.kind.constant? || n.kind.generic_instance_type? || n.kind.union_type? || n.kind.nilable_type? ||
+        n.kind.tuple_type? || n.kind.named_tuple_type? || n.kind.proc_type? || n.kind.pointer_type? ||
+        n.kind.class_type? || n.kind.static_array_type?
     end
 
     private def lower_block(node : Syntax::Node, params : Syntax::Node?) : ExprId

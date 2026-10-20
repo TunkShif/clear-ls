@@ -1,4 +1,5 @@
 require "../base/text_range"
+require "../syntax/kinds"
 
 module ClearLS::HIR
   # Indexes into a `Body`'s arenas. Valid only for the body (and revision)
@@ -120,9 +121,19 @@ module ClearLS::HIR
     getter block : ExprId?
     # Lexical scope this expression evaluates in.
     getter scope : ScopeId
+    # CST kind this expression came from (literal kind, collection kind, ...).
+    getter syntax : Syntax::Kind
+    # Literal source text (numbers, for suffixes like `1_i64`).
+    getter text : String?
+    # Type written in the construct: `[] of T`, `{} of K => V`,
+    # `uninitialized T`, `x.as(T)`, `is_a?(T)`, block/proc param types.
+    getter type_text : String?
+    # Second type for `{} of K => V`.
+    getter type_text2 : String?
 
-    def initialize(@id, @kind, @range, @scope, *, @name = nil, @name_range = nil, @binding = nil,
-                   @receiver = nil, @children = [] of ExprId, @named_args = [] of {String, ExprId}, @block = nil)
+    def initialize(@id, @kind, @range, @scope, *, @syntax = Syntax::Kind::Unknown, @name = nil, @name_range = nil,
+                   @binding = nil, @receiver = nil, @children = [] of ExprId, @named_args = [] of {String, ExprId},
+                   @block = nil, @text = nil, @type_text = nil, @type_text2 = nil)
     end
 
     # Call with no receiver, arguments, or block: `foo`. Ambiguous between a

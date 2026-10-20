@@ -1,5 +1,6 @@
 require "../workspace/index"
 require "./locals"
+require "./typing"
 
 module ClearLS::IDE
   # A location in a file, as byte ranges. The LSP layer converts to

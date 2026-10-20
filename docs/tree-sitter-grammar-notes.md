@@ -53,3 +53,9 @@ Fixes belong upstream in the grammar; clear-ls does not patch it locally.
   one parser across all workers. Put worker bodies in their own methods.
 - Optimised builds can collect a `Tree` while native code still walks it;
   `Syntax.keep_alive` guards cursor loops and native calls.
+
+## Lowering quirks
+
+- In `x || return` and `x || return 1`, `return` parses as an `identifier`
+  or a `call` named `return` (statement-level `return` is fine). Body
+  lowering maps these back to `return`/`next`/`break`.
