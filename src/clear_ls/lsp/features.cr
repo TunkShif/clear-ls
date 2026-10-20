@@ -4,6 +4,7 @@ require "../ide/semantic_tokens"
 require "../ide/completion"
 require "../ide/type_info"
 require "../ide/signature_help"
+require "../ide/navigation"
 
 module ClearLS::LSP
   # Phase 1 language features: symbols, folding, selection, and
@@ -45,6 +46,8 @@ module ClearLS::LSP
         renameProvider:          {prepareProvider: true},
         completionProvider:      {triggerCharacters: [".", ":", "@"], resolveProvider: false},
         inlayHintProvider:       true,
+        implementationProvider:  true,
+        callHierarchyProvider:   true,
         signatureHelpProvider:   {triggerCharacters: ["(", ","], retriggerCharacters: [" "]},
         semanticTokensProvider:  {
           legend: {
@@ -73,6 +76,10 @@ module ClearLS::LSP
       when "textDocument/completion"     then completion(params)
       when "textDocument/inlayHint"      then inlay_hint(params)
       when "textDocument/signatureHelp"  then signature_help(params)
+      when "textDocument/implementation" then implementation(params)
+      when "textDocument/prepareCallHierarchy" then prepare_call_hierarchy(params)
+      when "callHierarchy/outgoingCalls" then outgoing_calls(params)
+      when "callHierarchy/incomingCalls" then [] of Nil
       when "textDocument/semanticTokens/full"  then semantic_tokens(params, nil)
       when "textDocument/semanticTokens/range" then semantic_tokens(params, params["range"])
       else
@@ -241,6 +248,58 @@ module ClearLS::LSP
           {label: i.label, kind: COMPLETION_KINDS[i.kind], detail: i.detail, documentation: doc,
            sortText: i.sort_text, insertText: i.insert_text}
         end,
+      }
+    end
+
+    private def navigation(state : FileState) : IDE::Navigation
+      IDE::Navigation.new(state, bodies(state), typing, analysis(state))
+    end
+
+    private def implementation(params : JSON::Any)
+      state = document(params)
+      off = offset(state, params["position"])
+      navigation(state).implementations(off).compact_map { |s| location_json(IDE::Location.new(s.file, s.item.name_range)) }
+    end
+
+    private def prepare_call_hierarchy(params : JSON::Any)
+      state = document(params)
+      off = offset(state, params["position"])
+      nav = navigation(state)
+      item = nav.call_item_at(off)
+      if item.nil? && (hit = type_info(state).call_at(off))
+        # On a call: its resolved targets.
+        _, matches, _ = hit
+        return matches.first(10).compact_map { |m| call_item_json(IDE::CallItem.new(m.site, m.owner)) }
+      end
+      item ? [call_item_json(item)].compact : nil
+    end
+
+    private def outgoing_calls(params : JSON::Any)
+      data = params["item"]["data"]?
+      uri = params["item"]["uri"].as_s
+      state = @vfs.file?(uri) || @vfs.load(uri) || return [] of Nil
+      start = data.try(&.["start"]?.try(&.as_i64.to_u32)) || offset(state, params["item"]["selectionRange"]["start"])
+      nav = navigation(state)
+      item = nav.call_item_at(start + 1) || return [] of Nil
+      nav.outgoing_calls(item).compact_map do |c|
+        to = call_item_json(c.target) || next
+        {to: to, fromRanges: c.ranges.map { |r| range_json(state, r) }}
+      end
+    end
+
+    private def call_item_json(item : IDE::CallItem)
+      uri = @vfs.uri(item.site.file)
+      state = @vfs.file?(uri) || @vfs.load(uri) || return nil
+      it = item.site.item
+      owner = typing.def_map[item.owner].full_name
+      {
+        name:           it.name,
+        kind:           6, # Method
+        detail:         owner.empty? ? it.signature.to_s : "#{owner}#{it.signature.try(&.receiver) ? "." : "#"}#{it.name}#{it.signature}",
+        uri:            uri,
+        range:          range_json(state, it.range),
+        selectionRange: range_json(state, it.name_range),
+        data:           {start: it.range.start},
       }
     end
 

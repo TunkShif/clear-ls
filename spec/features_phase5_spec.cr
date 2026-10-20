@@ -123,3 +123,67 @@ describe "LSP phase 5 named-argument completion" do
     labels.should_not contain("limit:")
   end
 end
+
+NAV_APP = {
+  "src/nav.cr" => <<-CR,
+    abstract class Shape
+      abstract def area : Int32
+
+      def describe : String
+        area.to_s
+      end
+    end
+
+    class Square < Shape
+      def area : Int32
+        4
+      end
+    end
+
+    class Circle < Shape
+      def area : Int32
+        3
+      end
+    end
+
+    class Big < Square
+    end
+
+    def run(s : Shape, io : IO)
+      s.area
+      s.describe
+      io.gets(10)
+    end
+    CR
+}
+
+private def nav_lines(c, method, needle, shift = 0) : Array(Int32)
+  u = c.open("src/nav.cr")
+  r = c.request(method, {textDocument: {uri: u}, position: c.pos("src/nav.cr", needle, shift)})
+  r.as_a.map(&.["range"]["start"]["line"].as_i).sort
+end
+
+describe "LSP phase 5 implementation and call hierarchy" do
+  it "finds implementations of abstract defs, calls, and types" do
+    with_client(NAV_APP, PRELUDE_FILES) do |c|
+      nav_lines(c, "textDocument/implementation", "area : Int32\n\n  def", 0).should eq [9, 15]
+      # On a call: the target plus its overrides.
+      nav_lines(c, "textDocument/implementation", "area\n  s.describe").should eq [1, 9, 15]
+      nav_lines(c, "textDocument/implementation", "Shape\n  abstract", 0).should eq [8, 14, 20]
+    end
+  end
+
+  it "lists outgoing calls of a def" do
+    with_client(NAV_APP, PRELUDE_FILES) do |c|
+      u = c.open("src/nav.cr")
+      items = c.request("textDocument/prepareCallHierarchy", {textDocument: {uri: u}, position: c.pos("src/nav.cr", "run(")})
+      items.as_a.size.should eq 1
+      items[0]["name"].should eq "run"
+      out = c.request("callHierarchy/outgoingCalls", {item: items[0]})
+      names = out.as_a.map { |o| o["to"]["detail"].as_s }.sort
+      names.should eq ["IO#gets(limit : Int, chomp : Bool = false) : String?", "Shape#area() : Int32", "Shape#describe() : String"]
+      area = out.as_a.find! { |o| o["to"]["name"] == "area" }
+      area["fromRanges"][0]["start"]["line"].should eq 24
+    end
+  end
+end

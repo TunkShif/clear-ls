@@ -103,6 +103,7 @@ module ClearLS::Semantics
     def add_file(file : FileId, tree : Items::ItemTree) : Nil
       @ancestors_cache.clear
       @namespace_sites = nil
+      @subtypes_index = nil
       @path_cache.clear
       tree.items.each { |item| add_item(file, item, PROGRAM) }
     end
@@ -306,9 +307,36 @@ module ClearLS::Semantics
       @ancestors_cache[id] = result
     end
 
+    @subtypes_index : Hash(TypeId, Array(TypeId))? = nil
+
     # Direct subclasses / includers (for type hierarchy).
     def subtypes(id : TypeId) : Array(TypeId)
-      @types.select { |t| t.id != id && (superclass(t.id) == id || includes(t.id).includes?(id)) }.map(&.id)
+      index = @subtypes_index ||= begin
+        h = Hash(TypeId, Array(TypeId)).new { |hh, k| hh[k] = [] of TypeId }
+        @types.each do |t|
+          next if t.kind.alias? || t.kind.type_def? || t.id == PROGRAM
+          parents = includes(t.id)
+          superclass(t.id).try { |sup| parents << sup }
+          parents.uniq.each { |p| h[p] << t.id unless p == t.id }
+        end
+        h
+      end
+      index[id]? || [] of TypeId
+    end
+
+    # Every type that has *id* as an ancestor (excluding *id*), breadth first.
+    def descendants(id : TypeId) : Array(TypeId)
+      seen = Set{id}
+      result = [] of TypeId
+      queue = [id]
+      while cur = queue.shift?
+        subtypes(cur).each do |s|
+          next unless seen.add?(s)
+          result << s
+          queue << s
+        end
+      end
+      result
     end
 
     # The namespace enclosing a byte offset of a file: the innermost type
