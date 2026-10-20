@@ -116,11 +116,15 @@ module ClearLS
       offset
     end
 
-    # Rounds an offset that falls inside a UTF-8 sequence down to its start.
+    # Rounds an offset inside a multi-byte character down to its start, using
+    # the same decoding as `char_at`.
     private def snap_to_char(offset : UInt32) : UInt32
-      bytes = @text.to_slice
-      while offset > 0 && offset < bytes.size && (bytes[offset] & 0xC0) == 0x80
-        offset -= 1
+      return offset if offset >= text_size
+      pos = @line_starts[line_of(offset)]
+      while pos < offset
+        width, _ = char_at(pos, PositionEncoding::UTF8)
+        return pos if pos + width > offset
+        pos += width
       end
       offset
     end
@@ -137,21 +141,27 @@ module ClearLS
     end
 
     # Byte width and *encoding* unit count of the character at *offset*.
-    # Invalid bytes count as one byte and one unit.
+    # Invalid or truncated sequences count as one byte and one unit, like the
+    # replacement character an editor would display.
     private def char_at(offset : UInt32, encoding : PositionEncoding) : {UInt32, UInt32}
-      lead = @text.to_slice[offset]
+      bytes = @text.to_slice
+      lead = bytes[offset]
       width = if lead < 0x80
                 1_u32
-              elsif lead >= 0xF0
-                4_u32
-              elsif lead >= 0xE0
-                3_u32
-              elsif lead >= 0xC0
+              elsif 0xC2 <= lead <= 0xDF
                 2_u32
+              elsif 0xE0 <= lead <= 0xEF
+                3_u32
+              elsif 0xF0 <= lead <= 0xF4
+                4_u32
               else
                 1_u32
               end
-      width = Math.min(width, text_size - offset)
+      if width > 1
+        valid = offset + width <= bytes.size &&
+                (1...width).all? { |i| (bytes[offset + i] & 0xC0) == 0x80 }
+        width = 1_u32 unless valid
+      end
       units = encoding.utf16? && width == 4 ? 2_u32 : 1_u32
       {width, units}
     end
