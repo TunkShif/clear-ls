@@ -27,6 +27,11 @@ module ClearLS::HIR
 
     def run(node : Syntax::Node) : Body
       @scopes << Scope.new(ScopeId.new(0), ScopeKind::Def, nil, node.range)
+      unless node.kind.method_def? || node.kind.abstract_method_def?
+        # File or namespace body: top-level code has its own local scope;
+        # nested defs/types are separate bodies.
+        return Body.new(node.range, lower_children(node, ExprKind::Seq), @exprs, @bindings, @scopes)
+      end
       lower_params(node.field(Syntax::Field::Params), BindingKind::Param)
       root = if body = node.field(Syntax::Field::Body)
                lower(body)
@@ -114,6 +119,12 @@ module ClearLS::HIR
         add(ExprKind::Missing, node.range)
       when .comment?, .heredoc_body?
         add(ExprKind::Other, node.range)
+      when .method_def?, .abstract_method_def?, .macro_def?, .fun_def?, .lib_def?
+        # Separate body / not executable here.
+        add(ExprKind::Other, node.range)
+      when .class_def?, .struct_def?, .module_def?, .enum_def?
+        # Type bodies have their own top-level local scope.
+        with_scope(node.range, ScopeKind::Def) { lower_children(node.field(Syntax::Field::Body) || node, ExprKind::Other) }
       else
         lower_children(node, ExprKind::Other)
       end
@@ -322,10 +333,10 @@ module ClearLS::HIR
 
     # -- scopes and bindings ------------------------------------------------------
 
-    private def with_scope(range : TextRange, &)
+    private def with_scope(range : TextRange, kind = ScopeKind::Block, &)
       parent = @scope
       @scope = ScopeId.new(@scopes.size)
-      @scopes << Scope.new(@scope, ScopeKind::Block, parent, range)
+      @scopes << Scope.new(@scope, kind, kind.def? ? nil : parent, range)
       yield
     ensure
       @scope = parent.not_nil!

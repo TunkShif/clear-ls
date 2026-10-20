@@ -156,3 +156,15 @@ describe HIR::LowerBody do
     {e.kind, e.name}.should eq({HIR::ExprKind::LocalRef, "c"})
   end
 end
+
+describe "LowerBody file bodies" do
+  it "lowers top-level code, skipping defs and isolating type bodies" do
+    src = "x = 1\nputs x\ndef m\n  x\nend\nclass C\n  y = x\nend\n"
+    tree = Syntax::Parser.new.parse(src)
+    body = HIR::LowerBody.lower(tree.root)
+    x = body.bindings.find!(&.name.== "x")
+    x.references.size.should eq 2 # decl + `puts x`; not the def, not the class body
+    y = body.bindings.find!(&.name.== "y")
+    body.scope(y.scope).parent.should be_nil
+  end
+end

@@ -79,7 +79,13 @@ describe Server do
     c2 = Client.new
     r2 = c2.request("initialize", {capabilities: {} of String => String})
     r2["result"]["capabilities"]["positionEncoding"].should eq "utf-16"
-    r2["result"]["capabilities"]["textDocumentSync"]["change"].should eq 2
+    caps = r2["result"]["capabilities"]
+    caps["textDocumentSync"]["change"].should eq 2
+    %w(definitionProvider hoverProvider documentHighlightProvider referencesProvider documentSymbolProvider).each do |k|
+      caps[k]?.should_not be_nil
+    end
+    caps["renameProvider"]["prepareProvider"].should eq true
+    caps["semanticTokensProvider"]["legend"]["tokenTypes"].as_a.first.should eq "namespace"
   end
 
   it "tracks open documents through incremental changes" do

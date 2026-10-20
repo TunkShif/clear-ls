@@ -198,6 +198,7 @@ module ClearLS::LSP
     private def did_close(params : JSON::Any) : Nil
       uri = params["textDocument"]["uri"].as_s
       @vfs.close(uri)
+      evict_bodies(@vfs.id_for(uri))
       # Back to the disk contents (or forget an unsaved untitled buffer).
       if idx = @index
         if state = @vfs.file?(uri)
