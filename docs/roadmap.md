@@ -131,7 +131,7 @@ Not yet: method return inference for unannotated defs (Phase 6),
 untyped-param call-site specialisation (Phase 6), overload ranking by
 argument types (Phase 5), keyword-argument completion (Phase 5).
 
-### Phase 4 — control-flow analysis
+### Phase 4 — control-flow analysis (done)
 
 - Per-body CFG; joins; narrowing by `is_a?`, `nil?`, truthiness, `&&`/`||`,
   `case`/`in`; loop fixed points; rescue/ensure; unreachability.
@@ -164,6 +164,24 @@ Steps (one commit each):
 
 Not planned: ivar/cvar narrowing. The compiler narrows only locals
 (`if @a` leaves `@a` nilable), so clear-ls does the same.
+
+Status: implemented as planned. `Flow::Builder` turns a body into basic
+blocks of evaluation-ordered operations; `Types::Infer` solves block-entry
+environments with a worklist (reverse postorder, widening to unknown after
+8 changes of a block's state). NoReturn calls (`raise`, `exit`) end
+reachable code; edges whose narrowing leaves a local with no possible type
+are infeasible. Code after an exit is analysed afterwards from the code it
+follows, so completion works while editing it. `Infer#env_at` replays a
+block to the cursor; local completion details and hover use it.
+
+Measurements (`--release`, vs Phase 3): coverage of locals and block args
+62.8% in this repo (61.7%), 35.5% in the stdlib (35.4%); the remaining
+unknowns are mostly unannotated method returns (Phase 6). Inference over
+this repo's 540 defs takes 0.18 s (0.38 s); stdlib sample 1.58 s (1.98 s).
+CFG construction for all 15k stdlib defs takes 86 ms.
+
+Not yet: `responds_to?` narrowing, closure-captured locals stay narrowed
+(the compiler does not narrow them), ensure on exceptional paths.
 
 ### Phase 5 — call resolution
 

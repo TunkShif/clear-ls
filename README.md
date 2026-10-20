@@ -1,8 +1,10 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 3 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 4 —
 
+- flow-sensitive local types: branch joins, narrowing by `if x`, `nil?`,
+  `is_a?`, `&&`/`||`/`!`, `case`/`in`, early exits, loops, rescue;
 - completion: members of inferred receivers, `Foo::` paths, constants,
   `@ivars`, locals, methods, keywords;
 - hover with inferred types for locals and resolved method signatures;
@@ -39,6 +41,7 @@ bin/clear-ls lsp [--log-level debug] [--log-file PATH]   # stdio server
 bin/clear-ls dump-cst [--ranges] FILE                    # print the CST
 bin/clear-ls dump-items FILE                             # print declarations
 bin/clear-ls dump-hir FILE LINE                          # print a def's body HIR
+bin/clear-ls dump-cfg FILE LINE                          # print a def's control-flow graph
 ```
 
 The server reads `CRYSTAL_PATH`, version, and target from `crystal env` /
