@@ -42,7 +42,7 @@ calls the removed `ts_language_version`, so clear-ls uses its own
 
 ## Phases
 
-### Phase 0 — foundations
+### Phase 0 — foundations (done)
 
 The server keeps an exact, incrementally reparsed view of every open buffer.
 
@@ -57,6 +57,13 @@ The server keeps an exact, incrementally reparsed view of every open buffer.
 
 Exit: edits keep incremental and fresh parses identical (property test);
 position conversion round-trips; a real client can open/edit/close.
+
+Measurements (stdlib, 1646 files, 9.1 MB, `--release`): 2.4 s single-thread
+parse. Keeping every tree alive needs 282 MB GC heap with the binding's
+default Boehm allocator versus 17 MB heap with
+`-Dcrystal_tree_sitter_no_init` (libc malloc; RSS 297 MB vs 272 MB).
+Syntax trees for non-open files should be dropped after item lowering; the
+allocator choice is revisited in Phase 9.
 
 ### Phase 1 — declarations and project model
 

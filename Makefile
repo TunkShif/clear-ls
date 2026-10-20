@@ -100,8 +100,9 @@ verify-static: $(BIN)
 STDLIB := $(shell $(CRYSTAL) env CRYSTAL_PATH 2>/dev/null | tr ':' '\n' | grep -v '^lib$$' | tail -1)
 
 grammar-check: | $(GRAMMAR_DIR)
-	@cd $(GRAMMAR_DIR) && find $(STDLIB) -name '*.cr' -print0 | \
-	  xargs -0 $(TREE_SITTER_CLI) parse -q -s 2>&1 | \
+	@mkdir -p $(BUILD)
+	@find $(STDLIB) -name '*.cr' | sort > $(BUILD)/stdlib-files.txt
+	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) parse -q -s --paths $(BUILD)/stdlib-files.txt 2>&1 | \
 	  sed 's|$(STDLIB)/||' | grep -E 'ERROR|MISSING|Total parses' || true
 
 syntax-gen: | $(GRAMMAR_DIR)
