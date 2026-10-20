@@ -4,3 +4,4 @@
 /vendor/
 /.crystal-cache/
 /.shards/
+/*_tmp.cr

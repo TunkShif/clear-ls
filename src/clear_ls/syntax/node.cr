@@ -14,6 +14,14 @@ module ClearLS::Syntax
     def initialize(@raw, @tree)
     end
 
+    # Returns *value* after keeping the owning tree reachable, so a native
+    # call that produced *value* cannot race the tree's finalizer.
+    @[AlwaysInline]
+    private def alive(value : T) : T forall T
+      Syntax.keep_alive(@tree)
+      value
+    end
+
     def self.wrap?(raw : LibTreeSitter::TSNode, tree : Tree) : Node?
       LibTreeSitter.ts_node_is_null(raw) ? nil : new(raw, tree)
     end
@@ -23,40 +31,40 @@ module ClearLS::Syntax
     end
 
     def symbol : UInt16
-      LibTreeSitter.ts_node_symbol(@raw).unsafe_as(UInt16)
+      alive(LibTreeSitter.ts_node_symbol(@raw).unsafe_as(UInt16))
     end
 
     # Grammar type string, e.g. `"method_def"` or `"("`.
     def type : String
-      String.new(LibTreeSitter.ts_node_type(@raw))
+      alive(String.new(LibTreeSitter.ts_node_type(@raw)))
     end
 
     def named? : Bool
-      LibTreeSitter.ts_node_is_named(@raw)
+      alive(LibTreeSitter.ts_node_is_named(@raw))
     end
 
     def error? : Bool
-      LibTreeSitter.ts_node_is_error(@raw)
+      alive(LibTreeSitter.ts_node_is_error(@raw))
     end
 
     def missing? : Bool
-      LibTreeSitter.ts_node_is_missing(@raw)
+      alive(LibTreeSitter.ts_node_is_missing(@raw))
     end
 
     def extra? : Bool
-      LibTreeSitter.ts_node_is_extra(@raw)
+      alive(LibTreeSitter.ts_node_is_extra(@raw))
     end
 
     def has_error? : Bool
-      LibTreeSitter.ts_node_has_error(@raw)
+      alive(LibTreeSitter.ts_node_has_error(@raw))
     end
 
     def start_byte : UInt32
-      LibTreeSitter.ts_node_start_byte(@raw)
+      alive(LibTreeSitter.ts_node_start_byte(@raw))
     end
 
     def end_byte : UInt32
-      LibTreeSitter.ts_node_end_byte(@raw)
+      alive(LibTreeSitter.ts_node_end_byte(@raw))
     end
 
     def range : TextRange
@@ -72,11 +80,11 @@ module ClearLS::Syntax
     end
 
     def child_count : Int32
-      LibTreeSitter.ts_node_child_count(@raw).to_i32
+      alive(LibTreeSitter.ts_node_child_count(@raw).to_i32)
     end
 
     def named_child_count : Int32
-      LibTreeSitter.ts_node_named_child_count(@raw).to_i32
+      alive(LibTreeSitter.ts_node_named_child_count(@raw).to_i32)
     end
 
     def child(index : Int) : Node?
@@ -196,7 +204,7 @@ module ClearLS::Syntax
     end
 
     def ==(other : Node) : Bool
-      LibTreeSitter.ts_node_eq(@raw, other.raw)
+      alive(LibTreeSitter.ts_node_eq(@raw, other.raw))
     end
 
     def inspect(io : IO) : Nil

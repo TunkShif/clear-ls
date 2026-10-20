@@ -43,3 +43,13 @@ Parse errors are not published as diagnostics by default; the compiler owns
 diagnostics.
 
 Fixes belong upstream in the grammar; clear-ls does not patch it locally.
+
+## Threading notes
+
+- A `TSParser` must never be shared between threads. In Crystal, a local
+  first assigned at method level (e.g. `parser = ...` in an early-return
+  branch) is captured *by reference* by every block in that method, so
+  `ctx.spawn { parser = Parser.new ... }` in the same method silently shares
+  one parser across all workers. Put worker bodies in their own methods.
+- Optimised builds can collect a `Tree` while native code still walks it;
+  `Syntax.keep_alive` guards cursor loops and native calls.

@@ -57,6 +57,8 @@ module ClearLS::Syntax
     # Cheap reference-counted copy, for use on another thread.
     def copy : Tree
       Tree.new(LibTreeSitter.ts_tree_copy(@raw), @text, @line_index)
+    ensure
+      Syntax.keep_alive(self)
     end
 
     # Tree-sitter requires the *edited* old tree here, so this is only called
@@ -66,6 +68,7 @@ module ClearLS::Syntax
       @changed_ranges = Array(TextRange).new(count) { |i| TextRange.new(ptr[i].start_byte, ptr[i].end_byte) }
     ensure
       Syntax.free_native(ptr.as(Void*)) if ptr
+      Syntax.keep_alive(edited_old)
     end
   end
 
@@ -102,12 +105,14 @@ module ClearLS::Syntax
       build(text, line_index, nil)
     ensure
       LibTreeSitter.ts_parser_set_included_ranges(@raw, Pointer(LibTreeSitter::TSRange).null, 0)
+      Syntax.keep_alive(self)
     end
 
     # Applies *edits* (each in offsets of the text produced by the previous
     # edit, like LSP incremental changes) and reparses incrementally.
     def reparse(old : Tree, edits : Enumerable(TextEdit)) : Tree
       raw = LibTreeSitter.ts_tree_copy(old)
+      Syntax.keep_alive(old)
       text = old.text
       index = old.line_index
       edits.each do |edit|
@@ -134,6 +139,9 @@ module ClearLS::Syntax
     private def build(text : String, index : LineIndex, old : Tree?) : Tree
       old_raw = old ? old.to_unsafe : Pointer(LibTreeSitter::TSTree).null
       raw = LibTreeSitter.ts_parser_parse_string(@raw, old_raw, text, text.bytesize)
+      # The parser and old tree must outlive the native call; see keep_alive.
+      Syntax.keep_alive(self)
+      Syntax.keep_alive(old) if old
       raise "tree-sitter parse failed" if raw.null?
       Tree.new(raw, text, index)
     end
