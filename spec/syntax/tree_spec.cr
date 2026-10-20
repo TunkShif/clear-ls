@@ -138,3 +138,28 @@ describe Syntax::Parser do
     end
   end
 end
+
+describe "Syntax helpers" do
+  parser = Syntax::Parser.new
+
+  it "skips punctuation tagged with a field" do
+    tree = parser.parse("def f(x : Int32 = 1) : String; end")
+    m = tree.root.named_child(0).not_nil!
+    m.field(Field::Type).not_nil!.text.should eq "String"
+    param = m.field(Field::Params).not_nil!.named_child(0).not_nil!
+    param.field_text(Field::Type).should eq "Int32"
+    param.field_text(Field::Default).should eq "1"
+  end
+
+  it "parses selected ranges in original coordinates" do
+    text = "{% if a %}\n  class W; end\n{% end %}\nclass X; end\n"
+    start = text.index!("class W").to_u32
+    tree = parser.parse_ranges(text, [TextRange.new(start, start + 12)])
+    cls = tree.root.named_child(0).not_nil!
+    cls.kind.should eq Kind::ClassDef
+    cls.field_text(Field::Name).should eq "W"
+    cls.start_byte.should eq start
+    # The parser is reusable for full parses afterwards.
+    parser.parse(text).root.named_child_count.should eq 2
+  end
+end

@@ -88,6 +88,22 @@ module ClearLS::Syntax
       build(text, LineIndex.new(text), nil)
     end
 
+    # Parses only the byte *ranges* of *text*, as if they were concatenated.
+    # Node positions stay in *text* coordinates. Used to look inside macro
+    # bodies, which the grammar keeps as opaque `macro_content`.
+    def parse_ranges(text : String, ranges : Array(TextRange), line_index : LineIndex = LineIndex.new(text)) : Tree
+      ts_ranges = ranges.map do |r|
+        LibTreeSitter::TSRange.new(start_byte: r.start, end_byte: r.end,
+          start_point: ts_point(line_index.point(r.start)), end_point: ts_point(line_index.point(r.end)))
+      end
+      unless LibTreeSitter.ts_parser_set_included_ranges(@raw, ts_ranges.to_unsafe, ts_ranges.size)
+        raise ArgumentError.new("included ranges must be ordered and non-overlapping")
+      end
+      build(text, line_index, nil)
+    ensure
+      LibTreeSitter.ts_parser_set_included_ranges(@raw, Pointer(LibTreeSitter::TSRange).null, 0)
+    end
+
     # Applies *edits* (each in offsets of the text produced by the previous
     # edit, like LSP incremental changes) and reparses incrementally.
     def reparse(old : Tree, edits : Enumerable(TextEdit)) : Tree

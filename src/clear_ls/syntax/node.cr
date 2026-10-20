@@ -97,9 +97,19 @@ module ClearLS::Syntax
       Array(Node).new(named_child_count) { |i| named_child(i).not_nil! }
     end
 
-    # First child stored under *field*.
+    # First *named* child stored under *field*.
+    #
+    # The grammar also tags punctuation with fields (`type: ":"`,
+    # `default: "="`), so the raw first child is often not the useful one.
     def field(field : Field) : Node?
-      Node.wrap?(LibTreeSitter.ts_node_child_by_field_id(@raw, Grammar.field_id(field).unsafe_as(LibTreeSitter::TSFieldId)), @tree)
+      first = Node.wrap?(LibTreeSitter.ts_node_child_by_field_id(@raw, Grammar.field_id(field).unsafe_as(LibTreeSitter::TSFieldId)), @tree)
+      return first if first.nil? || first.named?
+      fields(field).find(&.named?)
+    end
+
+    # Text of `field(field)`, if present.
+    def field_text(field : Field) : String?
+      field(field).try(&.text)
     end
 
     # All children stored under *field* (some fields repeat).
@@ -176,6 +186,13 @@ module ClearLS::Syntax
       String.new(ptr)
     ensure
       Syntax.free_native(ptr.as(Void*)) if ptr
+      Syntax.keep_alive(@tree)
+    end
+
+    # First and last line (zero-based) the node spans.
+    def lines : {UInt32, UInt32}
+      index = @tree.line_index
+      {index.line_of(start_byte), index.line_of(end_byte)}
     end
 
     def ==(other : Node) : Bool
