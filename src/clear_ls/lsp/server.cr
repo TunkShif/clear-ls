@@ -163,6 +163,7 @@ module ClearLS::LSP
         workers ? idx.load(workers) : idx.load
         # Open buffers may have arrived before indexing; they win.
         @vfs.snapshot.files.each { |f| idx.update(f) if f.overlay? }
+        idx.def_map # build now rather than on the first request
         @index = idx
       end
       Log.info { "index ready: #{index.size} files in #{elapsed.total_milliseconds.round}ms" }

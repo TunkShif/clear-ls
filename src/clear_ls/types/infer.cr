@@ -743,6 +743,11 @@ module ClearLS::Types
     # (Phase 5 does full argument binding).
     private def arity_ok?(item : Items::Item, nargs : Int32, with_block : Bool) : Bool
       sig = item.signature || return true
+      # A def whose body yields needs a block; `&` / `&block` marks it. The
+      # common `first(&)` vs `first : T` overload pairs need this to pick
+      # the right one.
+      block = sig.params.find(&.kind.block?)
+      return false if block && !with_block && block.name.nil?
       positional = sig.params.select(&.kind.positional?)
       splat = sig.params.any? { |p| p.kind.splat? && p.name }
       required = positional.count { |p| p.default.nil? && !named_only?(sig, p) }

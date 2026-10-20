@@ -99,6 +99,9 @@ module ClearLS::IDE
       each_body_in(range) do |body, inf|
         body.bindings.each do |b|
           next unless b.kind.local? || b.kind.block_arg?
+          # Class/module bodies: `getter x = ...` arguments look like locals.
+          next if body.scope(b.scope).kind.def? && b.scope.value != 0
+          next if in_type_body?(b.name_range.start)
           decl = b.name_range
           next unless range.touches?(decl.start) && seen.add?(decl.end)
           t = inf.binding_type(b.id)
@@ -108,6 +111,16 @@ module ClearLS::IDE
         end
       end
       hints.sort_by!(&.offset)
+    end
+
+    private def in_type_body?(offset : UInt32) : Bool
+      node = @state.tree.root.descendant(offset, offset + 1)
+      while n = node
+        return false if n.kind.method_def? || n.kind.block?
+        return true if n.kind.class_def? || n.kind.struct_def? || n.kind.module_def?
+        node = n.parent
+      end
+      false
     end
 
     # The value is a literal or `T.new(...)`, so the type is visible.

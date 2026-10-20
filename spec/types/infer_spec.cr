@@ -259,3 +259,24 @@ describe "Types::Infer nil handling" do
     type_of_local(r, "d").should eq "Int32"
   end
 end
+
+describe "Types::Infer overload selection" do
+  it "prefers the blockless overload when no block is given" do
+    r = infer(<<-CR, 2)
+      module Picky(T)
+        def pick(&)
+          yield
+        end
+        def pick : T
+        end
+      end
+      class Box(T)
+        include Picky(T)
+      end
+      def m(b : Box(String))
+        v = b.pick
+      end
+      CR
+    type_of_local(r, "v").should eq "String"
+  end
+end

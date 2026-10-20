@@ -272,8 +272,10 @@ module ClearLS::IDE
         end
       end
       map.program.members.each do |name, sites|
-        next unless name.starts_with?(prefix) && !name.starts_with?("self.") && seen.add?(name)
-        site = sites.find { |s| s.item.kind.def? || s.item.kind.macro? } || next
+        next unless name.starts_with?(prefix) && !name.starts_with?("self.") && !seen.includes?(name)
+        # `private def` at top level is file-private.
+        site = sites.find { |s| (s.item.kind.def? || s.item.kind.macro?) && (!s.item.visibility.private? || s.file == @state.id) } || next
+        seen << name
         sig = site.item.signature
         kind = site.item.kind.macro? ? CompletionKind::Macro : CompletionKind::Function
         items << CompletionItem.new(name, kind, detail: sig ? "#{name}#{sig}" : nil, documentation: site.item.doc, sort_text: "2#{name}")
