@@ -183,7 +183,7 @@ CFG construction for all 15k stdlib defs takes 86 ms.
 Not yet: `responds_to?` narrowing, closure-captured locals stay narrowed
 (the compiler does not narrow them), ensure on exceptional paths.
 
-### Phase 5 — call resolution
+### Phase 5 — call resolution (done)
 
 - Argument binding (defaults, named, splats, blocks), three-valued
   compatibility, bounded specificity; `IO#gets` regression family.
@@ -218,6 +218,31 @@ Steps (one commit each):
 
 Exit criterion (design doc): the `IO#gets` examples narrow to the
 expected overload set without guessing when argument types are unknown.
+
+Status: implemented as planned. `Types::CallResolver` binds arguments
+structurally (an unknown count from `*xs` / `**opts` keeps candidates),
+checks types three-valued with literal autocasting (`1` to any number, `:sym`
+to enums), expands union arguments into at most 16 runtime combinations,
+and drops a candidate only when a definitely matching candidate is at least
+as specific (overrides: the nearer ancestor wins ties). `IO#gets` specs: literal arguments pick one
+overload, `io.gets(value)` keeps the four one-argument ones, `String | Char`
+gives the two delimiter overloads as multiple runtime targets.
+
+Pulled in to avoid regressions when the arity filter went away: number
+primitives that the stdlib declares inside `{% for %}` (operators, `to_*`),
+alias expansion in restrictions (`Process::Stdio`), and `&.foo` receivers
+typed from the block argument.
+
+Measurements (`--release`, vs Phase 4): typed locals and block args 66.0%
+in this repo (62.8%), 39.9% in the stdlib (35.5%). Inference over this
+repo takes 0.23 s for 603 defs (0.18 s for 540). In Neovim: signature help
+< 1 ms, implementation < 1 ms, outgoing calls 80 ms (cold body inference).
+
+Not yet: incoming calls (Phase 8), return inference for unannotated defs
+such as `Enumerable#sum`, `Hash#[]?` (Phase 6). Signature help needs the
+call's line to parse: an unclosed `(` before `end` makes Tree-sitter
+swallow the enclosing def, so the call is only found after a `)` is
+inserted on the same line (handled) or typed.
 
 ### Phase 6 — generics and summaries
 

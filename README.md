@@ -1,12 +1,16 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 4 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 5 —
 
 - flow-sensitive local types: branch joins, narrowing by `if x`, `nil?`,
   `is_a?`, `&&`/`||`/`!`, `case`/`in`, early exits, loops, rescue;
 - completion: members of inferred receivers, `Foo::` paths, constants,
   `@ivars`, locals, methods, keywords;
+- overload resolution: hover, definition, and signature help show the
+  overloads that fit the call's arguments; named-argument completion;
+- implementation (overrides, abstract def implementers, subtypes) and
+  outgoing call hierarchy;
 - hover with inferred types for locals and resolved method signatures;
 - inlay type hints for locals and block arguments;
 - document and workspace symbols, folding, selection ranges;
