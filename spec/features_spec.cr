@@ -145,6 +145,8 @@ describe "LSP features" do
       res = c.request("workspace/symbol", {query: "base"})
       res.as_a.map(&.["name"].as_s).should eq ["Base"]
       res[0]["containerName"].should eq "Dep"
+      user = c.request("workspace/symbol", {query: "User"}).as_a.find! { |s| s["name"] == "User" }
+      user["containerName"].should eq "App::Models"
       res[0]["location"]["uri"].should eq c.uri("lib/dep/src/dep.cr")
       c.request("workspace/symbol", {query: "usr"}).as_a.map(&.["name"].as_s).should contain("User")
     end

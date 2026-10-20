@@ -1,8 +1,12 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 0
-(foundations) — text sync and incremental parsing, no language features yet.
+Tree-sitter with an editor-oriented semantic model. Status: Phase 1 —
+declaration-level features from the workspace, shards, and stdlib:
+
+- document and workspace symbols, folding, selection ranges;
+- goto-definition and hover for types and constants;
+- links and goto-definition for `require` paths.
 
 See [docs/roadmap.md](docs/roadmap.md) for the plan and design docs.
 
@@ -27,7 +31,13 @@ After a grammar bump, run `make syntax-gen` to regenerate
 ```sh
 bin/clear-ls lsp [--log-level debug] [--log-file PATH]   # stdio server
 bin/clear-ls dump-cst [--ranges] FILE                    # print the CST
+bin/clear-ls dump-items FILE                             # print declarations
 ```
+
+The server reads `CRYSTAL_PATH`, version, and target from `crystal env` /
+`crystal --version` (override the executable with `CRYSTAL=...`) and indexes
+the prelude's require closure, required shards, and all `.cr` files under
+the workspace root.
 
 Neovim (0.11+):
 

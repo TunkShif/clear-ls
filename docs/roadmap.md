@@ -65,7 +65,7 @@ default Boehm allocator versus 17 MB heap with
 Syntax trees for non-open files should be dropped after item lowering; the
 allocator choice is revisited in Phase 9.
 
-### Phase 1 — declarations and project model
+### Phase 1 — declarations and project model (done)
 
 - Item tree per file: namespaces, defs, macros, aliases, constants, enums,
   `lib`/`fun`, annotations, include/extend, visibility, docs.
@@ -78,6 +78,16 @@ allocator choice is revisited in Phase 9.
 - Project model: shard root, `lib/`, require graph, prelude, stdlib index.
 - Features: document/workspace symbols, folding, selection range, type and
   constant goto-definition and hover, require document links.
+
+Status: implemented as above, plus `{% if flag?(...) %}` bodies (reparsed
+with included ranges, filtered by target flags) and declarations recovered
+from `ERROR` nodes. Not yet: `delegate`/`def_equals*` macros, file-private
+type scoping, multi-root workspaces, persistent stdlib cache.
+
+Measurements (`--release`): this repo indexes 386 files (prelude closure +
+shard + workspace) in ~0.65 s on 8 workers; the whole stdlib lowers in
+0.35 s after parsing. Definition and hover answer in < 1 ms once indexed;
+workspace symbol search ~35 ms over ~45k items.
 
 ### Phase 2 — body HIR and scopes
 

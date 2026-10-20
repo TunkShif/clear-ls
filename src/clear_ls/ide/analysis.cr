@@ -90,12 +90,16 @@ module ClearLS::IDE
       (own.sort_by!(&rank) + other.sort_by!(&rank)).first(MAX_WORKSPACE_SYMBOLS)
     end
 
+    # Yields each item with its full container name. For `class A::B` the
+    # path prefix `A` is part of the container.
     private def self.each_named(items : Array(Items::Item), container : String?, &block : Items::Item, String? ->) : Nil
       items.each do |item|
-        block.call(item, container)
+        path = item.header.try(&.path) || [item.name]
+        prefix = path[0...-1].join("::").presence
+        own = [container, prefix].compact.join("::").presence
+        block.call(item, own)
         if item.kind.namespace?
-          name = item.header.try(&.path.join("::")) || item.name
-          each_named(item.children, container ? "#{container}::#{name}" : name, &block)
+          each_named(item.children, [own, item.name].compact.join("::"), &block)
         end
       end
     end
