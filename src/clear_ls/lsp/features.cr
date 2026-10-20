@@ -3,6 +3,7 @@ require "../ide/analysis"
 require "../ide/semantic_tokens"
 require "../ide/completion"
 require "../ide/type_info"
+require "../ide/signature_help"
 
 module ClearLS::LSP
   # Phase 1 language features: symbols, folding, selection, and
@@ -44,6 +45,7 @@ module ClearLS::LSP
         renameProvider:          {prepareProvider: true},
         completionProvider:      {triggerCharacters: [".", ":", "@"], resolveProvider: false},
         inlayHintProvider:       true,
+        signatureHelpProvider:   {triggerCharacters: ["(", ","], retriggerCharacters: [" "]},
         semanticTokensProvider:  {
           legend: {
             tokenTypes:     IDE::TokenType.names.map(&.camelcase(lower: true)),
@@ -70,6 +72,7 @@ module ClearLS::LSP
       when "textDocument/rename"         then rename(params)
       when "textDocument/completion"     then completion(params)
       when "textDocument/inlayHint"      then inlay_hint(params)
+      when "textDocument/signatureHelp"  then signature_help(params)
       when "textDocument/semanticTokens/full"  then semantic_tokens(params, nil)
       when "textDocument/semanticTokens/range" then semantic_tokens(params, params["range"])
       else
@@ -238,6 +241,24 @@ module ClearLS::LSP
           {label: i.label, kind: COMPLETION_KINDS[i.kind], detail: i.detail, documentation: doc,
            sortText: i.sort_text, insertText: i.insert_text}
         end,
+      }
+    end
+
+    private def signature_help(params : JSON::Any)
+      state = document(params)
+      off = offset(state, params["position"])
+      res = IDE::SignatureHelp.new(state, typing).help(off) || return nil
+      {
+        signatures: res.signatures.map do |s|
+          {
+            label:           s.label,
+            documentation:   s.documentation.try { |d| {kind: "markdown", value: d} },
+            parameters:      s.parameters.map { |p| {label: [p.label[0], p.label[1]]} },
+            activeParameter: s.active_parameter,
+          }
+        end,
+        activeSignature: res.active_signature,
+        activeParameter: res.signatures[res.active_signature]?.try(&.active_parameter),
       }
     end
 
