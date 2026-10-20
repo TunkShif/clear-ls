@@ -3,6 +3,7 @@ require "./transport"
 require "./json_rpc"
 require "../vfs"
 require "../version"
+require "../workspace/index"
 
 module ClearLS::LSP
   Log = ::Log.for("clear-ls.lsp")
@@ -25,8 +26,16 @@ module ClearLS::LSP
     getter encoding = PositionEncoding::UTF16
     # Process exit code once `exit` arrives: 0 after shutdown, else 1.
     getter exit_code : Int32? = nil
+    @index : Workspace::Index? = nil
+    # Overridable for tests: builds the project for a workspace root.
+    property project_factory : Proc(String, Workspace::Project) = ->(root : String) { Workspace::Project.detect(root) }
+    property index_workers : Int32? = nil
 
     def initialize(@transport : Transport)
+    end
+
+    def index : Workspace::Index
+      @index || raise ResponseError.new(ErrorCode::ServerNotInitialized, "workspace not indexed")
     end
 
     def run : Int32
@@ -78,8 +87,7 @@ module ClearLS::LSP
       when "initialize"         then initialize_request(params)
       when "shutdown"           then @state = State::ShuttingDown; nil
       when "clearLs/syntaxTree" then syntax_tree(params)
-      else
-        raise ResponseError.new(ErrorCode::MethodNotFound, "unhandled method #{method}")
+      else                           feature_request(method, params)
       end
     end
 
@@ -95,7 +103,7 @@ module ClearLS::LSP
       return if @state.uninitialized? || @state.shutting_down?
 
       case method
-      when "initialized"                     then nil
+      when "initialized"                     then load_index
       when "textDocument/didOpen"            then did_open(params)
       when "textDocument/didChange"          then did_change(params)
       when "textDocument/didClose"           then did_close(params)
@@ -118,6 +126,7 @@ module ClearLS::LSP
       encodings = offered.compact_map { |e| e.as_s?.try { |s| PositionEncoding.from_lsp?(s) } }
       # Byte offsets are native for us; prefer them, then utf-32, else utf-16.
       @encoding = [PositionEncoding::UTF8, PositionEncoding::UTF32].find { |e| encodings.includes?(e) } || PositionEncoding::UTF16
+      @root = workspace_root(params)
       @state = State::Initialized
 
       {
@@ -128,9 +137,35 @@ module ClearLS::LSP
             change:    2, # incremental
             save:      {includeText: false},
           },
-        },
+        }.merge(feature_capabilities),
         serverInfo: {name: "clear-ls", version: VERSION},
       }
+    end
+
+    @root : String = Dir.current
+
+    private def workspace_root(params : JSON::Any) : String
+      if folders = params["workspaceFolders"]?.try(&.as_a?)
+        folders.each { |f| (p = VFS.path_for(f["uri"].as_s)) && return p }
+      end
+      params["rootUri"]?.try(&.as_s?).try { |u| VFS.path_for(u) } ||
+        params["rootPath"]?.try(&.as_s?) || Dir.current
+    end
+
+    # Indexes the workspace. Runs synchronously on `initialized`: requests
+    # queue behind it, which keeps every answer consistent with a complete
+    # index (stdlib + workspace takes well under a second).
+    private def load_index : Nil
+      return if @index
+      elapsed = Time.measure do
+        idx = Workspace::Index.new(@project_factory.call(@root), @vfs)
+        workers = @index_workers
+        workers ? idx.load(workers) : idx.load
+        # Open buffers may have arrived before indexing; they win.
+        @vfs.snapshot.files.each { |f| idx.update(f) if f.overlay? }
+        @index = idx
+      end
+      Log.info { "index ready: #{index.size} files in #{elapsed.total_milliseconds.round}ms" }
     end
 
     # -- text sync ----------------------------------------------------------
@@ -138,6 +173,7 @@ module ClearLS::LSP
     private def did_open(params : JSON::Any) : Nil
       doc = params["textDocument"]
       state = @vfs.open(doc["uri"].as_s, doc["text"].as_s, doc["version"].as_i64)
+      @index.try(&.update(state))
       Log.debug { "didOpen #{state.uri} v#{state.version} (#{state.text.bytesize} bytes)" }
     end
 
@@ -152,18 +188,39 @@ module ClearLS::LSP
         end
       end
       state = @vfs.change(doc["uri"].as_s, doc["version"].as_i64, changes, @encoding)
+      decls_changed = @index.try(&.update(state))
       Log.debug do
         ranges = state.tree.changed_ranges.try(&.join(", ")) || "full"
-        "didChange #{state.uri} v#{state.version}: #{changes.size} edit(s), changed [#{ranges}], error=#{state.tree.has_error?}"
+        "didChange #{state.uri} v#{state.version}: #{changes.size} edit(s), changed [#{ranges}], error=#{state.tree.has_error?}, decls_changed=#{decls_changed}"
       end
     end
 
     private def did_close(params : JSON::Any) : Nil
-      @vfs.close(params["textDocument"]["uri"].as_s)
+      uri = params["textDocument"]["uri"].as_s
+      @vfs.close(uri)
+      # Back to the disk contents (or forget an unsaved untitled buffer).
+      if idx = @index
+        if state = @vfs.file?(uri)
+          idx.update(state)
+        else
+          idx.remove(@vfs.id_for(uri))
+        end
+      end
     end
 
+    # FileChangeType: 1 created, 2 changed, 3 deleted.
     private def did_change_watched(params : JSON::Any) : Nil
-      params["changes"].as_a.each { |c| @vfs.disk_changed(c["uri"].as_s) }
+      params["changes"].as_a.each do |c|
+        uri = c["uri"].as_s
+        @vfs.disk_changed(uri)
+        idx = @index || next
+        next if @vfs.open?(uri)
+        if c["type"]?.try(&.as_i) == 3
+          idx.remove(@vfs.id_for(uri))
+        elsif state = @vfs.load(uri)
+          idx.update(state)
+        end
+      end
     end
 
     # -- debug --------------------------------------------------------------

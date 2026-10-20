@@ -74,6 +74,8 @@ module ClearLS
     @revisions = Hash(FileId, UInt64).new(0_u64)
     @snapshot : Snapshot? = nil
     @parser = Syntax::Parser.new
+    # Line indexes for files that are not loaded (location conversion only).
+    @line_indexes = {} of FileId => LineIndex
 
     # Interns *uri*. Normalised so `file:///a/../b.cr` and `file:///b.cr` match.
     def id_for(uri : String) : FileId
@@ -154,10 +156,26 @@ module ClearLS
       read_disk(id)
     end
 
+    # Line index of a file without parsing it: the open/loaded state if any,
+    # otherwise the text on disk (cached until `disk_changed`).
+    def line_index_for(id : FileId) : LineIndex?
+      if state = @files[id]?
+        return state.line_index
+      end
+      @line_indexes[id] ||= begin
+        path = VFS.path_for(uri(id)) || return nil
+        return nil unless File.file?(path)
+        LineIndex.new(File.read(path))
+      end
+    rescue IO::Error
+      nil
+    end
+
     # The file changed on disk (watcher or save). Ignored while open.
     def disk_changed(uri : String) : Nil
       id = id_for(uri)
       @disk.delete(id)
+      @line_indexes.delete(id)
       if @files[id]?.try(&.overlay?)
         return
       end

@@ -11,6 +11,9 @@ private class Client
 
   def initialize
     @server = Server.new(Transport.new(IO::Memory.new, @out))
+    # Empty project, no stdlib: keeps lifecycle specs fast.
+    @server.project_factory = ->(root : String) { Workspace::Project.new(File.tempname, ["lib"], nil, nil, "x86_64-unknown-linux-gnu") }
+    @server.index_workers = 1
   end
 
   def request(method : String, params = nil) : JSON::Any
