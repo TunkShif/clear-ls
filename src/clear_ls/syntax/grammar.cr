@@ -14,6 +14,17 @@ lib LibTreeSitter
 end
 
 module ClearLS::Syntax
+  # Frees memory that Tree-sitter allocated and handed to us (e.g. from
+  # `ts_node_string`). The binding installs Boehm GC as Tree-sitter's
+  # allocator unless `-Dcrystal_tree_sitter_no_init`; the free must match.
+  def self.free_native(ptr : Void*) : Nil
+    {% if flag?(:crystal_tree_sitter_no_init) %}
+      LibC.free(ptr)
+    {% else %}
+      GC.free(ptr)
+    {% end %}
+  end
+
   # The Crystal language plus lookup tables between grammar IDs and the
   # generated `Kind`/`Field` enums.
   module Grammar

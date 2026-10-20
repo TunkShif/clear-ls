@@ -20,6 +20,20 @@ Parsing the Crystal 1.22.0 standard library (`share/crystal/src`, 1646 files,
 | Unnamed proc-type `fun` parameter | `fun BIO_meth_set_create(BioMethod*, (Bio*) -> Int)` (`openssl/lib_crypto.cr`) |
 | Escaped macro inside macro | `\{% if Int{{n}} == LibGMP::SI %}` (`big/big_int.cr`) |
 
+## Error recovery on incomplete code
+
+Observed on half-typed code inside `class A … end` with a following
+`def bar; end`:
+
+| Input inside `def foo` | Result |
+|---|---|
+| `x.` / `if x` / `y = ` | Both defs survive, but the enclosing `class_def` degrades to an `ERROR` node containing `(constant)` and the `method_def`s. |
+| Unclosed `def foo(` | `MISSING ")"`; following lines are absorbed as parameters/body, and `def bar` is lost. |
+
+Item lowering must therefore recognise declarations inside `ERROR` nodes
+(e.g. `ERROR` starting with `class`/`module` keyword + `constant`), and use
+the previous good item tree for regions swallowed by recovery.
+
 ## Impact on clear-ls
 
 Small. Tree-sitter recovers locally, so a gap usually produces one `ERROR`
