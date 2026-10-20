@@ -9,6 +9,7 @@ module ClearLS::CLI
       lsp                 Run the language server on stdio (default)
       dump-cst FILE       Print the Tree-sitter CST of FILE
       dump-items FILE     Print the declarations (item tree) of FILE
+      dump-hir FILE LINE  Print the body HIR of the def at LINE (1-based)
       version             Print version information
 
     Options:
@@ -48,6 +49,18 @@ module ClearLS::CLI
       file = args.shift? || abort "dump-items: missing FILE"
       tree = Syntax::Parser.new.parse(File.read(file))
       Items::Dump.dump(Items::Lower.lower(tree), tree.line_index, STDOUT)
+      0
+    when "dump-hir"
+      file = args.shift? || abort "dump-hir: missing FILE"
+      line = (args.shift? || abort "dump-hir: missing LINE").to_i - 1
+      tree = Syntax::Parser.new.parse(File.read(file))
+      offset = tree.line_index.line_range(line.to_u32).start
+      node = tree.root.descendant(offset, offset)
+      while node && !(node.kind.method_def? || node.kind.abstract_method_def?)
+        node = node.parent
+      end
+      abort "dump-hir: no def at line #{line + 1}" unless node
+      HIR::Dump.dump(HIR::LowerBody.lower(node), tree.line_index, STDOUT)
       0
     when "version"
       puts "clear-ls #{VERSION}"
