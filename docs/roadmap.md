@@ -137,6 +137,34 @@ argument types (Phase 5), keyword-argument completion (Phase 5).
   `case`/`in`; loop fixed points; rescue/ensure; unreachability.
 - Features: flow-sensitive hover/completion; type at cursor.
 
+Steps (one commit each):
+
+1. **HIR prep.** Lower modifier `if`/`unless` as `[cond, then]` (CST
+   order is `then, cond`); tag rescue clauses (`syntax: Rescue`, rescue
+   var binding on the clause); `when`/`in`/`else` clauses keep their
+   syntax kind. No inference changes beyond the modifier-if fix.
+2. **CFG builder** (`src/clear_ls/flow/`). Basic blocks of HIR
+   operations in evaluation order, terminators (jump, branch on a
+   condition expr, return, break, next, raise-free fallthrough), loop
+   heads, call blocks as 0..n loops, rescue/ensure edges, unreachable
+   blocks. `dump-cfg FILE LINE` CLI and shape specs. Inference unchanged.
+3. **Dataflow inference on the CFG.** Worklist over block-entry
+   environments with joins, iteration budget, and edge refinements
+   (truthiness, `nil?`, `is_a?`, `!`, `&&`/`||`). Replaces the structured
+   `visit_if`/`visit_case`/`visit_loop`/`visit_and_or`; per-expression
+   transfer logic is reused. Early exits mid-branch, loop fixed points.
+4. **`case`/`in`, rescue, ensure.** `when T`/`in T`/`when .nil?` narrow
+   the subject local; rescue vars typed from their restriction (else
+   `Exception`); ensure runs on all paths.
+5. **Program points.** Environment before an expression / at a cursor
+   offset; hover reports the type at the reference's program point,
+   completion and local-type details use it. Flow-sensitive hover spec.
+6. **Verification and docs.** Coverage/perf against Phase 3 baselines,
+   headless Neovim check, roadmap + README status.
+
+Not planned: ivar/cvar narrowing. The compiler narrows only locals
+(`if @a` leaves `@a` nilable), so clear-ls does the same.
+
 ### Phase 5 — call resolution
 
 - Argument binding (defaults, named, splats, blocks), three-valued
