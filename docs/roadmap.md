@@ -190,6 +190,35 @@ Not yet: `responds_to?` narrowing, closure-captured locals stay narrowed
 - Features: signature help, overload-aware definition, implementation,
   outgoing call hierarchy.
 
+Steps (one commit each):
+
+1. **Call shape in HIR.** Splat / double-splat arguments get their own
+   kinds; `&blk` / `&->foo` (block pass) is distinguished from `&.foo` and
+   literal blocks. No resolution changes.
+2. **Resolver** (`Types::CallResolver`). Structural binding of
+   positional, named (external names), defaulted, splat, double-splat,
+   named-only (after `*`), and block arguments; three-valued compatibility
+   of argument types with restrictions (unknown keeps a candidate);
+   bounded specificity ranking; `CallResolution` with kind (unique,
+   multiple runtime targets, ambiguous, unresolved) and per-candidate
+   argument → parameter maps. Specs: `IO#gets` family on a fake prelude.
+3. **Use it.** Inference return/block types from the viable set; hover
+   and definition show viable overloads (the whole family when none is
+   viable); `IO#gets` LSP spec. Replaces `arity_ok?`.
+4. **Signature help** (`(`/`,` triggers): enclosing call, viable
+   signatures, active signature/parameter by binding; works in
+   unfinished calls.
+5. **Named-argument completion** inside call parentheses from the
+   viable candidates (`io.gets(li|)` → `limit:`).
+6. **Implementation and outgoing call hierarchy.** Overrides of a
+   method in subtypes / implementers of an abstract def; subtypes of a
+   type; resolved calls in a def body. Incoming calls need workspace
+   references (Phase 8).
+7. **Verification and docs.**
+
+Exit criterion (design doc): the `IO#gets` examples narrow to the
+expected overload set without guessing when argument types are unknown.
+
 ### Phase 6 — generics and summaries
 
 - Generic substitution, on-demand return summaries, call-site-keyed method
