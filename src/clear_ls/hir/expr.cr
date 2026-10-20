@@ -68,6 +68,7 @@ module ClearLS::HIR
 
   enum ExprKind
     Missing     # ERROR / MISSING node or unsupported construct
+    Nop         # absent optional part (empty `then`/`else`, no `case` subject)
     Literal
     LocalRef    # resolved to a binding
     Self
@@ -81,16 +82,18 @@ module ClearLS::HIR
     Call        # also identifiers that are not locals (`foo` → self.foo)
     Block
     ProcLiteral
-    If
+    If          # children: cond, then, else (Nop when absent)
     Unless
-    Case
+    Case        # children: subject (or Nop), then When / else-Seq clauses
+    When        # `when`/`in` clause (syntax tells which): conditions..., body
     While
     Until
     Return
     Break
     Next
     Yield
-    Begin       # begin/rescue/ensure, also def-level rescue
+    Begin       # body, Rescue clauses..., else Seq?, ensure Seq? (by syntax)
+    Rescue      # rescue clause: binding = rescue var, type_text, children: [body]
     Seq         # statement list
     And
     Or

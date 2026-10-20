@@ -280,3 +280,18 @@ describe "Types::Infer overload selection" do
     type_of_local(r, "v").should eq "String"
   end
 end
+
+describe "Types::Infer modifiers" do
+  it "narrows in modifier if/unless bodies" do
+    r = infer(<<-CR)
+      def m(x : String?)
+        a = x if x
+        b = x unless x.nil?
+        c = x ? x : "d"
+      end
+      CR
+    type_of_local(r, "a").should eq "String"
+    type_of_local(r, "b").should eq "String"
+    type_of_local(r, "c").should eq "String"
+  end
+end

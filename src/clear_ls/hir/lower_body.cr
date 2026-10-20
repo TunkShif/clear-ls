@@ -41,8 +41,8 @@ module ClearLS::HIR
       # def-level rescue/else/ensure clauses.
       extra = [] of ExprId
       node.fields(Syntax::Field::Rescue).each { |r| extra << lower_rescue(r) if r.named? }
-      node.field(Syntax::Field::Else).try { |e| extra << lower_children(e, ExprKind::Seq) }
-      node.field(Syntax::Field::Ensure).try { |e| extra << lower_children(e, ExprKind::Seq) }
+      node.field(Syntax::Field::Else).try { |e| extra << lower(e) }
+      node.field(Syntax::Field::Ensure).try { |e| extra << lower(e) }
       unless extra.empty?
         root = add(ExprKind::Begin, node.range, children: [root] + extra)
       end
@@ -54,8 +54,11 @@ module ClearLS::HIR
     private def lower(node : Syntax::Node) : ExprId
       k = node.kind
       case k
-      when .expressions?, .then?, .else?, .ensure?
+      when .expressions?, .then?
         lower_children(node, ExprKind::Seq)
+      when .else?, .ensure?
+        # `else`/`ensure` wrap an `expressions` body.
+        add(ExprKind::Seq, node.range, syntax: node.kind, children: node.named_children.reject(&.kind.comment?).map { |c| lower(c) })
       when .identifier?
         lower_identifier(node)
       when .instance_var?
@@ -88,18 +91,16 @@ module ClearLS::HIR
         lower_block(node, nil)
       when .proc_node?
         lower_proc(node)
-      when .if?, .unless?, .conditional?
+      when .if?, .unless?, .conditional?, .elsif?, .modifier_if?, .modifier_unless?
         lower_if(node)
-      when .modifier_if?, .modifier_unless?
-        lower_children(node, k.modifier_if? ? ExprKind::If : ExprKind::Unless)
       when .case?
-        lower_children(node, ExprKind::Case)
+        lower_case(node)
       when .while?, .until?
         lower_children(node, k.while? ? ExprKind::While : ExprKind::Until)
       when .begin?
         lower_begin(node)
       when .modifier_rescue?, .modifier_ensure?
-        lower_children(node, ExprKind::Begin)
+        lower_modifier_begin(node)
       when .return?, .break?, .next?, .yield?
         kind = {Syntax::Kind::Return => ExprKind::Return, Syntax::Kind::Break => ExprKind::Break,
                 Syntax::Kind::Next => ExprKind::Next, Syntax::Kind::Yield => ExprKind::Yield}[k]
@@ -341,30 +342,67 @@ module ClearLS::HIR
 
     # -- control flow -----------------------------------------------------------
 
+    # Always `[cond, then, else]`, with `Nop` for absent parts. Modifier
+    # forms store `then` before `cond` in the CST; evaluation order is cond
+    # first.
     private def lower_if(node : Syntax::Node) : ExprId
-      kids = [] of ExprId
-      node.field(Syntax::Field::Cond).try { |c| kids << lower(c) }
-      node.field(Syntax::Field::Then).try { |c| kids << lower(c) }
-      node.field(Syntax::Field::Else).try { |c| kids << lower(c) }
-      add(node.kind.unless? ? ExprKind::Unless : ExprKind::If, node.range, children: kids)
+      cond = node.field(Syntax::Field::Cond).try { |c| lower(c) } || add(ExprKind::Missing, node.range)
+      then_b = node.field(Syntax::Field::Then).try { |c| lower(c) } || nop(node)
+      else_b = node.field(Syntax::Field::Else).try { |c| lower(c) } || nop(node)
+      kind = node.kind.unless? || node.kind.modifier_unless? ? ExprKind::Unless : ExprKind::If
+      add(kind, node.range, syntax: node.kind, children: [cond, then_b, else_b])
+    end
+
+    private def nop(node : Syntax::Node) : ExprId
+      add(ExprKind::Nop, TextRange.new(node.end_byte, node.end_byte))
+    end
+
+    # `[subject or Nop, When..., else Seq?]`.
+    private def lower_case(node : Syntax::Node) : ExprId
+      kids = [node.field(Syntax::Field::Cond).try { |c| lower(c) } || nop(node)]
+      node.named_children.each do |c|
+        case c.kind
+        when .when?, .in?
+          conds = c.fields(Syntax::Field::Cond).select(&.named?).map { |x| lower(x) }
+          body = c.field(Syntax::Field::Body).try { |b| lower(b) } || nop(c)
+          kids << add(ExprKind::When, c.range, syntax: c.kind, children: conds + [body])
+        when .else?
+          kids << lower(c)
+        end
+      end
+      add(ExprKind::Case, node.range, syntax: node.kind, children: kids)
+    end
+
+    # `a rescue b` → Begin[a, Rescue[b]]; `a ensure b` → Begin[a, ensure Seq[b]].
+    private def lower_modifier_begin(node : Syntax::Node) : ExprId
+      kids = node.named_children.reject(&.kind.comment?)
+      body = kids[0]?.try { |c| lower(c) } || nop(node)
+      handler = kids[1]?.try { |c| lower(c) } || nop(node)
+      clause = if node.kind.modifier_rescue?
+                 add(ExprKind::Rescue, node.range, syntax: Syntax::Kind::Rescue, children: [handler])
+               else
+                 add(ExprKind::Seq, node.range, syntax: Syntax::Kind::Ensure, children: [handler])
+               end
+      add(ExprKind::Begin, node.range, syntax: node.kind, children: [body, clause])
     end
 
     private def lower_begin(node : Syntax::Node) : ExprId
       kids = [] of ExprId
-      node.field(Syntax::Field::Body).try { |b| kids << lower(b) }
+      kids << (node.field(Syntax::Field::Body).try { |b| lower(b) } || nop(node))
       node.fields(Syntax::Field::Rescue).each { |r| kids << lower_rescue(r) if r.named? }
       node.field(Syntax::Field::Else).try { |e| kids << lower(e) }
       node.field(Syntax::Field::Ensure).try { |e| kids << lower(e) }
       add(ExprKind::Begin, node.range, children: kids)
     end
 
+    # Rescue clause; the rescued types are in `type_text` (`A | B`).
     private def lower_rescue(node : Syntax::Node) : ExprId
-      if var = node.field(Syntax::Field::Variable)
-        declare(var.text, BindingKind::RescueVar, node.range, var.range, node.field_text(Syntax::Field::Type))
-      end
-      kids = [] of ExprId
-      node.field(Syntax::Field::Body).try { |b| kids << lower(b) }
-      add(ExprKind::Seq, node.range, children: kids)
+      type = node.field_text(Syntax::Field::Type)
+      b = if var = node.field(Syntax::Field::Variable)
+            declare(var.text, BindingKind::RescueVar, node.range, var.range, type)
+          end
+      body = node.field(Syntax::Field::Body).try { |x| lower(x) } || nop(node)
+      add(ExprKind::Rescue, node.range, syntax: node.kind, binding: b, children: [body], type_text: type)
     end
 
     # -- parameters -----------------------------------------------------------

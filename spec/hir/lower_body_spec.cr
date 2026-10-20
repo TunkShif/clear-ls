@@ -168,3 +168,67 @@ describe "LowerBody file bodies" do
     body.scope(y.scope).parent.should be_nil
   end
 end
+
+# Kind tree of an expression: `if(localref,seq,nop)`.
+private def shape(body : HIR::Body, id : HIR::ExprId) : String
+  e = body.expr(id)
+  kids = e.children.map { |c| shape(body, c) }
+  kids.empty? ? e.kind.to_s.downcase : "#{e.kind.to_s.downcase}(#{kids.join(',')})"
+end
+
+describe "HIR::LowerBody control-flow shapes" do
+  it "lowers if/unless/modifiers/elsif/ternary as [cond, then, else]" do
+    body, _ = body_of(<<-CR)
+      def m(x)
+        1 if x
+        2 unless x
+        x ? 1 : 2
+        if x
+        elsif x
+          3
+        end
+      end
+      CR
+    stmts = body.expr(body.root).children.map { |c| shape(body, c) }
+    stmts.should eq [
+      "if(localref,literal,nop)",
+      "unless(localref,literal,nop)",
+      "if(localref,literal,literal)",
+      "if(localref,nop,if(localref,seq(literal),nop))",
+    ]
+  end
+
+  it "lowers case clauses and rescue/ensure" do
+    body, _ = body_of(<<-CR)
+      def m(x)
+        case x
+        when Int32, Nil then 1
+        else 2
+        end
+        case
+        when x then 1
+        end
+        begin
+          1
+        rescue e : IO::Error
+          e
+        else
+          2
+        ensure
+          3
+        end
+        1 rescue 2
+      end
+      CR
+    stmts = body.expr(body.root).children.map { |c| shape(body, c) }
+    stmts.should eq [
+      "case(localref,when(const,const,seq(literal)),seq(seq(literal)))",
+      "case(nop,when(localref,seq(literal)))",
+      "begin(seq(literal),rescue(seq(localref)),seq(seq(literal)),seq(seq(literal)))",
+      "begin(literal,rescue(literal))",
+    ]
+    resc = body.exprs.find!(&.kind.rescue?)
+    resc.type_text.should eq "IO::Error"
+    body.binding(resc.binding.not_nil!).name.should eq "e"
+  end
+end

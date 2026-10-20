@@ -136,6 +136,7 @@ module ClearLS::Types
       e = @body.expr(id)
       ty = case e.kind
            when .literal?      then literal(e)
+           when .nop?          then @table.named!("Nil")
            when .local_ref?    then e.binding.try { |b| @env[b]? } || @table.unknown
            when .self?         then @ctx.self_type
            when .instance_var? then ivar_type(e.name.not_nil!, class_var: false)
