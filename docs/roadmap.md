@@ -89,13 +89,24 @@ shard + workspace) in ~0.65 s on 8 workers; the whole stdlib lowers in
 0.35 s after parsing. Definition and hover answer in < 1 ms once indexed;
 workspace symbol search ~35 ms over ~45k items.
 
-### Phase 2 — body HIR and scopes
+### Phase 2 — body HIR and scopes (done)
 
 - On-demand body lowering with `BindingId`s and two-way source maps.
 - Error nodes lower to `Missing`/`Unknown` placeholders.
 - Cursor lookup per the design doc.
 - Features: local definition, document highlight, local rename and
   references, semantic tokens.
+
+Status: implemented. Scoping rules were checked against the compiler
+(`x = x` sees the outer `x`, `@x` params bind `x`, block-assigned locals stay
+in the block, `if`/`while`/`case` share the enclosing scope). Top-level and
+type-body code get their own file body. Not yet: locals inside macro bodies
+(`{% %}` / `{{ }}`), the `SpanIndex`/`ProgramPoint` parts of the cursor-lookup
+design (deferred to Phase 4), references/rename for non-locals (Phase 8).
+
+Measurements (`--release`): the stdlib's 15k defs lower in 0.33 s
+(21 µs/def). On a 380-line file, full semantic tokens take ~3 ms warm;
+local definition/references/rename answer in < 1 ms.
 
 ### Phase 3 — basic types
 

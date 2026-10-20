@@ -1,11 +1,12 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 1 —
-declaration-level features from the workspace, shards, and stdlib:
+Tree-sitter with an editor-oriented semantic model. Status: Phase 2 —
 
 - document and workspace symbols, folding, selection ranges;
-- goto-definition and hover for types and constants;
+- goto-definition and hover for types, constants, and local variables;
+- references, highlights, and rename for local variables and parameters;
+- semantic tokens (params, locals, ivars, types, declarations);
 - links and goto-definition for `require` paths.
 
 See [docs/roadmap.md](docs/roadmap.md) for the plan and design docs.
@@ -33,6 +34,7 @@ After a grammar bump, run `make syntax-gen` to regenerate
 bin/clear-ls lsp [--log-level debug] [--log-file PATH]   # stdio server
 bin/clear-ls dump-cst [--ranges] FILE                    # print the CST
 bin/clear-ls dump-items FILE                             # print declarations
+bin/clear-ls dump-hir FILE LINE                          # print a def's body HIR
 ```
 
 The server reads `CRYSTAL_PATH`, version, and target from `crystal env` /
