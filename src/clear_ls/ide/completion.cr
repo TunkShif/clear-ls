@@ -1,5 +1,6 @@
 require "./typing"
 require "./analysis"
+require "./signature_help"
 
 module ClearLS::IDE
   enum CompletionKind
@@ -247,6 +248,7 @@ module ClearLS::IDE
     private def identifiers(text : String, start : UInt32, offset : UInt32, prefix : String) : Array(CompletionItem)
       items = [] of CompletionItem
       seen = Set(String).new
+      named_args(start, prefix).each { |i| items << i if seen.add?(i.label) }
       # Locals visible at the cursor (from the patched copy so that half
       # typed code still lowers).
       patched, at = patch(text, start, offset, PLACEHOLDER)
@@ -288,6 +290,28 @@ module ClearLS::IDE
         items << CompletionItem.new(kw, CompletionKind::Keyword, sort_text: "3#{kw}") if kw.starts_with?(prefix) && seen.add?(kw)
       end
       items.first(MAX_ITEMS)
+    end
+
+    # `name:` for parameters of the enclosing call's viable overloads that
+    # are not given yet. Only at the start of an argument.
+    private def named_args(start : UInt32, prefix : String) : Array(CompletionItem)
+      ctx = CallContext.find(@state.text, start) || return [] of CompletionItem
+      arg_text = @state.text.byte_slice(ctx.open_paren + 1, start - ctx.open_paren - 1).split(',').last? || ""
+      return [] of CompletionItem unless arg_text.strip.empty?
+      matches = SignatureHelp.new(@state, @typing).viable_matches(start) || return [] of CompletionItem
+      items = [] of CompletionItem
+      seen = Set(String).new
+      matches.each do |m|
+        m.site.item.signature.try &.params.each do |p|
+          next unless p.kind.positional?
+          name = p.call_name || next
+          next unless name.starts_with?(prefix) && !ctx.given_names.includes?(name)
+          next unless seen.add?(name)
+          items << CompletionItem.new("#{name}:", CompletionKind::Variable, detail: p.to_s,
+            sort_text: "00#{name}", insert_text: "#{name}: ")
+        end
+      end
+      items
     end
 
     KEYWORDS = %w(def end if elsif else unless while until case when in then do begin rescue ensure

@@ -39,6 +39,15 @@ module ClearLS::IDE
       SignatureHelpResult.new(sigs, 0)
     end
 
+    # Viable overloads of the call around *offset*, or the whole family when
+    # none fits; nil outside calls.
+    def viable_matches(offset : UInt32) : Array(Types::MethodMatch)?
+      ctx = CallContext.find(@state.text, offset) || return nil
+      call, inf = analyse(@state.text, offset, ctx) || return nil
+      res = inf.resolutions[call.id]? || inf.resolve_call(call)
+      res.candidates.empty? ? res.family : res.matches
+    end
+
     private def same_site?(a : Types::MethodMatch, b : Types::MethodMatch) : Bool
       a.site.file == b.site.file && a.site.item.range == b.site.item.range
     end
@@ -48,9 +57,17 @@ module ClearLS::IDE
       arg_start = text.byte_slice(ctx.open_paren + 1, offset - ctx.open_paren - 1)
       current = arg_start.split(',').last? || ""
       insert = ""
+      # A partial word (`li|`) would become a positional argument and change
+      # the binding: replace it by the placeholder too.
+      word = current[/[a-z_]\w*\z/]?
+      if word && current.strip == word
+        offset -= word.bytesize
+        current = current.rchop(word)
+      end
       insert += PLACEHOLDER if current.strip.empty? || current.rstrip.ends_with?(':')
       insert += ")" unless closed_on_line?(text, offset)
-      patched = text.byte_slice(0, offset) + insert + text.byte_slice(offset, text.bytesize - offset)
+      tail_from = offset + (word && current.strip.empty? ? word.bytesize : 0)
+      patched = text.byte_slice(0, offset) + insert + text.byte_slice(tail_from, text.bytesize - tail_from)
       tree = Syntax::Parser.new.parse(patched)
       state = FileState.new(@state.id, @state.uri, @state.revision ^ 0x4000_0000_0000_0000_u64, @state.version, tree)
       bodies = Bodies.new(state)

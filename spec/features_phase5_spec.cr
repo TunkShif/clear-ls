@@ -93,3 +93,33 @@ describe "LSP phase 5 signature help" do
     sig_help("def run(io : IO)\n  x = (1 + |)\nend\n").raw.should be_nil
   end
 end
+
+private def complete_in(source : String) : Array(JSON::Any)
+  off = source.index!("|")
+  text = source.sub("|", "")
+  c = FeatureClient.new({"src/calls.cr" => text}, PRELUDE_FILES)
+  uri = c.open("src/calls.cr")
+  before = text[0, off]
+  pos = {line: before.count('\n'), character: off - (before.rindex('\n').try(&.+(1)) || 0)}
+  c.request("textDocument/completion", {textDocument: {uri: uri}, position: pos})["items"].as_a
+ensure
+  c.try(&.cleanup)
+end
+
+describe "LSP phase 5 named-argument completion" do
+  it "offers parameter names of the viable overloads" do
+    items = complete_in("def run(io : IO)\n  io.gets(li|)\nend\n")
+    items.first["label"].should eq "limit:"
+    items.first["insertText"].should eq "limit: "
+    labels = complete_in("def run(io : IO)\n  io.gets(|)\nend\n").map(&.["label"].as_s)
+    labels.should contain("chomp:")
+    labels.should contain("delimiter:")
+    # Already given names are not offered again.
+    labels = complete_in("def run(io : IO)\n  io.gets(chomp: true, |)\nend\n").map(&.["label"].as_s)
+    labels.should_not contain("chomp:")
+    labels.should contain("limit:")
+    # Not inside an argument value.
+    labels = complete_in("def run(io : IO, x : Int32)\n  io.gets(x.ab|)\nend\n").map(&.["label"].as_s)
+    labels.should_not contain("limit:")
+  end
+end
