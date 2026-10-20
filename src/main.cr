@@ -8,6 +8,7 @@ module ClearLS::CLI
     Commands:
       lsp                 Run the language server on stdio (default)
       dump-cst FILE       Print the Tree-sitter CST of FILE
+      dump-items FILE     Print the declarations (item tree) of FILE
       version             Print version information
 
     Options:
@@ -42,6 +43,11 @@ module ClearLS::CLI
     when "dump-cst"
       file = args.shift? || abort "dump-cst: missing FILE"
       dump_cst(File.read(file), show_ranges)
+      0
+    when "dump-items"
+      file = args.shift? || abort "dump-items: missing FILE"
+      tree = Syntax::Parser.new.parse(File.read(file))
+      Items::Dump.dump(Items::Lower.lower(tree), tree.line_index, STDOUT)
       0
     when "version"
       puts "clear-ls #{VERSION}"

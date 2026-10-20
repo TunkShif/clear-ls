@@ -1,5 +1,6 @@
 require "./clear_ls/version"
 require "./clear_ls/base/line_index"
 require "./clear_ls/syntax"
+require "./clear_ls/items"
 require "./clear_ls/vfs"
 require "./clear_ls/lsp/server"
