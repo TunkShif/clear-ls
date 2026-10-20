@@ -325,8 +325,44 @@ module ClearLS::Types
     private def edge_facts(test : Flow::Test, truthy : Bool) : Env
       case test.kind
       in .truthy?    then narrowing(test.cond, truthy)
-      in .case_when? then {} of HIR::BindingId => TyId
+      in .case_when? then case_facts(test.cond, test.subject.not_nil!, truthy)
       end
+    end
+
+    # `case x` / `when T`, `when nil`, `when .nil?`, `when .is_a?(T)`, and
+    # `in T`: refines the subject local. Value conditions (`when 1`) only
+    # narrow on a match, to the value's type.
+    private def case_facts(cond : HIR::ExprId, subject : HIR::ExprId, truthy : Bool) : Env
+      result = {} of HIR::BindingId => TyId
+      s = @body.expr(subject)
+      return result unless s.kind.local_ref?
+      b = s.binding || return result
+      t = @env[b]? || return result
+      c = @body.expr(cond)
+      target = case c.kind
+               when .const?
+                 ct = @table[operand(cond)]
+                 ct.kind.metaclass? ? ct.args[0] : nil
+               when .literal?
+                 lt = operand(cond)
+                 if c.syntax.nil_node?
+                   lt
+                 else
+                   # `when 1`: a match means x == 1 (Int32); no fact otherwise.
+                   result[b] = narrow_to(t, lt) if truthy && !@table.unknown?(lt) && !c.syntax.regex_node?
+                   return result
+                 end
+               when .call?
+                 if c.receiver.nil? && c.syntax.implicit_object_call?
+                   case c.name
+                   when "nil?" then nil_t
+                   when "is_a?" then c.type_text.try { |tt| parse_type(tt) }
+                   end
+                 end
+               end
+      return result if target.nil? || @table.unknown?(target)
+      result[b] = truthy ? narrow_to(t, target) : exclude(t, target)
+      result
     end
 
     # Blocks the main pass never reached (after jumps, behind infeasible
@@ -771,7 +807,7 @@ module ClearLS::Types
     private def enter(id : HIR::ExprId) : Nil
       e = @body.expr(id)
       if e.kind.rescue?
-        e.binding.try { |b| assign(b, e.type_text.try { |t| parse_type(t) } || @table.unknown) }
+        e.binding.try { |b| assign(b, e.type_text.try { |t| parse_type(t) } || @table.named!("Exception")) }
         return
       end
       own = own_scope?(e)

@@ -445,3 +445,82 @@ describe "Types::Infer control flow" do
     type_at(r, "t", "t # dead").should eq "Int32"
   end
 end
+
+describe "Types::Infer case and rescue" do
+  it "narrows the case subject by when/in clauses" do
+    r = infer(<<-CR)
+      def m(x : Int32 | String | Nil)
+        case x
+        when String
+          x # s
+        when nil
+          x # n
+        else
+          x # e
+        end
+        case x
+        when .nil? then x # dn
+        when Int32, String then x # many
+        end
+        case x
+        in Int32 then 1
+        in String then x # in
+        in Nil then 2
+        end
+        case x
+        when 1 then x # lit
+        end
+      end
+      CR
+    type_at(r, "x", "x # s").should eq "String"
+    type_at(r, "x", "x # n").should eq "Nil"
+    type_at(r, "x", "x # e").should eq "Int32"
+    type_at(r, "x", "x # dn").should eq "Nil"
+    type_at(r, "x", "x # many").should eq "Int32 | String"
+    type_at(r, "x", "x # in").should eq "String"
+    type_at(r, "x", "x # lit").should eq "Int32"
+  end
+
+  it "joins case results and types case without else as nilable" do
+    r = infer(<<-CR)
+      def m(x : Int32 | String)
+        a = case x
+            when Int32 then 1
+            when String then "s"
+            end
+        b = case x
+            in Int32 then 1
+            in String then "s"
+            end
+      end
+      CR
+    type_of_local(r, "a").should eq "Int32 | String | Nil"
+    type_of_local(r, "b").should eq "Int32 | String"
+  end
+
+  it "types rescue variables and rescue/ensure paths" do
+    r = infer(<<-CR)
+      def m(c : Bool)
+        x = 1
+        begin
+          x = "s"
+          raise "no" if c
+          y = 1
+        rescue e : IO::Error
+          e # io
+          x # r
+        rescue any
+          any # any
+        ensure
+          x # ens
+        end
+        v = (1 rescue "s")
+      end
+      CR
+    type_at(r, "e", "e # io").should eq "IO::Error"
+    type_at(r, "any", "any # any").should eq "Exception"
+    type_at(r, "x", "x # r").should eq "Int32 | String"
+    type_at(r, "x", "x # ens").should eq "Int32 | String"
+    type_of_local(r, "v").should eq "Int32 | String"
+  end
+end
