@@ -108,12 +108,28 @@ Measurements (`--release`): the stdlib's 15k defs lower in 0.33 s
 (21 µs/def). On a 380-line file, full semantic tokens take ~3 ms warm;
 local definition/references/rename answer in < 1 ms.
 
-### Phase 3 — basic types
+### Phase 3 — basic types (done)
 
 - `TypeId`, `TypeSet` with certainty and provenance.
 - Literals, annotations, `.new`, assignments, declared returns, ivars,
   accessor types.
 - Features: typed hover, receiver/path/ivar completion, type inlay hints.
+
+Status: implemented, plus generic substitution (receiver args, `include
+Enumerable(T)` propagation, `forall` from args and block returns) and
+shallow yield summaries for blocks without restrictions. These were planned
+for Phase 6 and turned out to be needed for useful completion on stdlib
+collections. Branches are joined structurally with nil/`is_a?` narrowing;
+no CFG yet. Method hover/definition follow inferred receivers. Completion
+analyses a copy of the buffer with a placeholder identifier at the cursor.
+
+Coverage (locals and block args with a known type): ~64% in this repo,
+~35% in the stdlib (which uses many untyped params). Inference averages
+~0.35 ms per def including summaries; completion/hover answer in 1–3 ms.
+
+Not yet: method return inference for unannotated defs (Phase 6),
+untyped-param call-site specialisation (Phase 6), overload ranking by
+argument types (Phase 5), keyword-argument completion (Phase 5).
 
 ### Phase 4 — control-flow analysis
 

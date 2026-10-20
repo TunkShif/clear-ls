@@ -1,10 +1,14 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 2 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 3 —
 
+- completion: members of inferred receivers, `Foo::` paths, constants,
+  `@ivars`, locals, methods, keywords;
+- hover with inferred types for locals and resolved method signatures;
+- inlay type hints for locals and block arguments;
 - document and workspace symbols, folding, selection ranges;
-- goto-definition and hover for types, constants, and local variables;
+- goto-definition for types, constants, locals, and method calls;
 - references, highlights, and rename for local variables and parameters;
 - semantic tokens (params, locals, ivars, types, declarations);
 - links and goto-definition for `require` paths.
