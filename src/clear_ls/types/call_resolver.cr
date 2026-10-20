@@ -52,6 +52,8 @@ module ClearLS::Types
     property compat = Compatibility::Incompatible
     # Parsed restrictions by parameter index (nil: unrestricted).
     getter restrictions = {} of Int32 => TyId?
+    # Argument types of the call (positional, then named).
+    property arg_types = [] of TyId
 
     def initialize(@match, @self_type, @arg_params, @named_params, @structural)
     end
@@ -135,6 +137,12 @@ module ClearLS::Types
 
     # Binds arguments to parameters, or nil when the call cannot fit.
     def bind(m : MethodMatch, self_t : TyId, site : CallSite) : CallCandidate?
+      c = bind_params(m, self_t, site) || return nil
+      c.arg_types = site.args.map(&.type) + site.named.map(&.[1].type)
+      c
+    end
+
+    private def bind_params(m : MethodMatch, self_t : TyId, site : CallSite) : CallCandidate?
       sig = m.site.item.signature
       unless sig
         n = site.args.size

@@ -206,6 +206,14 @@ module ClearLS::Types
       # Built in, not declared in the stdlib.
       return @table.no_return if path.in?("NoReturn", "::NoReturn") && args.empty?
       def_id = @table.def_map.lookup_path(path, @ns) || return @table.unknown
+      info = @table.def_map[def_id]
+      if info.kind.alias? && args.empty? && (target = info.sites.first?.try(&.item.detail))
+        # `alias Stdio = Redirect | IO`: the aliased type (recursive aliases
+        # stay nominal).
+        return @table.alias_target(def_id) do
+          TypeExprParser.parse(target, @table, info.namespace || Semantics::DefMap::PROGRAM)
+        end
+      end
       @table.named(def_id, args)
     end
 

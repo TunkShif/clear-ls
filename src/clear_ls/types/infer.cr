@@ -886,6 +886,9 @@ module ClearLS::Types
       end
       owner = cfg.closure_owner[id]?.try { |o| @body.expr(o) }
       param_types = owner && owner.kind.call? ? closure_param_types(owner) : [] of TyId
+      if e.syntax.implicit_object_call?
+        @implicit_args[id] = param_types[0]? || @table.unknown
+      end
       args = block_args(e)
       if param_types.size == 1 && args.size > 1 && @table[param_types[0]].kind.tuple?
         param_types = @table[param_types[0]].args
@@ -917,9 +920,7 @@ module ClearLS::Types
       recv_t = call.receiver.try { |r| operand(r) }
       return [] of TyId if name.in?("as", "as?")
       return [@table.without_nil(recv_t)] if name == "try" && recv_t
-      receiver_type = recv_t || @ctx.self_type
-      matches = methods_for(receiver_type, name, call.children.size, true)
-      block_types_for(matches, receiver_type)
+      block_types_for(resolve_call(call).candidates)
     end
 
     # -- calls --------------------------------------------------------------------
@@ -952,58 +953,104 @@ module ClearLS::Types
         return @table.unknown?(inner) ? inner : @table.nilable(inner)
       end
 
+      recv_t ||= implicit_receiver(e)
       receiver_type = recv_t || @ctx.self_type
-      matches = methods_for(receiver_type, name, args.size, !e.block.nil?)
-      matches = top_level_methods(name, args.size, !e.block.nil?) if matches.empty? && recv_t.nil?
-
-      if name == "new" && matches.empty?
+      res = resolve_call(e)
+      if name == "new" && res.candidates.empty?
         # `Foo.new` without an explicit `self.new`: instance of Foo.
         rt = @table[receiver_type]
         return rt.args[0] if rt.kind.metaclass?
       end
+      @resolutions[e.id] = res
+      if res.candidates.empty? && (prim = primitive_op(receiver_type, name, args))
+        return prim
+      end
+      return_type_of(res, block_ret)
+    end
 
-      ret = return_type_for(matches, receiver_type, args, block_ret)
-      ret
+    INT_TYPES   = %w(Int8 Int16 Int32 Int64 Int128 UInt8 UInt16 UInt32 UInt64 UInt128)
+    FLOAT_TYPES = %w(Float32 Float64)
+    ARITH       = %w(+ - * &+ &- &*)
+    INT_ONLY    = %w(| & ^ unsafe_shl unsafe_shr unsafe_div unsafe_mod)
+    COMPARE     = %w(== != < <= > >=)
+    CONVERSIONS = {"to_i" => "Int32", "to_u" => "UInt32", "to_f" => "Float64"}
+
+    # Number primitives the stdlib declares in `{% for %}` loops
+    # (primitives.cr), which the item tree cannot see: binary operators
+    # between number types and `to_*` conversions. Unknown argument types
+    # stay unknown (Int32 - Float64 is Float64).
+    private def primitive_op(recv : TyId, name : String, args : Array(TyId)) : TyId?
+      rn = number_name(recv) || return nil
+      if args.empty?
+        target = CONVERSIONS[name.rchop('!')]? || begin
+          suffix = name.rchop('!').lchop?("to_") || return nil
+          case suffix
+          when /\Ai(\d+)\z/ then "Int#{$1}"
+          when /\Au(\d+)\z/ then "UInt#{$1}"
+          when /\Af(\d+)\z/ then "Float#{$1}"
+          end
+        end
+        return target.try { |t| (INT_TYPES + FLOAT_TYPES).includes?(t) ? @table.named?(t) : nil }
+      end
+      return nil unless args.size == 1
+      return @table.named!("Bool") if COMPARE.includes?(name)
+      r_int = INT_TYPES.includes?(rn)
+      an = number_name(args[0])
+      if an.nil?
+        return nil unless @table.unknown?(args[0])
+        # Unknown argument: integer `&+`-style ops and bit ops always return
+        # self; `+` does too unless the argument is a float, which is rare
+        # enough in integer code that the compiler-like answer is `self`.
+        # Floats return self for every arithmetic op.
+        return recv if (r_int && (ARITH.includes?(name) || INT_ONLY.includes?(name))) || (!r_int && ARITH.includes?(name) && !name.starts_with?('&'))
+        return nil
+      end
+      a_int = INT_TYPES.includes?(an)
+      if ARITH.includes?(name)
+        return recv if r_int && a_int
+        return recv if !r_int && !name.starts_with?('&')
+        return args[0] if r_int && !a_int && !name.starts_with?('&')
+      end
+      return recv if INT_ONLY.includes?(name) && r_int && a_int
+      return args[0] if name == "/" && !r_int && !a_int && rn == an
+      nil
+    end
+
+    private def number_name(t : TyId) : String?
+      ty = @table[t]
+      return nil unless ty.kind.named?
+      n = map[ty.def_id.not_nil!].full_name
+      INT_TYPES.includes?(n) || FLOAT_TYPES.includes?(n) ? n : nil
+    end
+
+    # Block argument types of `&.foo` blocks, set when entering them.
+    @implicit_args = {} of HIR::ExprId => TyId
+
+    # `xs.map(&.size)`: the receiver of `.size` is the block's argument.
+    private def implicit_receiver(call : HIR::Expr) : TyId?
+      return nil unless call.syntax.implicit_object_call? && call.receiver.nil?
+      blk = @parent[call.id]? || return nil
+      return nil unless @body.expr(blk).syntax.implicit_object_call?
+      @implicit_args[blk]? || @table.unknown
+    end
+
+    # Resolutions of calls, from the last evaluation of each call.
+    getter resolutions = {} of HIR::ExprId => CallResolution
+
+    # Union of the viable candidates' declared returns; unknown when any of
+    # them has none.
+    private def return_type_of(res : CallResolution, block_ret : TyId?) : TyId
+      return @table.unknown if res.candidates.empty?
+      results = res.candidates.map do |c|
+        declared_return(c, block_ret) || return @table.unknown
+      end
+      union_or_unknown(results.uniq)
     end
 
     private def block_args(blk : HIR::Expr) : Array(HIR::BindingId)
       # The block expression lives in its own scope (see LowerBody#lower_block).
       return [] of HIR::BindingId unless own_scope?(blk)
       @body.bindings.select { |b| b.scope == blk.scope && b.kind.block_arg? }.map(&.id)
-    end
-
-    # Methods named *name* on *receiver_type*: instance methods for instance
-    # types, `self.` methods (and `new`/`initialize`) for metaclasses.
-    def methods_for(receiver_type : TyId, name : String, nargs : Int32, with_block : Bool) : Array(MethodMatch)
-      result = [] of MethodMatch
-      @table.members(receiver_type).each do |member|
-        t = @table[member]
-        case t.kind
-        when .named?
-          def_id = t.def_id.not_nil!
-          bindings = generic_bindings(def_id, t.args)
-          map.lookup_member(def_id, name).each do |site|
-            next unless site.item.kind.def? || site.item.kind.macro?
-            result << MethodMatch.new(site, owner_of(def_id, site), bindings)
-          end
-        when .metaclass?
-          inst = @table[t.args[0]]
-          next unless inst.kind.named?
-          def_id = inst.def_id.not_nil!
-          bindings = generic_bindings(def_id, inst.args)
-          sites = map.lookup_member(def_id, "self.#{name}")
-          # Methods on the metaclass include module-level `extend self` defs.
-          map.extends(def_id).each do |ext|
-            sites += map.lookup_member(ext, name)
-          end
-          sites.each do |site|
-            next unless site.item.kind.def? || site.item.kind.macro?
-            result << MethodMatch.new(site, owner_of(def_id, site), bindings)
-          end
-        end
-      end
-      fitting = result.select { |m| arity_ok?(m.site.item, nargs, with_block) }
-      fitting.empty? ? result : fitting
     end
 
     @resolver : CallResolver? = nil
@@ -1013,10 +1060,10 @@ module ClearLS::Types
     end
 
     # Overload resolution of a call expression with the argument types
-    # inferred for it.
+    # inferred for it (operand types from the call's last evaluation).
     def resolve_call(call : HIR::Expr) : CallResolution
       name = call.name || return CallResolution.unresolved
-      recv_t = call.receiver.try { |r| type_of(r) }
+      recv_t = call.receiver.try { |r| operand(r) } || implicit_receiver(call)
       receiver = recv_t || @ctx.self_type
       groups = method_groups(receiver, name)
       if groups.empty? && recv_t.nil?
@@ -1036,18 +1083,19 @@ module ClearLS::Types
         when .splat?        then args << CallArg.new(@table.unknown, splat: true)
         when .double_splat? then dsplat = true
         else
-          args << CallArg.new(type_of(c), literal: a.kind.literal? ? a.syntax : nil)
+          args << CallArg.new(operand(c), literal: a.kind.literal? ? a.syntax : nil)
         end
       end
       named = call.named_args.map do |(n, v)|
         a = @body.expr(v)
-        {n, CallArg.new(type_of(v), literal: a.kind.literal? ? a.syntax : nil)}
+        {n, CallArg.new(operand(v), literal: a.kind.literal? ? a.syntax : nil)}
       end
       CallSite.new(args, named, dsplat, !call.block.nil?)
     end
 
     # Methods named *name* per receiver member type: instance methods for
-    # instance types, `self.` methods for metaclasses.
+    # instance types, `self.` methods (and `extend`ed modules) for
+    # metaclasses. Unknown receivers have no groups.
     def method_groups(receiver_type : TyId, name : String) : Array({TyId, Array(MethodMatch)})
       groups = [] of {TyId, Array(MethodMatch)}
       @table.members(receiver_type).each do |member|
@@ -1078,20 +1126,10 @@ module ClearLS::Types
       groups
     end
 
-    private def top_level_sites(name : String) : Array(MethodMatch)
+    def top_level_sites(name : String) : Array(MethodMatch)
       sites = map.program.members[name]? || return [] of MethodMatch
       sites.select { |s| s.item.kind.def? || s.item.kind.macro? }
         .map { |s| MethodMatch.new(s, Semantics::DefMap::PROGRAM, {} of String => TyId) }
-    end
-
-    # Receiverless calls not found on `self`: top-level defs (`raise`,
-    # `puts`).
-    def top_level_methods(name : String, nargs : Int32, with_block : Bool) : Array(MethodMatch)
-      sites = map.program.members[name]? || return [] of MethodMatch
-      all = sites.select { |s| s.item.kind.def? || s.item.kind.macro? }
-        .map { |s| MethodMatch.new(s, Semantics::DefMap::PROGRAM, {} of String => TyId) }
-      fitting = all.select { |m| arity_ok?(m.site.item, nargs, with_block) }
-      fitting.empty? ? all : fitting
     end
 
     # The ancestor that declares *site* (for parsing its types).
@@ -1124,41 +1162,21 @@ module ClearLS::Types
       bindings
     end
 
-    # Positional arity check. Blocks and named args are not checked yet
-    # (Phase 5 does full argument binding).
-    private def arity_ok?(item : Items::Item, nargs : Int32, with_block : Bool) : Bool
-      sig = item.signature || return true
-      # A def whose body yields needs a block; `&` / `&block` marks it. The
-      # common `first(&)` vs `first : T` overload pairs need this to pick
-      # the right one.
-      block = sig.params.find(&.kind.block?)
-      return false if block && !with_block && block.name.nil?
-      positional = sig.params.select(&.kind.positional?)
-      splat = sig.params.any? { |p| p.kind.splat? && p.name }
-      required = positional.count { |p| p.default.nil? && !named_only?(sig, p) }
-      max = splat ? Int32::MAX : positional.count { |p| !named_only?(sig, p) }
-      nargs >= required && nargs <= max
-    end
-
-    private def named_only?(sig : Items::Signature, p : Items::Param) : Bool
-      idx = sig.params.index(p) || return false
-      sig.params[0...idx].any?(&.kind.splat?)
-    end
-
     # Block arg types from `& : T, U -> R` / `&block : T -> R` restrictions,
     # else from the `yield`s in the method body (shallow summary).
-    private def block_types_for(matches : Array(MethodMatch), receiver_type : TyId) : Array(TyId)
-      matches.each do |m|
+    private def block_types_for(cands : Array(CallCandidate)) : Array(TyId)
+      cands.each do |c|
+        m = c.match
         sig = m.site.item.signature || next
         bp = sig.params.find(&.kind.block?)
         r = bp.try(&.restriction)
         unless r
-          ts = yield_summary(m, receiver_type)
+          ts = yield_summary(m, c.self_type)
           return ts unless ts.empty?
           next
         end
         owner = map[m.owner]
-        t = TypeExprParser.parse(r, @table, m.owner, owner.type_params + sig.free_vars, self_for(receiver_type))
+        t = TypeExprParser.parse(r, @table, m.owner, owner.type_params + sig.free_vars, c.self_type)
         pt = @table[t]
         next unless pt.kind.proc?
         return pt.args[0...-1].map { |a| Subst.apply(@table, a, m.bindings) }
@@ -1166,22 +1184,13 @@ module ClearLS::Types
       [] of TyId
     end
 
-    private def return_type_for(matches : Array(MethodMatch), receiver_type : TyId, args : Array(TyId), block_ret : TyId?) : TyId
-      results = [] of TyId
-      matches.each do |m|
-        t = declared_return(m, receiver_type, args, block_ret) || next
-        results << t
-      end
-      return @table.unknown if results.empty? || results.size != matches.size && matches.size > 1
-      union_or_unknown(results.uniq)
-    end
-
     # Return type of one candidate, with generic and `forall` substitution.
-    private def declared_return(m : MethodMatch, receiver_type : TyId, args : Array(TyId), block_ret : TyId?) : TyId?
+    private def declared_return(c : CallCandidate, block_ret : TyId?) : TyId?
+      m = c.match
       item = m.site.item
       sig = item.signature || return nil
       owner = map[m.owner]
-      self_t = self_for(receiver_type)
+      self_t = c.self_type
       text = sig.return_type
       if text.nil?
         # `def initialize` via `self.new` and accessor macros without types.
@@ -1192,11 +1201,15 @@ module ClearLS::Types
       ret = TypeExprParser.parse(text, @table, m.owner, tparams, self_t)
       bindings = m.bindings.dup
       unless sig.free_vars.empty?
-        # Bind free vars from argument restrictions and the block.
-        positional = sig.params.select(&.kind.positional?)
-        positional.each_with_index do |p, i|
-          next unless (r = p.restriction) && (a = args[i]?)
-          Subst.unify(@table, TypeExprParser.parse(r, @table, m.owner, tparams, self_t), a, bindings)
+        # Bind free vars from the restrictions of the parameters the
+        # arguments bound to, and from the block.
+        types = c.arg_types
+        (c.arg_params + c.named_params).each_with_index do |pi, i|
+          next unless pi && (r = sig.params[pi].restriction) && (a = types[i]?)
+          next if sig.params[pi].kind.double_splat?
+          pattern = TypeExprParser.parse(r, @table, m.owner, tparams, self_t)
+          # `*args : T` binds T per element.
+          Subst.unify(@table, pattern, a, bindings)
         end
         if (bp = sig.params.find(&.kind.block?)) && (r = bp.restriction) && block_ret
           pt = TypeExprParser.parse(r, @table, m.owner, tparams, self_t)
@@ -1247,8 +1260,8 @@ module ClearLS::Types
     # Return type of `recv.name(args)` (used by op-assign).
     private def call_return(recv : TyId, name : String, args : Array(TyId), block_ret : TyId?) : TyId?
       return nil if @table.unknown?(recv)
-      matches = methods_for(recv, name, args.size, false)
-      t = return_type_for(matches, recv, args, block_ret)
+      site = CallSite.new(args.map { |a| CallArg.new(a) }, [] of {String, CallArg}, false, false)
+      t = return_type_of(resolver.resolve(method_groups(recv, name), site), block_ret)
       @table.unknown?(t) ? nil : t
     end
 

@@ -72,6 +72,18 @@ module ClearLS::Types
       named?(name, args) || @unknown
     end
 
+    @aliases = {} of Semantics::TypeId => TyId
+
+    # Expansion of an alias, computed once; while computing (recursive
+    # aliases) the alias stays a nominal type.
+    def alias_target(id : Semantics::TypeId, & : -> TyId) : TyId
+      if t = @aliases[id]?
+        return t
+      end
+      @aliases[id] = named(id)
+      @aliases[id] = yield
+    end
+
     def metaclass(instance : TyId) : TyId
       intern(Ty.new(TyKind::Metaclass, args: [instance]))
     end

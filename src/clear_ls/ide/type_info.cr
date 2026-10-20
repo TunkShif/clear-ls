@@ -46,20 +46,12 @@ module ClearLS::IDE
       end
       call || return nil
       _, inf = @typing.infer_at(@state, @bodies, offset) || return nil
-      recv_t = call.receiver.try { |r| inf.type_of(r) }
-      receiver = recv_t || @typing.self_type(@typing.def_map.namespace_at(@state.id, offset))
-      name = call.name || return nil
-      return nil if table.unknown?(receiver) && call.receiver
-      matches = table.unknown?(receiver) ? top_level(name) : inf.methods_for(receiver, name, call.children.size, !call.block.nil?)
-      matches = top_level(name) if matches.empty? && call.receiver.nil?
+      call.name || return nil
+      res = inf.resolutions[call.id]? || inf.resolve_call(call)
+      # Viable overloads; the whole family when none fits (unfinished or
+      # wrong calls), so navigation still works.
+      matches = res.candidates.empty? ? res.family : res.matches
       {call, matches, inf.types[call.id]?}
-    end
-
-    private def top_level(name : String) : Array(Types::MethodMatch)
-      sites = @typing.def_map.program.members[name]? || return [] of Types::MethodMatch
-      sites.select { |s| s.item.kind.def? || s.item.kind.macro? }.map do |s|
-        Types::MethodMatch.new(s, Semantics::DefMap::PROGRAM, {} of String => Types::TyId)
-      end
     end
 
     def method_hover(offset : UInt32) : {String, TextRange}?
