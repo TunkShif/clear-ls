@@ -1,6 +1,8 @@
 require "./server"
 require "../ide/analysis"
 require "../ide/semantic_tokens"
+require "../ide/completion"
+require "../ide/type_info"
 
 module ClearLS::LSP
   # Phase 1 language features: symbols, folding, selection, and
@@ -40,6 +42,8 @@ module ClearLS::LSP
         documentHighlightProvider: true,
         referencesProvider:      true,
         renameProvider:          {prepareProvider: true},
+        completionProvider:      {triggerCharacters: [".", ":", "@"], resolveProvider: false},
+        inlayHintProvider:       true,
         semanticTokensProvider:  {
           legend: {
             tokenTypes:     IDE::TokenType.names.map(&.camelcase(lower: true)),
@@ -64,6 +68,8 @@ module ClearLS::LSP
       when "textDocument/references"     then references(params)
       when "textDocument/prepareRename"  then prepare_rename(params)
       when "textDocument/rename"         then rename(params)
+      when "textDocument/completion"     then completion(params)
+      when "textDocument/inlayHint"      then inlay_hint(params)
       when "textDocument/semanticTokens/full"  then semantic_tokens(params, nil)
       when "textDocument/semanticTokens/range" then semantic_tokens(params, params["range"])
       else
@@ -130,16 +136,20 @@ module ClearLS::LSP
       if r = locals(state).definition(off)
         return [{uri: state.uri, range: range_json(state, r)}]
       end
+      sites = type_info(state).method_definitions(off)
+      unless sites.empty?
+        return sites.compact_map { |s| location_json(IDE::Location.new(s.file, s.item.name_range)) }
+      end
       a.definition(off).compact_map { |loc| location_json(loc) }
     end
 
     private def hover(params : JSON::Any)
       state = document(params)
       off = offset(state, params["position"])
-      if hit = locals(state).binding_at(off)
-        _, b, r = hit
-        md = "```crystal\n#{b.name}#{b.restriction ? " : #{b.restriction}" : ""}\n```\n\n#{LOCAL_KINDS[b.kind]}"
-        return {contents: {kind: "markdown", value: md}, range: range_json(state, r.range)}
+      ti = type_info(state)
+      if hit = ti.local_hover(off) || ti.method_hover(off)
+        md, r = hit
+        return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
       end
       info = analysis(state).hover(off) || return nil
       {contents: {kind: "markdown", value: info.markdown}, range: range_json(state, info.range)}
@@ -209,7 +219,57 @@ module ClearLS::LSP
       {data: IDE::SemanticTokens.encode(tokens, state.line_index, @encoding)}
     end
 
+    COMPLETION_KINDS = {
+      IDE::CompletionKind::Method => 2, IDE::CompletionKind::Function => 3, IDE::CompletionKind::Variable => 6,
+      IDE::CompletionKind::Field => 5, IDE::CompletionKind::Class => 7, IDE::CompletionKind::Struct => 22,
+      IDE::CompletionKind::Module => 9, IDE::CompletionKind::Enum => 13, IDE::CompletionKind::EnumMember => 20,
+      IDE::CompletionKind::Constant => 21, IDE::CompletionKind::Keyword => 14, IDE::CompletionKind::Snippet => 15,
+      IDE::CompletionKind::Macro => 3,
+    }
+
+    private def completion(params : JSON::Any)
+      state = document(params)
+      off = offset(state, params["position"])
+      items = IDE::Completion.new(state, index, typing).complete(off)
+      {
+        isIncomplete: items.size >= IDE::Completion::MAX_ITEMS,
+        items:        items.map do |i|
+          doc = i.documentation.try { |d| {kind: "markdown", value: d} }
+          {label: i.label, kind: COMPLETION_KINDS[i.kind], detail: i.detail, documentation: doc,
+           sortText: i.sort_text, insertText: i.insert_text}
+        end,
+      }
+    end
+
+    private def inlay_hint(params : JSON::Any)
+      state = document(params)
+      r = params["range"]
+      range = TextRange.new(offset(state, r["start"]), offset(state, r["end"]))
+      type_info(state).inlay_hints(range).map do |h|
+        p = state.line_index.position(h.offset, @encoding)
+        {position: {line: p.line, character: p.column}, label: h.label, kind: 1, paddingLeft: false}
+      end
+    end
+
     # -- helpers --------------------------------------------------------------
+
+    @typing : IDE::Typing? = nil
+    @typing_map : Semantics::DefMap? = nil
+
+    # Typing state follows the DefMap: a new map (declarations changed)
+    # means a fresh type table and caches.
+    private def typing : IDE::Typing
+      map = index.def_map
+      if (t = @typing) && @typing_map.same?(map)
+        return t
+      end
+      @typing_map = map
+      @typing = IDE::Typing.new(map, @vfs)
+    end
+
+    private def type_info(state : FileState) : IDE::TypeInfo
+      IDE::TypeInfo.new(state, bodies(state), typing)
+    end
 
     @body_cache = IDE::BodyCache.new
 

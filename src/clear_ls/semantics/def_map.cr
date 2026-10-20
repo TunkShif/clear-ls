@@ -239,12 +239,29 @@ module ClearLS::Semantics
       implicit_superclass(info)
     end
 
+    # Superclasses the compiler wires up itself (program.cr) rather than in
+    # source: Object > Reference / Value > Struct, Number, Enum, ...
+    BUILTIN_SUPERCLASSES = {
+      "Reference" => "Object", "Value" => "Object", "Struct" => "Value", "Number" => "Value",
+      "Int" => "Number", "Float" => "Number", "Nil" => "Value", "Bool" => "Value", "Char" => "Value",
+      "Symbol" => "Value", "Pointer" => "Struct", "Tuple" => "Struct", "NamedTuple" => "Struct",
+      "StaticArray" => "Struct", "Proc" => "Struct", "Enum" => "Value", "Union" => "Value",
+      "Int8" => "Int", "Int16" => "Int", "Int32" => "Int", "Int64" => "Int", "Int128" => "Int",
+      "UInt8" => "Int", "UInt16" => "Int", "UInt32" => "Int", "UInt64" => "Int", "UInt128" => "Int",
+      "Float32" => "Float", "Float64" => "Float", "String" => "Reference",
+    }
+
     private def implicit_superclass(info : TypeInfo) : TypeId?
-      name = case info.kind
-             when .class?  then info.full_name == "Reference" || info.full_name == "Object" ? nil : "Reference"
-             when .struct? then info.full_name == "Struct" || info.full_name == "Value" ? nil : "Struct"
-             when .enum?   then "Enum"
-             else               nil
+      return nil if info.full_name == "Object"
+      name = if builtin = BUILTIN_SUPERCLASSES[info.full_name]?
+               builtin
+             else
+               case info.kind
+               when .class? then "Reference"
+               when .struct? then "Struct"
+               when .enum?  then "Enum"
+               else              nil
+               end
              end
       return nil unless name && info.full_name != name
       found = program.types[name]?

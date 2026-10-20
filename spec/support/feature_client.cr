@@ -10,7 +10,9 @@ class FeatureClient
   @next_id = 0
   getter root : String
 
-  def initialize(files : Hash(String, String))
+  # *stdlib*: files placed in a fake stdlib dir with a prelude.cr that
+  # requires them all.
+  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil)
     @root = File.tempname("clear-ls-feat")
     files.each do |path, text|
       full = File.join(@root, path)
@@ -18,7 +20,15 @@ class FeatureClient
       File.write(full, text)
     end
     @server = Server.new(Transport.new(IO::Memory.new, @out))
-    @server.project_factory = ->(root : String) { Workspace::Project.new(root, ["lib"], nil, nil, "x86_64-unknown-linux-gnu") }
+    std_dir = nil
+    if stdlib
+      std_dir = File.join(@root, ".stdlib")
+      Dir.mkdir_p(std_dir)
+      stdlib.each { |path, text| File.write(File.join(std_dir, path), text) }
+      File.write(File.join(std_dir, "prelude.cr"), stdlib.keys.map { |k| %(require "./#{k.rchop(".cr")}") }.join('\n'))
+    end
+    paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
+    @server.project_factory = ->(root : String) { Workspace::Project.new(root, paths, std_dir, nil, "x86_64-unknown-linux-gnu") }
     @server.index_workers = 1
     request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}}})
     notify("initialized", {} of String => String)
@@ -70,8 +80,8 @@ class FeatureClient
   end
 end
 
-def with_client(files, &)
-  c = FeatureClient.new(files)
+def with_client(files, stdlib = nil, &)
+  c = FeatureClient.new(files, stdlib)
   yield c
 ensure
   c.try(&.cleanup)
