@@ -145,3 +145,41 @@ describe "hover coverage gaps" do
     end
   end
 end
+
+RETURN_APP = {
+  "src/r.cr" => <<-CR,
+    class Item
+      getter name : String
+      def initialize(@name)
+      end
+      def label
+        name + "!"
+      end
+      def count(xs : Array(String))
+        xs.size
+      end
+      def raw(x)
+        x
+      end
+      def done : Nil
+      end
+    end
+    CR
+}
+
+describe "inferred return types" do
+  it "shows inferred returns in hover and inlay hints" do
+    with_client(RETURN_APP, PRELUDE_FILES) do |c|
+      u = c.open("src/r.cr")
+      h = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/r.cr", "label")})
+      h["contents"]["value"].as_s.should contain("→ `String` (inferred)")
+      hints = c.request("textDocument/inlayHint", {textDocument: {uri: u}, range: {start: {line: 0, character: 0}, end: {line: 20, character: 0}}})
+      got = hints.as_a.map { |x| {x["position"]["line"].as_i, x["label"].as_s} }
+      got.should contain({4, " : String"})
+      got.should contain({7, " : Int32"})
+      got.map(&.[0]).should_not contain(10) # raw(x): unknown
+      got.map(&.[0]).should_not contain(13) # declared
+      got.map(&.[0]).should_not contain(2)  # initialize
+    end
+  end
+end

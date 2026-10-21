@@ -251,6 +251,9 @@ the current instance"
         io << owner << (item.signature.try(&.receiver) ? "." : "#") unless owner.empty?
         io << item.name << item.signature << "
 ```"
+        if item.kind.def? && item.signature.try(&.return_type).nil? && (rt = inferred_return(def_node))
+          io << "\n\n→ `" << rt << "` (inferred)"
+        end
         if node == recv_node && !owner.empty?
           io << "
 
@@ -309,9 +312,20 @@ class method: `self` is `" << owner << ".class`"
 
     # `: Type` after locals at their declaration, when inferred and not
     # obvious from a literal or `.new` on the right-hand side.
+    # Return type of an unannotated def's body, inferred with its declared
+    # param types (unrestricted params unknown); nil when unknown.
+    def inferred_return(def_node : Syntax::Node) : String?
+      body, inf = @typing.infer_at(@state, @bodies, def_node.start_byte + 1) || return nil
+      return nil unless body.range == def_node.range
+      t = inf.return_type
+      return nil if table.unknown?(t)
+      table.to_s(t)
+    end
+
     def inlay_hints(range : TextRange) : Array(InlayHint)
       hints = [] of InlayHint
       seen = Set(UInt32).new
+      return_hints(range, hints)
       each_body_in(range) do |body, inf|
         body.bindings.each do |b|
           next unless b.kind.local? || b.kind.block_arg?
@@ -330,6 +344,24 @@ class method: `self` is `" << owner << ".class`"
         end
       end
       hints.sort_by!(&.offset)
+    end
+
+    # `def foo(x)` → ` : Int32` after the param list, for defs without a
+    # return type whose body's type is known.
+    private def return_hints(range : TextRange, hints : Array(InlayHint)) : Nil
+      @state.tree.root.walk do |n|
+        next false if n.end_byte < range.start || n.start_byte > range.end
+        if n.kind.method_def?
+          if n.field(Syntax::Field::Type).nil? && (name = n.field(Syntax::Field::Name)) && name.text != "initialize"
+            anchor = n.field(Syntax::Field::Params).try(&.end_byte) || name.end_byte
+            if range.touches?(anchor) && (rt = inferred_return(n))
+              hints << InlayHint.new(anchor, " : #{rt}", :type)
+            end
+          end
+          next false
+        end
+        true
+      end
     end
 
     private def in_type_body?(offset : UInt32) : Bool
