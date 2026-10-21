@@ -11,6 +11,7 @@ module ClearLS::LSP
     ServerNotInitialized = -32002
     RequestCancelled     = -32800
     ContentModified      = -32801
+    RequestFailed        = -32803
   end
 
   class ResponseError < Exception

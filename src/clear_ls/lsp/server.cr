@@ -8,6 +8,16 @@ require "../workspace/index"
 module ClearLS::LSP
   Log = ::Log.for("clear-ls.lsp")
 
+  # A request answered later from another fiber (it waits on a
+  # subprocess). The handler captures what it needs from server state
+  # before returning; the block must not read mutable server state.
+  class Deferred
+    getter block : Proc(JSON::Any)
+
+    def initialize(&@block : -> JSON::Any)
+    end
+  end
+
   # Language server main loop.
   #
   # Messages are handled one at a time in arrival order on one fiber, so VFS
@@ -67,7 +77,20 @@ module ClearLS::LSP
       id = msg.id
       method = msg.method.not_nil!
       result = request(method, msg.params)
-      @transport.write(JsonRpc.response(id, result))
+      if result.is_a?(Deferred)
+        spawn(name: "clear-ls-deferred") { finish_deferred(id, method, result) }
+      else
+        @transport.write(JsonRpc.response(id, result))
+      end
+    rescue ex : ResponseError
+      @transport.write(JsonRpc.error(id, ex.code, ex.message || ""))
+    rescue ex
+      Log.error(exception: ex) { "request #{method} failed" }
+      @transport.write(JsonRpc.error(id, ErrorCode::InternalError, ex.message || ex.class.name))
+    end
+
+    private def finish_deferred(id : RequestId?, method : String, deferred : Deferred) : Nil
+      @transport.write(JsonRpc.response(id, deferred.block.call))
     rescue ex : ResponseError
       @transport.write(JsonRpc.error(id, ex.code, ex.message || ""))
     rescue ex
@@ -87,6 +110,7 @@ module ClearLS::LSP
       when "initialize"         then initialize_request(params)
       when "shutdown"           then stop_compiler; @state = State::ShuttingDown; nil
       when "clearLs/syntaxTree" then syntax_tree(params)
+      when "clearLs/expandMacro" then expand_macro(params)
       else                           feature_request(method, params)
       end
     end

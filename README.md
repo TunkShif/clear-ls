@@ -70,3 +70,42 @@ vim.lsp.enable("clear_ls")
 
 Debug request: `clearLs/syntaxTree {textDocument: {uri}}` returns the CST as
 an S-expression.
+
+### Compiler integration
+
+Diagnostics come only from the compiler. In the background, clear-ls runs
+`crystal build --no-codegen` for each program that contains the file: the
+`shard.yml` targets that require it, or the file itself. These checks run at
+startup, when a file is opened, and when a file is saved. The compiler reads
+files from disk, so diagnostics describe the saved text. Formatting runs
+`crystal tool format` on the buffer text. Settings go under
+`initializationOptions.compiler`:
+
+```lua
+init_options = { compiler = {
+  enabled = true,          -- background checks (formatting/expansion always available)
+  path = "crystal",        -- executable (default $CRYSTAL or crystal)
+  entries = { "src/app.cr" }, -- programs to check instead of shard targets
+  debounceMs = 150,
+} },
+```
+
+Macro expansion preview: `clearLs/expandMacro {textDocument, position}` runs
+`crystal tool expand` on the saved file and returns
+`{status, message, expansions: [{original, steps: [{source, macros}]}]}`.
+Hook macros (`inherited`, `included`) can't be expanded this way. In Neovim:
+
+```lua
+vim.api.nvim_create_user_command("CrystalExpand", function()
+  local params = vim.lsp.util.make_position_params(0, "utf-16")
+  vim.lsp.buf_request(0, "clearLs/expandMacro", params, function(err, res)
+    if err then return vim.notify(err.message, vim.log.levels.WARN) end
+    local lines = { "# " .. res.message }
+    for _, e in ipairs(res.expansions) do
+      table.insert(lines, "# " .. e.original)
+      for _, s in ipairs(e.steps) do vim.list_extend(lines, vim.split(s.source, "\n")) end
+    end
+    vim.lsp.util.open_floating_preview(lines, "crystal")
+  end)
+end, {})
+```

@@ -54,6 +54,13 @@ class FeatureClient
     @next_id += 1
     @server.dispatch({jsonrpc: "2.0", id: @next_id, method: method, params: params}.to_json)
     reply = response(@next_id)
+    if reply.raw.nil? # answered later from another fiber
+      deadline = Time.instant + 30.seconds
+      while (reply = response(@next_id)).raw.nil?
+        raise "#{method}: no response" if Time.instant > deadline
+        sleep 10.milliseconds
+      end
+    end
     raise "#{method}: #{reply["error"]}" if reply["error"]?
     reply["result"]
   end

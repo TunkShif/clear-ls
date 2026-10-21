@@ -22,6 +22,15 @@ module ClearLS::Compiler
       Job.new(@crystal, args, chdir: @root, timeout: @timeout)
     end
 
+    # `crystal tool expand` at *file*:*line*:*column* (1-based, codepoint
+    # column). The cursor file is passed as a source too: the tool only
+    # looks for the cursor in the program's sources, not in required files.
+    def expand(entry : String, file : String, line : Int32, column : Int32) : Job
+      args = ["tool", "expand", "-f", "json", "--no-color", "-c", "#{file}:#{line}:#{column}", entry]
+      args << file unless file == entry
+      Job.new(@crystal, args, chdir: @root, timeout: @timeout)
+    end
+
     # `crystal tool format -`: formatted *text* on stdout; a syntax error
     # exits 1 with the message on stderr.
     def format(text : String) : Job

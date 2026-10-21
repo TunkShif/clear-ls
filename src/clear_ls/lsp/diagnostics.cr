@@ -43,16 +43,21 @@ module ClearLS::LSP
       end
     end
 
+    private def entry_points : Compiler::EntryPoints
+      @entry_points ||= begin
+        root = index.project.root
+        entries = @compiler_options["entries"]?.try(&.as_a?).try &.compact_map { |e| e.as_s?.try { |s| File.expand_path(s, root) } }
+        Compiler::EntryPoints.new(root, entries)
+      end
+    end
+
     private def start_compiler : Nil
       return unless compiler_enabled?
-      root = index.project.root
-      entries = @compiler_options["entries"]?.try(&.as_a?).try &.compact_map { |e| e.as_s?.try { |s| File.expand_path(s, root) } }
-      @entry_points = Compiler::EntryPoints.new(root, entries)
       checker = Compiler::Checker.new(toolchain,
         ->(file : String, problems : Array(Compiler::Problem)) { publish_problems(file, problems) })
       @compiler_options["debounceMs"]?.try(&.as_i?).try { |ms| checker.debounce = ms.milliseconds }
       @checker = checker
-      check_entries(@entry_points.not_nil!.targets)
+      check_entries(entry_points.targets)
     end
 
     private def stop_compiler : Nil
@@ -81,10 +86,15 @@ module ClearLS::LSP
 
     private def entries_for(uri : String) : Array(String)?
       return unless @checker
+      program_entries(uri)
+    end
+
+    # Programs that contain *uri* (a saved `.cr` file).
+    private def program_entries(uri : String) : Array(String)?
       path = VFS.path_for(uri) || return
       return unless path.ends_with?(".cr") && File.file?(path)
       idx = @index || return
-      @entry_points.not_nil!.for(path) do |p|
+      entry_points.for(path) do |p|
         idx.entry?(@vfs.id_for(VFS.uri_for(p))).try(&.requires)
       end
     end

@@ -106,3 +106,42 @@ describe "formatting" do
     end
   end
 end
+
+describe "clearLs/expandMacro" do
+  files = {
+    "shard.yml"     => "name: x\ntargets:\n  x:\n    main: src/x.cr\n",
+    "src/x.cr"      => "require \"./model\"\nputs Model.new.size\n",
+    "src/model.cr"  => "macro twice(name)\n  def {{name.id}}; 2; end\nend\n\nclass Model\n  x = \"😀\"; getter size : Int32 = 1\n  twice width\nend\n",
+  }
+
+  it "expands a macro call in a required file" do
+    with_client(files) do |c|
+      u = c.open("src/model.cr")
+      # On `getter`, after the emoji (utf-16 column 12).
+      r = c.request("clearLs/expandMacro", {textDocument: {uri: u}, position: c.pos("src/model.cr", "getter", 2)})
+      r["status"].should eq "ok"
+      e = r["expansions"][0]
+      e["original"].should eq "getter(size : Int32 = 1)"
+      e["steps"][0]["source"].as_s.should contain "def size : Int32"
+      m = e["steps"][0]["macros"][0]
+      m["name"].should eq "getter"
+      m["location"]["uri"].as_s.should end_with "object/properties.cr"
+
+      r = c.request("clearLs/expandMacro", {textDocument: {uri: u}, position: c.pos("src/model.cr", "twice width")})
+      r["expansions"][0]["steps"][0]["source"].as_s.should contain "def width"
+      r["expansions"][0]["steps"][0]["macros"][0]["location"]["uri"].should eq u
+    end
+  end
+
+  it "fails softly outside macros and refuses unsaved buffers" do
+    with_client(files) do |c|
+      u = c.open("src/model.cr")
+      r = c.request("clearLs/expandMacro", {textDocument: {uri: u}, position: {line: 0, character: 1}})
+      r["status"].should eq "failed"
+      c.notify("textDocument/didChange", {textDocument: {uri: u, version: 2}, contentChanges: [{text: "# changed\n"}]})
+      expect_raises(Exception, /save the file first/) do
+        c.request("clearLs/expandMacro", {textDocument: {uri: u}, position: {line: 0, character: 1}})
+      end
+    end
+  end
+end
