@@ -18,8 +18,15 @@ FEEDBACK_APP = {
       end
 
       def bump : Int32
+        self.label
         @count
       end
+
+      def self.make : Counter
+        self.build("x")
+      end
+
+      self.make
 
       def +(other : Counter) : Int32
         0
@@ -66,6 +73,23 @@ describe "completion order and declaration hovers" do
       h.should contain("Builds a counter.")
       fb_hover(c, "self.build").not_nil!.should contain("`self` is `Counter.class`")
       fb_hover(c, "bump : Int32").not_nil!.should contain("def Counter#bump() : Int32")
+      fb_hover(c, "self.label").not_nil!.should contain("self : Counter\n")
+      fb_hover(c, "self.build(\"x").not_nil!.should contain("self : Counter.class")
+      fb_hover(c, "self.make\n").not_nil!.should contain("self : Counter.class")
     end
+  end
+end
+
+describe "self in type bodies" do
+  it "completes class methods on self outside defs" do
+    src = "class Counter\n  def self.make : Counter\n    new\n  end\n\n  def bump : Int32\n    1\n  end\n\n  x = self.\nend\n"
+    c = FeatureClient.new({"src/s.cr" => src}, PRELUDE_FILES)
+    uri = c.open("src/s.cr")
+    res = c.request("textDocument/completion", {textDocument: {uri: uri}, position: {line: 9, character: 11}})
+    labels = res["items"].as_a.map(&.["label"].as_s)
+    labels.should contain("make")
+    labels.should_not contain("bump")
+  ensure
+    c.try(&.cleanup)
   end
 end

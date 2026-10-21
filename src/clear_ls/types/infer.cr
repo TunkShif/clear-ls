@@ -493,7 +493,7 @@ module ClearLS::Types
            when .literal?      then literal(e)
            when .nop?          then @table.named!("Nil")
            when .local_ref?    then e.binding.try { |b| @env[b]? } || @table.unknown
-           when .self?         then @ctx.self_type
+           when .self?         then self_at(e)
            when .instance_var? then ivar_type(e.name.not_nil!, class_var: false)
            when .class_var?    then ivar_type(e.name.not_nil!, class_var: true)
            when .const?        then const_type(e)
@@ -534,6 +534,19 @@ module ClearLS::Types
            end
       @types[id] = ty
       ty
+    end
+
+    # Namespace lookup for code outside defs (`class Foo; self.x; end`),
+    # set by the caller; nil inside defs.
+    property type_body_self : Proc(UInt32, TyId?)? = nil
+
+    private def self_at(e : HIR::Expr) : TyId
+      @type_body_self.try(&.call(e.range.start)) || @ctx.self_type
+    end
+
+    # Implicit receiver: `self` at the call site.
+    private def implicit_self(e : HIR::Expr) : TyId
+      self_at(e)
     end
 
     private def literal(e : HIR::Expr) : TyId
@@ -954,7 +967,7 @@ module ClearLS::Types
       end
 
       recv_t ||= implicit_receiver(e)
-      receiver_type = recv_t || @ctx.self_type
+      receiver_type = recv_t || implicit_self(e)
       res = resolve_call(e)
       if name == "new" && res.candidates.empty?
         # `Foo.new` without an explicit `self.new`: instance of Foo.
@@ -1064,7 +1077,7 @@ module ClearLS::Types
     def resolve_call(call : HIR::Expr) : CallResolution
       name = call.name || return CallResolution.unresolved
       recv_t = call.receiver.try { |r| operand(r) } || implicit_receiver(call)
-      receiver = recv_t || @ctx.self_type
+      receiver = recv_t || implicit_self(call)
       groups = method_groups(receiver, name)
       if groups.empty? && recv_t.nil?
         top = top_level_sites(name)

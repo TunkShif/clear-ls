@@ -51,7 +51,20 @@ module ClearLS::IDE
       ctx = Types::DefContext.new(ns, self_t, info.type_params + free)
       inf = Types::Infer.new(body, ctx, @table)
       inf.source_loader = ->(site : Semantics::Site) { def_node(site) }
+      unless body_is_def?(state, body)
+        # File-level body: inside `class Foo ... end` self is `Foo.class`.
+        file = state.id
+        inf.type_body_self = ->(offset : UInt32) do
+          tns = @def_map.namespace_at(file, offset)
+          tns == Semantics::DefMap::PROGRAM ? nil.as(Types::TyId?) : @table.metaclass(self_type(tns)).as(Types::TyId?)
+        end
+      end
       inf.with_source(state.text).run
+    end
+
+    private def body_is_def?(state : FileState, body : HIR::Body) : Bool
+      node = state.tree.root.descendant(body.range.start, body.range.end) || return false
+      node.kind.method_def? || node.kind.abstract_method_def?
     end
 
     def self_type(ns : Semantics::TypeId) : Types::TyId

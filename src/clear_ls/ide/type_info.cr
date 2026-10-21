@@ -98,6 +98,50 @@ module ClearLS::IDE
       @typing.def_map.lookup_member(owner, name).find(&.item.kind.==(kind)).try(&.item.detail)
     end
 
+    # `self` in a body: the instance type, or the metaclass inside
+    # `def self.foo` / at class-body level. (`self` as a def receiver is
+    # `def_hover`.)
+    def self_hover(offset : UInt32) : {String, TextRange}?
+      node = @state.tree.root.descendant(offset, offset, named: true) || return nil
+      return nil unless node.kind.self_node?
+      parent = node.parent
+      return nil if parent && (parent.kind.method_def? || parent.kind.abstract_method_def?) &&
+                    parent.fields(Syntax::Field::ClassNode).includes?(node)
+      t = nil.as(Types::TyId?)
+      if hit = @typing.infer_at(@state, @bodies, offset)
+        body, inf = hit
+        e = body.exprs.find { |x| x.kind.self? && x.range == node.range }
+        t = e.try { |x| inf.types[x.id]? }
+      end
+      map = @typing.def_map
+      ns = map.namespace_at(@state.id, offset)
+      if t.nil? || table.unknown?(t)
+        # Class bodies (no def): self is the type itself.
+        t = ns == Semantics::DefMap::PROGRAM ? nil : table.metaclass(@typing.self_type(ns))
+      end
+      ty = t && !table.unknown?(t) ? table.to_s(t) : nil
+      md = String.build do |io|
+        io << "```crystal
+self"
+        io << " : " << ty if ty
+        io << "
+```"
+        io << "
+
+top-level `self` (the program)" if ns == Semantics::DefMap::PROGRAM
+        if t && table[t].kind.metaclass?
+          io << "
+
+the class itself (class method or type body)"
+        elsif ty
+          io << "
+
+the current instance"
+        end
+      end
+      {md, node.range}
+    end
+
     # On a def's name or its `self.` receiver: the declaration's signature.
     def def_hover(offset : UInt32) : {String, TextRange}?
       node = @state.tree.root.descendant(offset, offset, named: true) || return nil
