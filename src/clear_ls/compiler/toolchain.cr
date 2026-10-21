@@ -31,6 +31,14 @@ module ClearLS::Compiler
       Job.new(@crystal, args, chdir: @root, timeout: @timeout)
     end
 
+    # `crystal tool context` at a location: local and ivar types in each
+    # instantiation of the enclosing def.
+    def context(entry : String, file : String, line : Int32, column : Int32) : Job
+      args = ["tool", "context", "-f", "json", "--no-color", "-c", "#{file}:#{line}:#{column}", entry]
+      args << file unless file == entry
+      Job.new(@crystal, args, chdir: @root, timeout: @timeout)
+    end
+
     # `crystal tool format -`: formatted *text* on stdout; a syntax error
     # exits 1 with the message on stderr.
     def format(text : String) : Job

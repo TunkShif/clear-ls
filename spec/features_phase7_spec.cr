@@ -207,3 +207,39 @@ describe "compiler facts" do
     end
   end
 end
+
+describe "compiler-confirmed hover" do
+  files = {
+    "a.cr" => "def twice(x)\n  y = x + x\n  y\nend\n\ndef never(z)\n  w = z\nend\n\ntwice(1)\ntwice(\"a\")\n",
+  }
+
+  it "adds the compiler's types per instantiation after a background run" do
+    with_client(files, compiler: {enabled: true, debounceMs: 0, facts: false}) do |c|
+      u = c.open("a.cr")
+      c.wait_compiler
+      first = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("a.cr", "y\nend")})
+      first["contents"]["value"].as_s.should_not contain "compiler:"
+      wait_contexts(c)
+      again = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("a.cr", "y\nend")})
+      again["contents"]["value"].as_s.should contain "compiler: `Int32` · `String`"
+      # Never instantiated: the top-level fallback is not shown.
+      c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("a.cr", "w = z")})
+      wait_contexts(c)
+      h = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("a.cr", "w = z")})
+      h["contents"]["value"].as_s.should_not contain "compiler:"
+      # Unsaved edits: no compiler types.
+      c.notify("textDocument/didChange", {textDocument: {uri: u, version: 2}, contentChanges: [{text: File.read(File.join(c.root, "a.cr")) + "\n"}]})
+      h = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("a.cr", "y\nend")})
+      h["contents"]["value"].as_s.should_not contain "compiler:"
+    end
+  end
+end
+
+def wait_contexts(c : FeatureClient)
+  deadline = Time.instant + 30.seconds
+  sleep 20.milliseconds
+  until c.server.contexts.values.all? { |v| !v.nil? } || !c.server.context_running?
+    raise "context still running" if Time.instant > deadline
+    sleep 20.milliseconds
+  end
+end

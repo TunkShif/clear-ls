@@ -2,6 +2,7 @@ require "./server"
 require "./diagnostics"
 require "./formatting"
 require "./expand"
+require "./context"
 require "../ide/analysis"
 require "../ide/semantic_tokens"
 require "../ide/completion"
@@ -162,12 +163,25 @@ module ClearLS::LSP
       state = document(params)
       off = offset(state, params["position"])
       ti = type_info(state)
-      if hit = ti.local_hover(off) || ti.var_hover(off) || ti.self_hover(off) || ti.accessor_macro_hover(off) || ti.def_hover(off) || ti.decl_param_hover(off) || ti.literal_hover(off) || ti.key_or_op_hover(off) || ti.method_hover(off)
+      if hit = ti.local_hover(off)
+        md, r = hit
+        md = add_compiler_type(state, off, md)
+        return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
+      end
+      if hit = ti.var_hover(off) || ti.self_hover(off) || ti.accessor_macro_hover(off) || ti.def_hover(off) || ti.decl_param_hover(off) || ti.literal_hover(off) || ti.key_or_op_hover(off) || ti.method_hover(off)
         md, r = hit
         return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
       end
       info = analysis(state).hover(off) || return nil
       {contents: {kind: "markdown", value: info.markdown}, range: range_json(state, info.range)}
+    end
+
+    # Appends the compiler's types for the local under the cursor, when a
+    # context run for its def has finished.
+    private def add_compiler_type(state : FileState, off : UInt32, md : String) : String
+      body, b, _ = locals(state).binding_at(off) || return md
+      types = compiler_types(state, body, b.name) || return md
+      md + "\n\ncompiler: " + types.map { |t| "`#{t}`" }.join(" · ")
     end
 
     private def document_link(params : JSON::Any)
