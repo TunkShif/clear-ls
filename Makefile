@@ -6,6 +6,8 @@
 #   make verify-static   check no dynamic Tree-sitter dependency
 #   make grammar-check   parse the Crystal stdlib, list grammar failures
 #   make syntax-gen      regenerate src/clear_ls/syntax/kinds.cr
+#   make probes          build analysis probes into bin/probes/ (tools/README.md)
+#   make nvim-check      headless Neovim checks against tools/fixtures/
 #   make distclean  remove deps and build outputs
 
 CRYSTAL ?= crystal
@@ -45,7 +47,7 @@ export PKG_CONFIG_PATH := $(PC_DIR):$(PKG_CONFIG_PATH)
 
 SOURCES := $(shell find src -name '*.cr' 2>/dev/null)
 
-.PHONY: all build release deps spec verify-static grammar-check syntax-gen clean distclean
+.PHONY: all build release deps spec verify-static grammar-check syntax-gen probes nvim-check clean distclean
 
 all: build
 
@@ -115,6 +117,22 @@ grammar-check: | $(GRAMMAR_DIR)
 
 syntax-gen: | $(GRAMMAR_DIR)
 	$(CRYSTAL) run tools/gen_syntax.cr -- $(GRAMMAR_DIR)/src/node-types.json src/clear_ls/syntax/kinds.cr
+
+PROBES := $(patsubst tools/probes/%.cr,bin/probes/%,$(wildcard tools/probes/*.cr))
+
+probes: $(PROBES)
+
+bin/probes/%: tools/probes/%.cr deps $(SOURCES)
+	@mkdir -p bin/probes
+	$(CRYSTAL) build --release $(CRYSTAL_FLAGS) $< -o $@
+
+# Copies each fixture project to a temp dir and drives the release binary
+# from headless Neovim; prints results for review (no assertions).
+NVIM ?= nvim
+NVIM_CHECKS ?= smoke calls chains compiler
+
+nvim-check: release
+	@for c in $(NVIM_CHECKS); do echo "== $$c"; tools/nvim/run.sh $$c || exit 1; done
 
 clean:
 	rm -rf bin $(CRYSTAL_CACHE_DIR)

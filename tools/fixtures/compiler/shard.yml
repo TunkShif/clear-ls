@@ -1,0 +1,5 @@
+name: p7v
+version: 0.1.0
+targets:
+  p7v:
+    main: src/app.cr
