@@ -28,7 +28,10 @@ Tree-sitter with an editor-oriented semantic model. Status: Phase 7 —
 - semantic tokens (params, locals, ivars, types, declarations);
 - links and goto-definition for `require` paths.
 
-See [docs/roadmap.md](docs/roadmap.md) for the plan and design docs.
+See [docs/status.md](docs/status.md) for where development stands,
+[docs/roadmap.md](docs/roadmap.md) for the plan, and
+[docs/development.md](docs/development.md) for workflow, tests, and
+[tools](tools/README.md).
 
 ## Build
 
@@ -39,6 +42,8 @@ make            # fetch pinned deps into vendor/, build bin/clear-ls (debug)
 make release    # optimised build; use this one in the editor
 make spec       # run specs
 make verify-static
+make probes     # analysis probes into bin/probes/ (tools/README.md)
+make nvim-check # headless Neovim checks against tools/fixtures/
 ```
 
 The Tree-sitter runtime (v0.26.9) and `tree-sitter-crystal` grammar are

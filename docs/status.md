@@ -1,0 +1,35 @@
+# Status
+
+Where development stands; update at every phase boundary (and when work
+stops mid-phase). History and per-phase details are in
+[roadmap.md](roadmap.md).
+
+- **Done:** Phases 0–7 (through compiler integration).
+- **Next:** Phase 8 — workspace identity (`DefId`-keyed reference index;
+  workspace references/rename, type hierarchy, incoming calls, code
+  actions). Start by measuring what it needs, then split it into steps in
+  the roadmap ([development.md](development.md#workflow)).
+- **In progress:** nothing.
+
+## Resume
+
+```sh
+git log --oneline | head -3
+crystal --version             # 1.22.x
+make && make spec             # all green
+make verify-static
+make release && make nvim-check
+```
+
+Then read [architecture.md](architecture.md) for the code map and
+[gotchas.md](gotchas.md) before touching an area.
+
+## Open threads
+
+Known gaps relevant to the next phases (full lists under each phase in the
+roadmap and in [architecture.md](architecture.md#known-limitations)):
+
+- References/rename are local-only; incoming calls return `[]` (Phase 8).
+- Diagnostics describe saved files only (compiler limitation).
+- No persistent index cache, no request cancellation, single root
+  (Phase 9).

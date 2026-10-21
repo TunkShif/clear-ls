@@ -5,6 +5,10 @@ parses with Tree-sitter and answers editor queries from an approximate,
 editor-oriented semantic model. The Crystal compiler stays authoritative for
 diagnostics and final semantics.
 
+Current state: [status.md](status.md). Code map:
+[architecture.md](architecture.md); workflow and tools:
+[development.md](development.md); pitfalls: [gotchas.md](gotchas.md).
+
 Design background:
 
 - [Semantic architecture](design/crystal-lsp-semantic-architecture.md):
@@ -304,7 +308,7 @@ typed locals and block args 89.6% in this repo (73.5%), 59.8% in the
 stdlib (43.3%); per-local type diff against each step's predecessor
 showed no unexplained regressions. Inference over this repo's 639 defs
 takes 0.46 s cold (0.26 s); worst stdlib def 43 ms cold; warm hover
-0.1–0.3 ms. All chains in the exit fixture (`docs/handoff-tools/chains.cr`)
+0.1–0.3 ms. All chains in the exit fixture (`tools/fixtures/chains/src/c.cr`)
 are typed.
 
 Not yet: closure-captured variables, ivar types from assignments in
