@@ -12,7 +12,9 @@ class FeatureClient
 
   # *stdlib*: files placed in a fake stdlib dir with a prelude.cr that
   # requires them all.
-  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil)
+  # *compiler*: `initializationOptions.compiler`; the real compiler is off
+  # unless a spec asks for it.
+  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false})
     @root = File.tempname("clear-ls-feat")
     files.each do |path, text|
       full = File.join(@root, path)
@@ -30,7 +32,7 @@ class FeatureClient
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
     @server.project_factory = ->(root : String) { Workspace::Project.new(root, paths, std_dir, nil, "x86_64-unknown-linux-gnu") }
     @server.index_workers = 1
-    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}}})
+    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}}, initializationOptions: {compiler: compiler}})
     notify("initialized", {} of String => String)
   end
 
@@ -51,7 +53,7 @@ class FeatureClient
   def request(method : String, params = nil) : JSON::Any
     @next_id += 1
     @server.dispatch({jsonrpc: "2.0", id: @next_id, method: method, params: params}.to_json)
-    reply = last
+    reply = response(@next_id)
     raise "#{method}: #{reply["error"]}" if reply["error"]?
     reply["result"]
   end
@@ -70,18 +72,46 @@ class FeatureClient
     {line: line, character: col}
   end
 
-  private def last : JSON::Any
+  # Server-initiated notifications with *method*, oldest first.
+  def notifications(method : String) : Array(JSON::Any)
+    t = Transport.new(IO::Memory.new(@out.to_s), IO::Memory.new)
+    found = [] of JSON::Any
+    while body = t.read
+      msg = JSON.parse(body)
+      found << msg["params"] if msg["method"]? == method
+    end
+    found
+  end
+
+  # Waits for background compiler runs to finish.
+  def wait_compiler(timeout = 30.seconds) : Nil
+    deadline = Time.instant + timeout
+    sleep 10.milliseconds
+    while @server.checker.try(&.busy?)
+      raise "compiler still busy" if Time.instant > deadline
+      sleep 10.milliseconds
+    end
+  end
+
+  # Latest diagnostics published for *path*.
+  def diagnostics(path : String) : Array(JSON::Any)?
+    u = uri(path)
+    notifications("textDocument/publishDiagnostics").reverse.find { |n| n["uri"] == u }.try(&.["diagnostics"].as_a)
+  end
+
+  private def response(id : Int32) : JSON::Any
     t = Transport.new(IO::Memory.new(@out.to_s), IO::Memory.new)
     result = JSON::Any.new(nil)
     while body = t.read
-      result = JSON.parse(body)
+      msg = JSON.parse(body)
+      result = msg if msg["id"]? == id
     end
     result
   end
 end
 
-def with_client(files, stdlib = nil, &)
-  c = FeatureClient.new(files, stdlib)
+def with_client(files, stdlib = nil, compiler = {enabled: false}, &)
+  c = FeatureClient.new(files, stdlib, compiler)
   yield c
 ensure
   c.try(&.cleanup)

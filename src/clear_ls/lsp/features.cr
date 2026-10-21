@@ -1,4 +1,5 @@
 require "./server"
+require "./diagnostics"
 require "../ide/analysis"
 require "../ide/semantic_tokens"
 require "../ide/completion"

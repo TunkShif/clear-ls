@@ -85,7 +85,7 @@ module ClearLS::LSP
 
       case method
       when "initialize"         then initialize_request(params)
-      when "shutdown"           then @state = State::ShuttingDown; nil
+      when "shutdown"           then stop_compiler; @state = State::ShuttingDown; nil
       when "clearLs/syntaxTree" then syntax_tree(params)
       else                           feature_request(method, params)
       end
@@ -103,11 +103,11 @@ module ClearLS::LSP
       return if @state.uninitialized? || @state.shutting_down?
 
       case method
-      when "initialized"                     then load_index
+      when "initialized"                     then load_index; start_compiler
       when "textDocument/didOpen"            then did_open(params)
       when "textDocument/didChange"          then did_change(params)
       when "textDocument/didClose"           then did_close(params)
-      when "textDocument/didSave"            then nil
+      when "textDocument/didSave"            then compiler_saved(params.dig("textDocument", "uri").as_s)
       when "workspace/didChangeWatchedFiles" then did_change_watched(params)
       when "$/cancelRequest", "$/setTrace"   then nil
       else
@@ -127,6 +127,7 @@ module ClearLS::LSP
       # Byte offsets are native for us; prefer them, then utf-32, else utf-16.
       @encoding = [PositionEncoding::UTF8, PositionEncoding::UTF32].find { |e| encodings.includes?(e) } || PositionEncoding::UTF16
       @root = workspace_root(params)
+      read_compiler_options(params)
       @state = State::Initialized
 
       {
@@ -175,6 +176,7 @@ module ClearLS::LSP
       doc = params["textDocument"]
       state = @vfs.open(doc["uri"].as_s, doc["text"].as_s, doc["version"].as_i64)
       @index.try(&.update(state))
+      compiler_opened(state.uri)
       Log.debug { "didOpen #{state.uri} v#{state.version} (#{state.text.bytesize} bytes)" }
     end
 
@@ -215,6 +217,7 @@ module ClearLS::LSP
       params["changes"].as_a.each do |c|
         uri = c["uri"].as_s
         @vfs.disk_changed(uri)
+        compiler_saved(uri) if c["type"]?.try(&.as_i) != 3
         idx = @index || next
         next if @vfs.open?(uri)
         if c["type"]?.try(&.as_i) == 3

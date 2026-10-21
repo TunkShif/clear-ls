@@ -1,3 +1,4 @@
 require "./compiler/output"
 require "./compiler/job"
 require "./compiler/toolchain"
+require "./compiler/checker"

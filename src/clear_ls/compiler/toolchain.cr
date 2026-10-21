@@ -28,9 +28,26 @@ module ClearLS::Compiler
       return [] of Problem unless result.completed?
       problems = Output.warnings(result.stderr, base_dir)
       if frames = Output.error_frames(result.stderr)
-        Output.error(frames).try { |e| problems.unshift(e) }
+        Output.error(frames).try { |e| problems.unshift(relocate(e, base_dir)) }
       end
       problems
+    end
+
+    # An error inside the stdlib or a shard is reported at the last trace
+    # frame in the workspace (the user's call that led there), keeping the
+    # original location as the last trace entry.
+    def self.relocate(problem : Problem, root : String) : Problem
+      return problem if workspace_file?(problem.file, root)
+      idx = problem.trace.rindex { |f| workspace_file?(f.file, root) } || return problem
+      site = problem.trace[idx]
+      frame = Frame.new(site.file, site.line, site.column, site.size, problem.message)
+      Problem.new(problem.severity, frame, problem.trace[0...idx] + problem.trace[idx + 1..] + [problem.frame])
+    end
+
+    # Under *root* but not in its `lib/` (shards).
+    def self.workspace_file?(path : String, root : String) : Bool
+      prefix = root.ends_with?('/') ? root : root + "/"
+      path.starts_with?(prefix) && !path.starts_with?(prefix + "lib/")
     end
   end
 
