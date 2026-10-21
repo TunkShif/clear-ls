@@ -30,7 +30,12 @@ module ClearLS::HIR
       unless node.kind.method_def? || node.kind.abstract_method_def?
         # File or namespace body: top-level code has its own local scope;
         # nested defs/types are separate bodies.
-        return Body.new(node.range, lower_children(node, ExprKind::Seq), @exprs, @bindings, @scopes)
+        if node.kind.expressions? || node.parent.nil? || node.kind.class_def? || node.kind.module_def? || node.kind.struct_def?
+          return Body.new(node.range, lower_children(node, ExprKind::Seq), @exprs, @bindings, @scopes)
+        end
+        # A single expression (a constant's value).
+        root = lower(node)
+        return Body.new(node.range, add(ExprKind::Seq, node.range, children: [root]), @exprs, @bindings, @scopes)
       end
       lower_params(node.field(Syntax::Field::Params), BindingKind::Param)
       root = if body = node.field(Syntax::Field::Body)
@@ -121,6 +126,8 @@ module ClearLS::HIR
         lower_children(node, ExprKind::Not)
       when .array_node?, .hash_node?, .tuple_node?, .named_tuple?, .range_node?, .array_like?, .hash_like?
         lower_collection(node)
+      when .typeof?
+        lower_children(node, ExprKind::TypeOf)
       when .uninitialized_var?
         add(ExprKind::Other, node.range, syntax: node.kind, type_text: node.named_child(0).try(&.text))
       when .error?, .unknown?
@@ -143,6 +150,9 @@ module ClearLS::HIR
       end
     end
 
+    OF_KEY   = "__of__"
+    OF_VALUE = "__of_value__"
+
     private def lower_collection(node : Syntax::Node) : ExprId
       kids = [] of ExprId
       names = [] of {String, ExprId}
@@ -164,6 +174,13 @@ module ClearLS::HIR
           c.named_children.each { |x| kids << lower(x) }
         else
           kids << lower(c)
+        end
+      end
+      # `[] of typeof(x)`: the type expressions are lowered too, under
+      # reserved names, so inference can type them.
+      {Syntax::Field::Of => OF_KEY, Syntax::Field::OfKey => OF_KEY, Syntax::Field::OfValue => OF_VALUE}.each do |field, key|
+        if (t = node.field(field)) && t.kind.typeof?
+          names << {key, lower(t)} unless names.any? { |(n, _)| n == key }
         end
       end
       add(ExprKind::Collection, node.range, syntax: node.kind, children: kids, named_args: names,

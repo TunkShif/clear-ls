@@ -100,6 +100,7 @@ module ClearLS::HIR
     Not
     TypeDecl
     Collection  # array, hash, tuple, named tuple, range
+    TypeOf      # `typeof(a, b)`: union of its expressions' types (not evaluated at runtime)
     Splat       # `*xs` call argument
     DoubleSplat # `**opts` call argument
     Other       # recognised but not modelled further (lowered children only)

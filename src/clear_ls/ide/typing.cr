@@ -102,7 +102,7 @@ module ClearLS::IDE
              end
       node = tree.root.descendant(r.start, r.end)
       while n = node
-        return n if n.kind.method_def? && n.range == r
+        return n if (n.kind.method_def? || n.kind.const_assign?) && n.range == r
         node = n.parent
       end
       nil

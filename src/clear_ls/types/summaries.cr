@@ -21,7 +21,9 @@ module ClearLS::Types
     # (file, def start, file revision, self type, argument types).
     alias Key = {Int32, UInt32, UInt64, Int32, Array(Int32)}
 
-    MAX_DEPTH = 4
+    # Nesting depth of summaries being computed at once. Results are
+    # cached, so depth bounds stack use rather than total work.
+    MAX_DEPTH = 12
     # Defs summarised per generation before giving up (protects against
     # pathological fan-out in big files; cached entries are free).
     MAX_TOTAL = 20_000
@@ -31,9 +33,15 @@ module ClearLS::Types
 
     getter computed = 0
     getter hits = 0
+    # Summaries recomputed later because a cut or budget made them partial.
+    getter uncached = 0
     @cache = {} of Key => Summary
-    @in_progress = Set(Key).new
-    @shapes = Hash({Int32, UInt32, UInt64}, Int32).new(0)
+    # Summaries being computed, outermost first.
+    @stack = [] of Key
+    # Lowest stack level a recursion cut referred to while computing the
+    # current summary.
+    @lowest_cut = Int32::MAX
+    @shapes = Hash({ {Int32, UInt32, UInt64}, Int32 }, Int32).new(0)
     @depth = 0
 
     # Current revision of a file (open buffers change without a DefMap
@@ -56,7 +64,9 @@ module ClearLS::Types
       def_key = {site.file.value.to_i32, site.item.range.start, rev}
       # Unknown args carry no information: normalise so shapes are shared.
       args = [] of TyId if args.all? { |a| @table.unknown?(a) }
-      if !args.empty? && @shapes[def_key] >= MAX_SHAPES && !@cache.has_key?(key(def_key, self_t, args))
+      # Shape cap per (def, self): each receiver type is its own instance.
+      shape_key = {def_key, self_t.value}
+      if !args.empty? && @shapes[shape_key] >= MAX_SHAPES && !@cache.has_key?(key(def_key, self_t, args))
         args = [] of TyId
       end
       k = key(def_key, self_t, args)
@@ -66,19 +76,36 @@ module ClearLS::Types
       end
       # Recursive call: contributes nothing to the outer summary (Pending
       # vanishes from unions), like the first iteration of a fixed point.
-      return Summary.new(@table.pending, [] of TyId) if @in_progress.includes?(k)
-      return unknown_summary if @depth >= MAX_DEPTH || @computed >= MAX_TOTAL
-      @in_progress << k
+      if level = @stack.index(k)
+        # Every summary between the cycle head and here depends on a cut.
+        @lowest_cut = Math.min(@lowest_cut, level)
+        return Summary.new(@table.pending, [] of TyId)
+      end
+      if @depth >= MAX_DEPTH || @computed >= MAX_TOTAL
+        # Budget answer: the caller's summary is partial; it may be cached
+        # (a deeper chain would only be cut again), but not the whole stack.
+        return unknown_summary
+      end
+      @stack << k
       @depth += 1
       @computed += 1
-      @shapes[def_key] += 1 unless args.empty?
+      @shapes[shape_key] += 1 unless args.empty?
+      level = @stack.size - 1
+      saved_cut = @lowest_cut
+      @lowest_cut = Int32::MAX
       begin
         result = (yield args) || unknown_summary
       ensure
         @depth -= 1
-        @in_progress.delete(k)
+        @stack.pop
       end
-      @cache[k] = result
+      cut = @lowest_cut
+      # Cached unless a cycle through an outer def was cut beneath us; the
+      # cycle head (cut == level) caches its first-iteration result.
+      @cache[k] = result if cut >= level
+      @lowest_cut = Math.min(saved_cut, cut >= level ? Int32::MAX : cut)
+      @uncached += 1 unless cut >= level
+      result
     end
 
     private def key(def_key : {Int32, UInt32, UInt64}, self_t : TyId, args : Array(TyId)) : Key

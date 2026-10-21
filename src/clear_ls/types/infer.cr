@@ -239,10 +239,13 @@ module ClearLS::Types
       @body.bindings.each do |b|
         next unless b.kind.param? || b.kind.block_param?
         index += 1
-        ty = if r = b.restriction
+        given = @param_args[index]?
+        ty = if given && !@table.unknown?(given)
+               given
+             elsif r = b.restriction
                parse_type(r)
              else
-               @param_args[index]? || @table.unknown
+               @table.unknown
              end
         # Splats: `*args : T` is a Tuple of T, `**opts` a NamedTuple.
         decl = param_decl_text(b)
@@ -573,6 +576,10 @@ module ClearLS::Types
            when .seq?          then e.children.last?.try { |c| operand(c) } || nil_t
            when .not?          then @table.named!("Bool")
            when .collection?   then collection(e)
+           when .type_of?
+             # `typeof(a, b)` as a value is the type: its metaclass.
+             ts = e.children.map { |c| operand(c) }
+             ts.empty? ? @table.unknown : @table.metaclass(union_or_unknown(ts))
            when .proc_literal? then eval_proc(e)
            when .block?
              # `&proc` passes a value; literal and `&.foo` blocks merge
@@ -652,14 +659,22 @@ module ClearLS::Types
 
     private def collection(e : HIR::Expr) : TyId
       elems = e.children.map { |c| operand(c) }
-      named = e.named_args.map { |(n, v)| {n, operand(v)} }
+      of_key = of_value = nil.as(TyId?)
+      named = [] of {String, TyId}
+      e.named_args.each do |(n, v)|
+        case n
+        when HIR::LowerBody::OF_KEY   then of_key = instance_of(operand(v))
+        when HIR::LowerBody::OF_VALUE then of_value = instance_of(operand(v))
+        else                               named << {n, operand(v)}
+        end
+      end
       case e.syntax
       when .array_node?
-        elem = e.type_text.try { |t| parse_type(t) } || (elems.empty? ? @table.unknown : union_or_unknown(elems))
+        elem = of_key || e.type_text.try { |t| parse_type(t) } || (elems.empty? ? @table.unknown : union_or_unknown(elems))
         @table.named!("Array", [elem])
       when .hash_node?
         if k = e.type_text
-          @table.named!("Hash", [parse_type(k), e.type_text2.try { |v| parse_type(v) } || @table.unknown])
+          @table.named!("Hash", [of_key || parse_type(k), of_value || e.type_text2.try { |v| parse_type(v) } || @table.unknown])
         else
           keys = elems.each_slice(2).map(&.first).to_a
           vals = elems.each_slice(2).compact_map(&.[1]?).to_a
@@ -683,6 +698,29 @@ module ClearLS::Types
       else
         @table.unknown
       end
+    end
+
+    # T of the `Enumerable(T)` (or `Iterator(T)`) ancestor of *t*.
+    private def enumerable_element(t : TyId) : TyId?
+      ty = @table[t]
+      case ty.kind
+      when .tuple?
+        return union_or_unknown(ty.args)
+      when .named?
+        def_id = ty.def_id.not_nil!
+        bindings = generic_bindings(def_id, ty.args)
+        enum_id = map.lookup_path("::Enumerable") || return nil
+        return nil unless map.ancestors(def_id).includes?(enum_id)
+        tparam = map[enum_id].type_params.first? || return nil
+        # Bindings propagate through `include Enumerable(T)` refs.
+        bindings[tparam]?
+      end
+    end
+
+    # Instance type of a metaclass (`typeof(x)` value → type of x).
+    private def instance_of(t : TyId) : TyId
+      ty = @table[t]
+      ty.kind.metaclass? ? ty.args[0] : @table.unknown
     end
 
     private def union_or_unknown(ts : Array(TyId)) : TyId
@@ -729,7 +767,29 @@ module ClearLS::Types
     private def const_value_type(site : Semantics::Site, owner : Semantics::TypeId) : TyId
       value = site.item.detail || return @table.unknown
       key = {owner.value, site.item.name}
-      @const_cache[key] ||= Infer.value_text_type(value, @table, owner)
+      @const_cache[key] ||= begin
+        t = Infer.value_text_type(value, @table, owner)
+        @table.unknown?(t) ? const_expr_type(site, owner) : t
+      end
+    end
+
+    # Infers a constant's value expression (`%w(a b)`, `[1, 2]`, calls) as
+    # a tiny body in the owner's namespace, through the summary cache.
+    private def const_expr_type(site : Semantics::Site, owner : Semantics::TypeId) : TyId
+      cache = @summaries || return @table.unknown
+      loader = @source_loader || return @table.unknown
+      self_t = owner == Semantics::DefMap::PROGRAM ? @table.unknown : @table.metaclass(@table.named(owner))
+      cache.get(site, self_t, [] of TyId) do
+        node = loader.call(site) || next nil
+        rhs = node.field(Syntax::Field::Rhs) || next nil
+        ctx = DefContext.new(owner, self_t, map[owner].type_params)
+        inner = Infer.new(HIR::LowerBody.lower(rhs), ctx, @table)
+        inner.source_loader = loader
+        inner.summaries = cache
+        inner.summarising = true
+        inner.run
+        Summaries::Summary.new(inner.return_type, [] of TyId)
+      end.returns.tap { |t| return @table.unknown if t == @table.pending }
     end
 
     def self.value_text_type(value : String, table : TypeTable, ns : Semantics::TypeId) : TyId
@@ -1031,6 +1091,14 @@ module ClearLS::Types
         return recv_t ? @table.without_nil(recv_t) : @table.unknown
       when "typeof", "sizeof", "instance_sizeof", "pointerof"
         return name == "pointerof" ? (args[0]?.try { |a| @table.named?("Pointer", [a]) } || @table.unknown) : (name == "typeof" ? @table.unknown : @table.named!("Int32"))
+      end
+
+      # `Enumerable.element_type(x)` / `Iterator.element_type(x)`: what x
+      # yields from `each` (generic arg of Enumerable/Iterator ancestors).
+      if name == "element_type" && args.size == 1 && recv_t && @table[recv_t].kind.metaclass?
+        if (et = enumerable_element(args[0])) && !@table.unknown?(et)
+          return et
+        end
       end
 
       if name == "try" && recv_t && e.block
@@ -1354,22 +1422,30 @@ module ClearLS::Types
         t = summary(c, block_ret).returns
         return t if t == @table.no_return || t == @table.pending
         return nil if @table.unknown?(t)
-        r = Subst.apply(@table, t, m.bindings)
+        r = Subst.apply(@table, t, free_var_bindings(c, block_ret))
         return still_open?(r) ? nil : r
       end
       tparams = owner.type_params + sig.free_vars
       ret = TypeExprParser.parse(text, @table, m.owner, tparams, self_t)
-      bindings = arg_bindings(c)
-      unless sig.free_vars.empty?
-        if (bp = sig.params.find(&.kind.block?)) && (r = bp.restriction) && block_ret
-          pt = TypeExprParser.parse(r, @table, m.owner, tparams, self_t)
-          if @table[pt].kind.proc?
-            Subst.unify(@table, @table[pt].args.last, block_ret, bindings)
-          end
-        end
-      end
-      result = Subst.apply(@table, ret, bindings)
+      result = Subst.apply(@table, ret, free_var_bindings(c, block_ret))
       still_open?(result) ? nil : result
+    end
+
+    # Receiver and argument bindings, plus `forall` vars bound from the
+    # block's value (`& : T -> U`).
+    private def free_var_bindings(c : CallCandidate, block_ret : TyId?) : Hash(String, TyId)
+      bindings = arg_bindings(c)
+      m = c.match
+      sig = m.site.item.signature || return bindings
+      return bindings if sig.free_vars.empty? || block_ret.nil?
+      bp = sig.params.find(&.kind.block?) || return bindings
+      r = bp.restriction || return bindings
+      owner = map[m.owner]
+      pt = TypeExprParser.parse(r, @table, m.owner, owner.type_params + sig.free_vars, c.self_type)
+      if @table[pt].kind.proc?
+        Subst.unify(@table, @table[pt].args.last, block_ret, bindings)
+      end
+      bindings
     end
 
     # A type param left after substitution that is not one of the current
@@ -1403,7 +1479,15 @@ module ClearLS::Types
           next unless pi
           bound << pi
           next unless t = c.arg_types[i]?
-          next unless sig.params[pi].kind.positional? && sig.params[pi].restriction.nil?
+          next unless sig.params[pi].kind.positional?
+          # Restricted params also take the argument type: the compiler
+          # instantiates the def for it (`other : Int::Primitive` with an
+          # Int32 argument is an Int32 inside), when it definitely fits.
+          if sig.params[pi].restriction
+            next if @table.unknown?(t)
+            rt = resolver.restriction(c, pi) || next
+            next unless resolver.matches(t, rt, nil).compatible?
+          end
           args[pi] = t
         end
         # Omitted params with a literal default (`if_none = nil`): the

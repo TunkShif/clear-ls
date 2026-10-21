@@ -8,7 +8,7 @@ def def_node_in(trees : Hash(Int32, Syntax::Tree), site : Semantics::Site) : Syn
   t = trees[site.file.value]? || return nil
   n = t.root.descendant(site.item.range.start, site.item.range.end)
   while x = n
-    return x if x.kind.method_def? && x.range == site.item.range
+    return x if (x.kind.method_def? || x.kind.const_assign?) && x.range == site.item.range
     n = x.parent
   end
   nil
@@ -614,5 +614,26 @@ describe "Types::Infer return summaries" do
       CR
     type_of_local(r, "f").should eq "Int32"
     type_of_local(r, "g").should eq "String"
+  end
+end
+
+describe "Types::Infer typeof and constants" do
+  it "types typeof in collection literals and constant expressions" do
+    r = infer(<<-CR, 0)
+      XS = [1, 2]
+      NAMES = %w(a b)
+      def m(s : String)
+        a = [] of typeof(s.size)
+        h = {} of String => typeof(s)
+        t = typeof(s)
+        x = XS
+        n = NAMES
+      end
+      CR
+    type_of_local(r, "a").should eq "Array(Int32)"
+    type_of_local(r, "h").should eq "Hash(String, String)"
+    type_of_local(r, "t").should eq "String.class"
+    type_of_local(r, "x").should eq "Array(Int32)"
+    type_of_local(r, "n").should eq "Array(String)"
   end
 end
