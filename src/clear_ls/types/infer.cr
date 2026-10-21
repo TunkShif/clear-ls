@@ -773,15 +773,79 @@ module ClearLS::Types
       end
     end
 
+    MAX_CONST_BYTES = 4096
+
+    @value_parser : Syntax::Parser? = nil
+
+    # Parses the first ~1 KB of a big literal value, closed off after the
+    # last complete top-level entry: `Slice(UInt64).literal(1, 2, 3, ...)`
+    # → `Slice(UInt64).literal(1, 2)`, `{"a" => 1, ...}` → `{"a" => 1}`.
+    private def truncated_value(text : String) : Syntax::Node?
+      stripped = text.strip
+      if stripped.starts_with?("begin") && stripped.ends_with?("end")
+        # `begin; data = Array(T).new(n); put(...) x1000; data; end`: keep
+        # the first statements and the final value.
+        lines = stripped.lines
+        body = lines[1, Math.min(4, lines.size - 2)] + lines[-2..-2]
+        src = "x = begin\n" + body.join('\n') + "\nend"
+        tree = (@value_parser ||= Syntax::Parser.new).parse(src)
+        return tree.root.named_child(0).try(&.field(Syntax::Field::Rhs))
+      end
+      head = text.byte_slice(0, Math.min(text.bytesize, 1024))
+      depth = 0
+      opens = [] of Char
+      last_cut = nil.as(Int32?)
+      in_str = false
+      head.each_char_with_index do |c, i|
+        if in_str
+          in_str = false if c == '"'
+          next
+        end
+        case c
+        when '"' then in_str = true
+        when '(', '[', '{'
+          opens << c
+          depth += 1
+        when ')', ']', '}'
+          opens.pop?
+          depth -= 1
+        when ','
+          last_cut = i if depth == 1
+        end
+      end
+      cut = last_cut || return nil
+      closers = {'(' => ')', '[' => ']', '{' => '}'}
+      stack = [] of Char
+      head[0, cut].each_char do |c|
+        case c
+        when '(', '[', '{' then stack << c
+        when ')', ']', '}' then stack.pop?
+        end
+      end
+      return nil unless stack.size == 1
+      src = "x = " + head[0, cut] + closers[stack[0]]
+      tree = (@value_parser ||= Syntax::Parser.new).parse(src)
+      tree.root.named_child(0).try(&.field(Syntax::Field::Rhs))
+    end
+
     # Infers a constant's value expression (`%w(a b)`, `[1, 2]`, calls) as
     # a tiny body in the owner's namespace, through the summary cache.
     private def const_expr_type(site : Semantics::Site, owner : Semantics::TypeId) : TyId
       cache = @summaries || return @table.unknown
       loader = @source_loader || return @table.unknown
       self_t = owner == Semantics::DefMap::PROGRAM ? @table.unknown : @table.metaclass(@table.named(owner))
+      # Big data tables (`POW10_SPLIT = [...]` with thousands of entries)
+      # are typed from a prefix: their first elements decide the element
+      # type in practice, and lowering them all costs hundreds of ms.
       cache.get(site, self_t, [] of TyId) do
-        node = loader.call(site) || next nil
-        rhs = node.field(Syntax::Field::Rhs) || next nil
+        rhs = if site.item.range.size > MAX_CONST_BYTES
+                # Data table: infer a truncated copy (first entries) rather
+                # than parsing thousands of elements.
+                truncated_value(site.item.detail || "") || next nil
+              else
+                node = loader.call(site) || next nil
+                node.field(Syntax::Field::Rhs) || next nil
+              end
         ctx = DefContext.new(owner, self_t, map[owner].type_params)
         inner = Infer.new(HIR::LowerBody.lower(rhs), ctx, @table)
         inner.source_loader = loader
@@ -1125,7 +1189,7 @@ module ClearLS::Types
       declared = return_type_of(res, block_ret)
       # Contracts only fill in what resolution could not type, and only
       # for stdlib owners (user code overriding `sum` keeps its type).
-      if @table.unknown?(declared) && stdlib_candidates?(res) && (c = contract(e, receiver_type, name, args, block_ret))
+      if partially_unknown?(declared) && stdlib_candidates?(res) && (c = contract(e, receiver_type, name, args, block_ret))
         return c
       end
       declared
@@ -1191,6 +1255,13 @@ module ClearLS::Types
         end
       end
       nil
+    end
+
+    # Unknown, or a generic whose args are unknown (`Array(?)`).
+    private def partially_unknown?(t : TyId) : Bool
+      return true if @table.unknown?(t)
+      ty = @table[t]
+      ty.kind.named? && ty.args.any? { |a| @table.unknown?(a) }
     end
 
     private def stdlib_candidates?(res : CallResolution) : Bool
