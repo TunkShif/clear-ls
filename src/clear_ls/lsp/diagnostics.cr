@@ -104,6 +104,8 @@ module ClearLS::LSP
 
     # didSave / disk change of *uri*: everything checked before is stale.
     private def compiler_saved(uri : String) : Nil
+      # Failed context runs (e.g. the program did not compile) may succeed now.
+      @contexts.reject! { |_, v| v.nil? }
       entries = entries_for(uri) || return
       @checked.clear
       check_entries(entries)
