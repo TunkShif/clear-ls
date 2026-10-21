@@ -1,6 +1,7 @@
 require "./project"
 require "../vfs"
 require "../semantics/def_map"
+require "./compiler_facts"
 
 module ClearLS::Workspace
   # Item trees for every indexed file plus the merged `DefMap`.
@@ -23,6 +24,18 @@ module ClearLS::Workspace
     getter rebuilds = 0
     @entries = {} of FileId => Entry
     @def_map : Semantics::DefMap? = nil
+    @facts = CompilerFacts.new
+    # Members added from compiler facts in the current DefMap.
+    getter fact_members = 0
+
+    getter facts
+
+    # Replaces the compiler facts; rebuilds the DefMap when they changed.
+    def facts=(facts : CompilerFacts) : Nil
+      return if facts == @facts
+      @facts = facts
+      @def_map = nil
+    end
 
     def initialize(@project : Project, @vfs : VFS)
     end
@@ -32,6 +45,12 @@ module ClearLS::Workspace
         @rebuilds += 1
         map = Semantics::DefMap.new(@project.flags)
         @entries.each { |id, e| map.add_file(id, e.items) }
+        unless @facts.empty?
+          elapsed = Time.measure do
+            @fact_members = @facts.apply(map, ->(path : String) { @vfs.id_for(VFS.uri_for(path)) }, ->saved_text(String))
+          end
+          Log.debug { "applied compiler facts: #{@fact_members} members in #{elapsed.total_milliseconds.round(1)}ms" }
+        end
         map
       end
     end
@@ -92,6 +111,17 @@ module ClearLS::Workspace
     # Removes a file (deleted from disk).
     def remove(file : FileId) : Nil
       @def_map = nil if @entries.delete(file)
+    end
+
+    # Text of a file as the compiler saw it, unless an open buffer differs
+    # (then compiler locations may not match the indexed declarations).
+    private def saved_text(path : String) : String?
+      return nil unless File.file?(path)
+      text = File.read(path)
+      if (state = @vfs.file?(VFS.uri_for(path))) && state.overlay? && state.text != text
+        return nil
+      end
+      text
     end
 
     private def load_missing(paths : Array(String)) : Nil

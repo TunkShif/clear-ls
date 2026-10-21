@@ -17,6 +17,8 @@ module ClearLS::LSP
   # - `path`: crystal executable (default `$CRYSTAL` or `crystal`)
   # - `entries`: main files to check instead of the shard targets
   # - `debounceMs` (default 150)
+  # - `facts` (default true): add the facts exporter to each check and
+  #   merge generated methods and ivar types into the index
   class Server
     @compiler_options = JSON::Any.new({} of String => JSON::Any)
     @checker : Compiler::Checker? = nil
@@ -56,12 +58,42 @@ module ClearLS::LSP
       checker = Compiler::Checker.new(toolchain,
         ->(file : String, problems : Array(Compiler::Problem)) { publish_problems(file, problems) })
       @compiler_options["debounceMs"]?.try(&.as_i?).try { |ms| checker.debounce = ms.milliseconds }
+      if @compiler_options["facts"]?.try(&.as_bool?) != false
+        exporter = File.join(Dir.tempdir, "clear-ls-facts-#{Process.pid}.cr")
+        File.write(exporter, Compiler::Exporter.source(index.project.root))
+        @exporter_file = exporter
+        checker.extra_sources = [exporter]
+        checker.on_result = ->(entry : String, result : Compiler::Job::Result) { import_facts(entry, result) }
+      end
       @checker = checker
       check_entries(entry_points.targets)
     end
 
     private def stop_compiler : Nil
       @checker.try(&.stop)
+      @exporter_file.try { |f| File.delete?(f) }
+    end
+
+    @exporter_file : String? = nil
+    # Facts per entry point; merged into the index.
+    @entry_facts = {} of String => Workspace::CompilerFacts
+
+    # Takes the facts from one check. A section that the compile did not
+    # reach (an error stopped it first) keeps the entry's previous facts.
+    private def import_facts(entry : String, result : Compiler::Job::Result) : Nil
+      parsed = Compiler::Exporter::Facts.parse(result.stdout)
+      old = @entry_facts[entry]?
+      methods = parsed.methods || old.try(&.methods) || [] of Compiler::Exporter::MethodFact
+      ivars = parsed.ivars || old.try(&.ivars) || [] of Compiler::Exporter::IvarFact
+      @entry_facts[entry] = Workspace::CompilerFacts.snapshot(methods, ivars)
+      digests = {} of String => UInt64
+      @entry_facts.each_value { |f| digests.merge!(f.digests) }
+      merged = Workspace::CompilerFacts.new(
+        @entry_facts.values.flat_map(&.methods).uniq,
+        @entry_facts.values.flat_map(&.ivars).uniq, digests)
+      idx = @index || return
+      idx.facts = merged
+      Log.info { "compiler facts: #{merged.methods.size} methods, #{merged.ivars.size} ivars" }
     end
 
     # didOpen: check the programs containing *uri* once.

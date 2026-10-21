@@ -37,6 +37,7 @@ class FeatureClient
   end
 
   def cleanup
+    request("shutdown") rescue nil
     FileUtils.rm_rf(@root)
   end
 

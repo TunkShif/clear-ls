@@ -43,6 +43,7 @@ module ClearLS::Items
       end
       io << " @" << line_index.point(item.name_range.start)
       io << " [macro]" if item.origin.macro?
+      io << " [compiler]" if item.origin.compiler?
       item.annotations.each { |a| io << " @[" << a << ']' }
       item.conditions.each { |c| io << " if " << c }
       io << " include " << item.includes.join(", ") unless item.includes.empty?

@@ -42,6 +42,7 @@ module ClearLS::Items
   enum Origin
     Source # written in source
     Macro  # synthesised from a known macro call (getter, record, ...)
+    Compiler # reported by the compiler (hooks, `{% for %}`, inferred ivars)
   end
 
   # How a parameter binds arguments.

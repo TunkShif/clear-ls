@@ -127,3 +127,57 @@ describe Toolchain do
     FileUtils.rm_rf(root) if root
   end
 end
+
+describe Exporter::Facts do
+  it "parses methods and ivars, and marks unfinished sections" do
+    text = "noise\nclear-ls:M\tFoo\tfalse\tpublic\t/w/a.cr:3:5\tbar(x : Int32) : String\nclear-ls:M\t\ttrue\tprivate\t/w/b.cr:1:1\tbaz()\nclear-ls:MEND\nclear-ls:I\tFoo\t@x\t(Int32 | Nil)\n"
+    facts = Exporter::Facts.parse(text)
+    ms = facts.methods.not_nil!
+    ms.map { |m| {m.owner, m.class_level, m.visibility, m.file, m.line, m.column, m.header} }.should eq [
+      {"Foo", false, "public", "/w/a.cr", 3, 5, "bar(x : Int32) : String"},
+      {"", true, "private", "/w/b.cr", 1, 1, "baz()"},
+    ]
+    facts.ivars.should be_nil # no IEND: the compile stopped before typing ivars
+    Exporter::Facts.parse("clear-ls:MEND\nclear-ls:IEND\n").ivars.should eq [] of Exporter::IvarFact
+  end
+end
+
+describe ClearLS::Workspace::CompilerFacts do
+  it "adds only members missing from source" do
+    text = "class Foo\n  getter a : Int32\n  {% for n in %w(b) %}\n    def {{n.id}}; end\n  {% end %}\n  def c; end\nend\n"
+    tree = ClearLS::Items::Lower.lower(ClearLS::Syntax::Parser.new.parse(text))
+    map = ClearLS::Semantics::DefMap.new
+    file = ClearLS::FileId.new(0)
+    map.add_file(file, tree)
+    facts = ClearLS::Workspace::CompilerFacts.new([
+      Exporter::MethodFact.new("Foo", false, "public", "/w/a.cr", 2, 3, "a() : Int32"),
+      Exporter::MethodFact.new("Foo", false, "public", "/w/a.cr", 3, 3, "b()"),
+      Exporter::MethodFact.new("Foo", false, "public", "/w/a.cr", 6, 3, "c()"),
+      Exporter::MethodFact.new("Nope", false, "public", "/w/a.cr", 6, 3, "d()"),
+    ], [
+      Exporter::IvarFact.new("Foo", "@a", "Int32"),
+      Exporter::IvarFact.new("Foo", "@z", "String"),
+    ])
+    facts.apply(map, ->(_p : String) { file }, ->(_p : String) { text.as(String?) }).should eq 2
+    foo = map[map.lookup_path("Foo").not_nil!]
+    foo.members["b"].first.item.origin.compiler?.should be_true
+    foo.members["b"].first.item.range.should eq ClearLS::TextRange.new(text.index!("{%").to_u32, text.index!("{%").to_u32 + 1)
+    foo.members["a"].size.should eq 1
+    foo.members["c"].size.should eq 1
+    foo.members["@z"].first.item.detail.should eq "String"
+  end
+end
+
+describe "ClearLS::Workspace::CompilerFacts digests" do
+  it "skips files changed since the facts were taken" do
+    text = "class Foo\n  {% for n in %w(b) %}\n    def {{n.id}}; end\n  {% end %}\nend\n"
+    map = ClearLS::Semantics::DefMap.new
+    file = ClearLS::FileId.new(0)
+    map.add_file(file, ClearLS::Items::Lower.lower(ClearLS::Syntax::Parser.new.parse(text)))
+    m = [Exporter::MethodFact.new("Foo", false, "public", "/w/a.cr", 2, 3, "b()")]
+    stale = ClearLS::Workspace::CompilerFacts.new(m, [] of Exporter::IvarFact, {"/w/a.cr" => "old".hash})
+    stale.apply(map, ->(_p : String) { file }, ->(_p : String) { text.as(String?) }).should eq 0
+    fresh = ClearLS::Workspace::CompilerFacts.new(m, [] of Exporter::IvarFact, {"/w/a.cr" => text.hash})
+    fresh.apply(map, ->(_p : String) { file }, ->(_p : String) { text.as(String?) }).should eq 1
+  end
+end

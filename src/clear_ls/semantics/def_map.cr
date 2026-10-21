@@ -129,6 +129,13 @@ module ClearLS::Semantics
       end
     end
 
+    # Adds a member that has no source declaration of its own (compiler
+    # facts). *file* is where it was generated.
+    # Members do not affect ancestors or paths, so no cache is cleared.
+    def add_synthetic(owner : TypeId, file : FileId, item : Items::Item) : Nil
+      self[owner].members[member_key(item)] << Site.new(file, item)
+    end
+
     # Class-level defs (`def self.x`) live under a distinct key.
     def self.member_key(name : String, class_level : Bool) : String
       class_level ? "self.#{name}" : name
