@@ -17,8 +17,13 @@ module ClearLS::IDE
     @parser = Syntax::Parser.new
     @results = {} of {FileId, UInt64, UInt32} => Types::Infer
 
+    getter summaries : Types::Summaries
+
     def initialize(@def_map : Semantics::DefMap, @vfs : VFS)
       @table = Types::TypeTable.new(@def_map)
+      @summaries = Types::Summaries.new(@table)
+      vfs = @vfs
+      @summaries.revision_of = ->(id : FileId) { vfs.file?(vfs.uri(id)).try(&.revision) || 0_u64 }
     end
 
     # Inference for the body containing *offset* in *state*.
@@ -51,6 +56,7 @@ module ClearLS::IDE
       ctx = Types::DefContext.new(ns, self_t, info.type_params + free)
       inf = Types::Infer.new(body, ctx, @table)
       inf.source_loader = ->(site : Semantics::Site) { def_node(site) }
+      inf.summaries = @summaries
       unless body_is_def?(state, body)
         # File-level body: inside `class Foo ... end` self is `Foo.class`.
         file = state.id

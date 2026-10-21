@@ -78,8 +78,10 @@ module ClearLS::Flow
     getter eval_block : Hash(HIR::ExprId, BlockId)
     # Call or proc literal owning a block expression.
     getter closure_owner : Hash(HIR::ExprId, HIR::ExprId)
+    # Values the body returns: explicit `return`s and the fallthrough.
+    getter returns : Array(Source)
 
-    def initialize(@blocks, @merges, @eval_block, @closure_owner)
+    def initialize(@blocks, @merges, @eval_block, @closure_owner, @returns = [] of Source)
     end
 
     def [](id : BlockId) : Block

@@ -36,6 +36,7 @@ module ClearLS::Flow
     @handlers = [] of BlockId
     @eval_block = {} of HIR::ExprId => BlockId
     @closure_owner = {} of HIR::ExprId => HIR::ExprId
+    @returns = [] of Source
     @cur = CFG::ENTRY
 
     def initialize(@body : HIR::Body)
@@ -46,9 +47,12 @@ module ClearLS::Flow
 
     def run : CFG
       lower(@body.root)
+      # The def's value: the body's last expression, joined with every
+      # `return` (sources under `CFG#returns`).
+      @returns << Source.new(@cur, @body.root)
       finish(Terminator::Return, [CFG::EXIT])
       @blocks.each { |b| b.handler.try { |h| block(h).exc_preds << b.id } }
-      CFG.new(@blocks, @merges, @eval_block, @closure_owner)
+      CFG.new(@blocks, @merges, @eval_block, @closure_owner, @returns)
     end
 
     # -- block plumbing -----------------------------------------------------------
@@ -303,7 +307,9 @@ module ClearLS::Flow
     private def lower_jump(e : HIR::Expr) : Nil
       e.children.each { |c| lower(c) }
       eval(e.id)
-      value = e.children.first?
+      # Value: the single argument; several (`return a, b`) form a tuple,
+      # recorded as the jump itself (typed by `Infer#jump_value`).
+      value = e.children.size > 1 ? e.id : e.children.first?
       ctx = @loops.last?
       case e.kind
       when .return?
@@ -312,6 +318,8 @@ module ClearLS::Flow
           p.value_owner.try { |o| add_source(o, Source.new(@cur, value)) }
           goto(p.next_to)
         else
+          # `return` without a value returns nil (Source with no expr).
+          @returns << Source.new(@cur, value)
           finish(Terminator::Return, [CFG::EXIT])
         end
       when .break?

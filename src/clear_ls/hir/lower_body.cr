@@ -104,7 +104,17 @@ module ClearLS::HIR
       when .return?, .break?, .next?, .yield?
         kind = {Syntax::Kind::Return => ExprKind::Return, Syntax::Kind::Break => ExprKind::Break,
                 Syntax::Kind::Next => ExprKind::Next, Syntax::Kind::Yield => ExprKind::Yield}[k]
-        lower_children(node, kind)
+        # Values sit in an `argument_list`; `return a, b` returns a tuple.
+        kids = [] of ExprId
+        node.named_children.each do |c|
+          next if c.kind.comment?
+          if c.kind.argument_list?
+            c.named_children.each { |a| kids << lower(a) unless a.kind.comment? }
+          else
+            kids << lower(c)
+          end
+        end
+        add(kind, node.range, syntax: node.kind, children: kids)
       when .and?, .or?
         lower_children(node, k.and? ? ExprKind::And : ExprKind::Or)
       when .not?

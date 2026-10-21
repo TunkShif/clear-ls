@@ -4,6 +4,16 @@ include ClearLS
 
 require "../support/prelude"
 
+def def_node_in(trees : Hash(Int32, Syntax::Tree), site : Semantics::Site) : Syntax::Node?
+  t = trees[site.file.value]? || return nil
+  n = t.root.descendant(site.item.range.start, site.item.range.end)
+  while x = n
+    return x if x.kind.method_def? && x.range == site.item.range
+    n = x.parent
+  end
+  nil
+end
+
 private def infer(src : String, line_of_def = 0) : {Types::Infer, HIR::Body, String, Types::TypeTable}
   parser = Syntax::Parser.new
   map = Semantics::DefMap.new
@@ -18,7 +28,14 @@ private def infer(src : String, line_of_def = 0) : {Types::Infer, HIR::Body, Str
   self_t = ns == Semantics::DefMap::PROGRAM ? table.unknown : table.named(ns, map[ns].type_params.map { |p| table.type_param(p) })
   body = HIR::LowerBody.lower(node)
   ctx = Types::DefContext.new(ns, self_t, map[ns].type_params)
-  {Types::Infer.new(body, ctx, table).with_source(src).run, body, src, table}
+  inf = Types::Infer.new(body, ctx, table)
+  src_tree = tree
+  # Def sources for summaries: the prelude (file 0) and this file (1).
+  prelude = parser.parse(PRELUDE)
+  trees = {0 => prelude, 1 => src_tree}
+  inf.source_loader = ->(site : Semantics::Site) { def_node_in(trees, site) }
+  inf.summaries = Types::Summaries.new(table)
+  {inf.with_source(src).run, body, src, table}
 end
 
 # Type of the binding named *name* at its last reference.
@@ -544,5 +561,58 @@ describe "Types::Infer accessor defaults" do
     type_of_local(r, "n").should eq "Int32"
     type_of_local(r, "c").should eq "Int32"
     type_of_local(r, "d").should eq "Int32?"
+  end
+end
+
+describe "Types::Infer return summaries" do
+  it "infers returns of unannotated defs, with argument types" do
+    r = infer(<<-CR, 3)
+      class Item
+        getter name : String
+        def initialize(@name)
+        end
+        def label
+          name + "!"
+        end
+        def twice(x)
+          x
+        end
+      end
+      def m(i : Item)
+        a = i.label
+        b = i.twice(1)
+        c = i.twice("s")
+        d = helper(i)
+      end
+      def helper(i)
+        return nil if i.name.size > 3
+        i.name.size
+      end
+      CR
+    type_of_local(r, "a").should eq "String"
+    type_of_local(r, "b").should eq "Int32"
+    type_of_local(r, "c").should eq "String"
+    type_of_local(r, "d").should eq "Int32?"
+  end
+
+  it "terminates on recursion and keeps non-recursive paths" do
+    r = infer(<<-CR, 0)
+      def m
+        f = fact(3)
+        g = ping(1)
+      end
+      def fact(n)
+        return 1 if n == 0
+        n * fact(n - 1)
+      end
+      def ping(n)
+        n > 0 ? pong(n) : "done"
+      end
+      def pong(n)
+        ping(n - 1)
+      end
+      CR
+    type_of_local(r, "f").should eq "Int32"
+    type_of_local(r, "g").should eq "String"
   end
 end
