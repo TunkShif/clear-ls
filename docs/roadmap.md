@@ -312,7 +312,7 @@ methods, macro-generated defs (`{% for %}`), `responds_to?` narrowing.
 Remaining unknowns are mostly untyped params of stdlib defs analysed
 without a caller and macro-heavy code.
 
-### Phase 7 — compiler integration
+### Phase 7 — compiler integration (done)
 
 - Async `crystal build --no-codegen -f json` diagnostics.
 - `crystal tool expand` for explicit macros; a separate exporter for macro
@@ -367,6 +367,45 @@ Steps (one commit each):
 
 Exit criterion (design doc): compiler facts improve semantic results
 without blocking normal requests.
+
+Status: implemented as planned. `Compiler::Toolchain` and `Job` run
+subprocesses with timeouts and cancellation. `Compiler::Checker` checks
+each program (the shard targets whose require closure contains the file,
+else the file itself) at startup, on open, and on save. A newer request
+cancels the running check, and results are merged per file, so files that
+became clean are cleared. A stdlib error is reported at the last workspace
+frame of its trace, and the full trace becomes related information.
+Compiler columns are codepoints and are converted with the saved text.
+Formatting (`crystal tool format -`) formats the buffer text and sends one
+line-range edit. `clearLs/expandMacro` passes the cursor file as a source
+because the tool ignores cursors in required files.
+
+`Compiler::Exporter` adds about 0.05 s to the diagnostics compile and
+reports methods with locations and ivar types. Methods whose location has
+no source member of that name become `Origin::Compiler` items located at
+the generating code: hooks, `{% for %}`, `JSON::Serializable`. Undeclared
+ivars get the compiler's types. Facts from files saved since the check are
+skipped. A compile error stops the export after the methods section, and
+the previous ivars are kept. Hover labels both kinds of fact. Hovering a
+local in a saved, unmodified file starts a `tool context` run for its def.
+Later hovers then show `compiler: T` per instantiation. The tool falls
+back to top-level variables for uninstantiated defs, and those results are
+rejected. Requests that wait on a subprocess (expansion) are answered from
+a fiber (`LSP::Deferred`).
+
+Measurements (`--release`, this repo, 460 files): check 1.9 s (exporter
+adds no measurable time), 2140 method and 532 ivar facts → 826 synthetic
+members; DefMap rebuild 4 ms without facts, 5–7 ms with them (first
+application 60 ms, header parse cached per result). Hover latency while a
+check runs: median 0.2 ms. Small project: diagnostics 0.9 s after
+indexing, expansion 0.8 s, formatting 21 ms, context 0.7 s. `make spec`
+takes ~9 s now (was 1.1 s) because 9 specs run the real compiler.
+
+Not yet: diagnostics for unsaved buffers (the compiler only reads files;
+`--stdin-filename` replaces only the main file); hook-macro expansion
+preview (the tool cannot locate it); compiler facts for generic types'
+ivars (`type_vars` non-empty) and the stdlib; facts are not used for
+completion ranking beyond normal member lookup.
 
 ### Phase 8 — workspace identity
 
