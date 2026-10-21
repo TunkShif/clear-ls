@@ -637,3 +637,25 @@ describe "Types::Infer typeof and constants" do
     type_of_local(r, "n").should eq "Array(String)"
   end
 end
+
+describe "Types::Infer collection contracts" do
+  it "types tuple indexing by literal and keeps user overrides" do
+    r = infer(<<-CR, 1)
+      class Bag
+        def sum : String
+          ""
+        end
+      end
+      def m(t : {Int32, String}, b : Bag)
+        x = t[0]
+        y = t[1]
+        z = t[-1]
+        s = b.sum
+      end
+      CR
+    type_of_local(r, "x").should eq "Int32"
+    type_of_local(r, "y").should eq "String"
+    type_of_local(r, "z").should eq "String"
+    type_of_local(r, "s").should eq "String"
+  end
+end

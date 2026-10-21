@@ -328,6 +328,9 @@ module ClearLS::Types
       when .named?
         if a.kind.named? && a.def_id == p.def_id
           p.args.zip?(a.args) { |pp, aa| unify(table, pp, aa, bindings) if aa }
+        elsif a.kind.tuple? && table.def_map[p.def_id.not_nil!].full_name == "Tuple"
+          # `Tuple(K, V)` written as a generic ~ `{String, Int32}`.
+          p.args.zip?(a.args) { |pp, aa| unify(table, pp, aa, bindings) if aa }
         end
       when .tuple?, .proc?
         if a.kind == p.kind

@@ -1122,7 +1122,13 @@ module ClearLS::Types
       if res.candidates.empty? && (gen = generated_method(receiver_type, name, args))
         return gen
       end
-      return_type_of(res, block_ret)
+      declared = return_type_of(res, block_ret)
+      # Contracts only fill in what resolution could not type, and only
+      # for stdlib owners (user code overriding `sum` keeps its type).
+      if @table.unknown?(declared) && stdlib_candidates?(res) && (c = contract(e, receiver_type, name, args, block_ret))
+        return c
+      end
+      declared
     end
 
     # Methods the compiler defines without source: `Proc#call`, enum
@@ -1142,6 +1148,73 @@ module ClearLS::Types
         end
       end
       nil
+    end
+
+    # Stdlib methods whose result type the compiler computes from macros or
+    # literal arguments, which summaries cannot see (architecture §19:
+    # block/collection contracts). Only applied to stdlib receivers.
+    private def contract(e : HIR::Expr, recv : TyId, name : String, args : Array(TyId), block_ret : TyId?) : TyId?
+      t = @table[recv]
+      case t.kind
+      when .tuple?
+        # `t[0]` with a literal index: that element (the compiler types
+        # tuple indexing by literal per element).
+        if name.in?("[]", "[]?", "at") && e.children.size == 1
+          arg = @body.expr(e.children[0])
+          if arg.kind.literal? && arg.syntax.integer? && (i = arg.text.try(&.to_i?))
+            i += t.args.size if i < 0
+            if el = t.args[i]?
+              return el
+            end
+            return name == "[]?" ? nil_t : @table.no_return
+          end
+          return union_or_unknown(t.args) if name == "[]"
+        end
+      when .named?
+        owner = map[t.def_id.not_nil!].full_name
+        elem = enumerable_element(recv)
+        case name
+        when "sum", "product"
+          # `sum` / `sum(&)`: element (or block) type; `sum(initial)`: initial.
+          return args[0] if args.size == 1 && !@table.unknown?(args[0])
+          return block_ret if block_ret && !@table.unknown?(block_ret)
+          return elem if elem && args.empty? && !@table.unknown?(elem)
+        when "flatten"
+          if owner == "Array" && elem
+            return @table.named!("Array", [flatten_element(elem)])
+          end
+        when "zip"
+          if elem && !args.empty? && e.block.nil?
+            others = args.map { |a| enumerable_element(a) || @table.unknown }
+            return @table.named!("Array", [@table.tuple([elem] + others)])
+          end
+        end
+      end
+      nil
+    end
+
+    private def stdlib_candidates?(res : CallResolution) : Bool
+      return true if res.candidates.empty? && res.family.empty?
+      (res.candidates.empty? ? res.family : res.matches).all? do |m|
+        STDLIB_OWNERS.includes?(map[m.owner].full_name)
+      end
+    end
+
+    STDLIB_OWNERS = %w(Tuple NamedTuple Array Hash Enumerable Indexable Iterable Iterator Set Deque Slice StaticArray)
+
+    # Element type of nested arrays, flattened (`Array(Array(Int32) | Int32)`
+    # → Int32).
+    private def flatten_element(t : TyId, depth = 0) : TyId
+      return t if depth > 4
+      parts = @table.members(t).map do |m|
+        mt = @table[m]
+        if mt.kind.named? && map[mt.def_id.not_nil!].full_name == "Array" && mt.args.size == 1
+          flatten_element(mt.args[0], depth + 1)
+        else
+          m
+        end
+      end
+      union_or_unknown(parts)
     end
 
     INT_TYPES   = %w(Int8 Int16 Int32 Int64 Int128 UInt8 UInt16 UInt32 UInt64 UInt128)
