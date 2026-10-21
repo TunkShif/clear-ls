@@ -93,3 +93,55 @@ describe "self in type bodies" do
     c.try(&.cleanup)
   end
 end
+
+HOVER_GAPS_APP = {
+  "src/g.cr" => <<-CR,
+    enum Color
+      Red
+    end
+
+    module Shape
+      abstract def area(scale : Int32) : Int32
+    end
+
+    struct Point
+      property x : Int32 = 0
+    end
+
+    def run(t : {Int32, String}, c : Color)
+      first, second = t
+      pr = ->(v : Int32) { v + 1 }
+      w = pr.call(1)
+      q = c.red?
+      b = 1_u8
+      nt = {name: "n"}
+      i = 0
+      i += 1
+    end
+    CR
+}
+
+private def gap_hover(c, needle, shift = 0) : String?
+  u = c.open("src/g.cr")
+  h = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/g.cr", needle, shift)})
+  h.raw.nil? ? nil : h["contents"]["value"].as_s
+end
+
+describe "hover coverage gaps" do
+  it "hovers inferred but previously unhandled positions" do
+    with_client(HOVER_GAPS_APP, PRELUDE_FILES) do |c|
+      gap_hover(c, "first,").not_nil!.should contain("first : Int32")
+      gap_hover(c, "second =").not_nil!.should contain("second : String")
+      gap_hover(c, "call(1)").not_nil!.should contain("call : Int32")
+      gap_hover(c, "w =").not_nil!.should contain("w : Int32")
+      gap_hover(c, "red?").not_nil!.should contain("red? : Bool")
+      gap_hover(c, "q =").not_nil!.should contain("q : Bool")
+      gap_hover(c, "1_u8").not_nil!.should contain("UInt8")
+      gap_hover(c, "name:").not_nil!.should contain("name : String")
+      gap_hover(c, "+= 1").not_nil!.should contain("+= : Int32")
+      gap_hover(c, "scale :").not_nil!.should contain("scale : Int32")
+      gap_hover(c, "property").not_nil!.should contain("def Point#x() : Int32")
+      gap_hover(c, "property").not_nil!.should contain("def Point#x=(x : Int32)")
+    end
+  end
+end

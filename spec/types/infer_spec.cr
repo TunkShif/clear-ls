@@ -524,3 +524,20 @@ describe "Types::Infer case and rescue" do
     type_of_local(r, "v").should eq "Int32 | String"
   end
 end
+
+describe "Types::Infer accessor defaults" do
+  it "types getters declared with only a default value" do
+    r = infer(<<-CR, 0)
+      class Box
+        getter items = [] of String
+        class_getter count = 0
+      end
+      def m(b : Box)
+        x = b.items
+        n = Box.count
+      end
+      CR
+    type_of_local(r, "x").should eq "Array(String)"
+    type_of_local(r, "n").should eq "Int32"
+  end
+end

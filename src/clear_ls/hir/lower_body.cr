@@ -211,7 +211,8 @@ module ClearLS::HIR
       values = rhs.map { |r| lower(r) }
       targets = lhs.map { |l| lower_target(l) }
       kind = lhs.size > 1 || rhs.size > 1 ? ExprKind::MultiAssign : ExprKind::Assign
-      add(kind, node.range, children: targets + values)
+      # Target count in `text` (`a, b = t` has 2 targets, 1 value).
+      add(kind, node.range, children: targets + values, text: kind.multi_assign? ? targets.size.to_s : nil)
     end
 
     private def lower_op_assign(node : Syntax::Node) : ExprId

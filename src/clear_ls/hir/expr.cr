@@ -143,6 +143,11 @@ module ClearLS::HIR
 
     # Call with no receiver, arguments, or block: `foo`. Ambiguous between a
     # method call and an undefined local in incomplete code.
+    # Number of assignment targets (leading children) of Assign/MultiAssign.
+    def target_count : Int32
+      kind.multi_assign? ? (text.try(&.to_i?) || children.size // 2) : 1
+    end
+
     def bare_call? : Bool
       kind.call? && receiver.nil? && children.empty? && named_args.empty? && block.nil?
     end

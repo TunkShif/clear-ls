@@ -157,7 +157,7 @@ module ClearLS::LSP
       state = document(params)
       off = offset(state, params["position"])
       ti = type_info(state)
-      if hit = ti.local_hover(off) || ti.var_hover(off) || ti.self_hover(off) || ti.def_hover(off) || ti.method_hover(off)
+      if hit = ti.local_hover(off) || ti.var_hover(off) || ti.self_hover(off) || ti.accessor_macro_hover(off) || ti.def_hover(off) || ti.decl_param_hover(off) || ti.literal_hover(off) || ti.key_or_op_hover(off) || ti.method_hover(off)
         md, r = hit
         return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
       end

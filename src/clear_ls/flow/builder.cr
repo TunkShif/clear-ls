@@ -126,7 +126,7 @@ module ClearLS::Flow
         end
         eval(id)
       when .assign?, .multi_assign?
-        n = e.kind.multi_assign? ? e.children.size // 2 : 1
+        n = e.target_count
         e.children[n..].each { |v| lower(v) }
         # Local targets are writes, not reads; other targets (`@x`, `a.b`,
         # `a[i]`) evaluate their operands.

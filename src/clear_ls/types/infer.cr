@@ -746,7 +746,7 @@ module ClearLS::Types
     end
 
     private def visit_multi_assign(e : HIR::Expr) : TyId
-      n = e.children.size // 2
+      n = e.target_count
       targets = e.children[0, n]
       values = e.children[n..].map { |v| operand(v) }
       if values.size == 1 && targets.size > 1
@@ -978,7 +978,29 @@ module ClearLS::Types
       if res.candidates.empty? && (prim = primitive_op(receiver_type, name, args))
         return prim
       end
+      if res.candidates.empty? && (gen = generated_method(receiver_type, name, args))
+        return gen
+      end
       return_type_of(res, block_ret)
+    end
+
+    # Methods the compiler defines without source: `Proc#call`, enum
+    # member predicates (`Color::Red` → `#red?`).
+    private def generated_method(recv : TyId, name : String, args : Array(TyId)) : TyId?
+      t = @table[recv]
+      if t.kind.proc? && name == "call"
+        return t.args.last
+      end
+      if t.kind.named? && name.ends_with?('?') && args.empty?
+        info = map[t.def_id.not_nil!]
+        if info.kind.enum?
+          member = name.rchop('?')
+          if info.members.any? { |k, sites| k.underscore == member && sites.any?(&.item.kind.constant?) }
+            return @table.named!("Bool")
+          end
+        end
+      end
+      nil
     end
 
     INT_TYPES   = %w(Int8 Int16 Int32 Int64 Int128 UInt8 UInt16 UInt32 UInt64 UInt128)
@@ -1042,9 +1064,17 @@ module ClearLS::Types
     # `xs.map(&.size)`: the receiver of `.size` is the block's argument.
     private def implicit_receiver(call : HIR::Expr) : TyId?
       return nil unless call.syntax.implicit_object_call? && call.receiver.nil?
-      blk = @parent[call.id]? || return nil
-      return nil unless @body.expr(blk).syntax.implicit_object_call?
-      @implicit_args[blk]? || @table.unknown
+      parent_id = @parent[call.id]? || return nil
+      parent = @body.expr(parent_id)
+      if parent.kind.when?
+        # `case x; when .nil?`: the receiver is the subject.
+        kase = @parent[parent_id]?.try { |k| @body.expr(k) } || return nil
+        subj = kase.children[0]?
+        return nil unless subj && !@body.expr(subj).kind.nop?
+        return @types[subj]? || @table.unknown
+      end
+      return nil unless parent.syntax.implicit_object_call?
+      @implicit_args[parent_id]? || @table.unknown
     end
 
     # Resolutions of calls, from the last evaluation of each call.
@@ -1206,7 +1236,13 @@ module ClearLS::Types
       self_t = c.self_type
       text = sig.return_type
       if text.nil?
-        # `def initialize` via `self.new` and accessor macros without types.
+        # `getter x = [] of T`: the type of the ivar the macro declares.
+        if item.origin.macro? && sig.params.empty? && item.name[0].letter?
+          ivar = (sig.receiver ? "@@" : "@") + item.name.rstrip("?!")
+          t = Infer.ivar_type(map, @table, m.owner, ivar, !sig.receiver.nil?, @ctx)
+          return Subst.apply(@table, t, m.bindings) unless @table.unknown?(t)
+        end
+        # `def initialize` via `self.new`.
         return nil unless item.name == "new"
         return self_t
       end
