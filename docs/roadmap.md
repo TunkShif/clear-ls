@@ -320,6 +320,54 @@ without a caller and macro-heavy code.
 - Features: compiler diagnostics, expansion preview, formatting via
   `crystal tool format`, compiler-confirmed types.
 
+Measured (Crystal 1.22): `build --no-codegen -f json` writes a JSON array
+of frames (instantiation trace, then the error) to stderr and exits 1;
+warnings stay text even with `-f json`; columns count codepoints. It takes
+~0.7 s on a small project and 1.8 s on this repo. `--stdin-filename` only
+replaces the main file, so compiler results describe saved files.
+`tool expand -c` finds a cursor in a non-main file only when that file is
+also passed as a source; hook expansions (`included`, `inherited`) are never
+found. An extra source with `macro finished` sees every method, including
+those that hooks, `{% for %}` and `property` generate, with locations, and can run in
+the diagnostics compile (stdout vs stderr). Ivar types need a nested
+`\{% %}` inside a def body. `tool format -` takes ~25 ms. `tool context`
+takes ~0.8 s per location, which is too slow to call from hover directly.
+
+Steps (one commit each):
+
+1. **Toolchain runner** (`src/clear_ls/compiler/`). Subprocess runner
+   with timeout and kill; entry-point selection (shard targets whose
+   require closure contains the file, else the file itself); parsers for
+   JSON error frames (final error + trace as related information) and
+   text warnings. Unit specs on recorded output plus one real-compiler
+   spec.
+2. **Async diagnostics.** On open/save, a background fiber compiles each
+   affected entry point; a newer run supersedes (kills) an older one;
+   `publishDiagnostics` per file, clearing files that no longer have
+   errors; codepoint columns are converted to the client encoding using the
+   text of the saved file. `initializationOptions.compiler` (`enabled`, `path`,
+   `entries`). Requests never wait on the compiler.
+3. **Formatting.** `textDocument/formatting` via `crystal tool format -`
+   on the buffer text, minimal line-range edit; syntax errors return no
+   edits plus a log message.
+4. **Expansion preview.** `clearLs/expandMacro` request (position →
+   expanded sources and macro locations) on the saved file; Neovim usage
+   in README.
+5. **Compiler facts exporter.** Extra `macro finished` source in the
+   diagnostics compile: workspace methods (owner, name, signature,
+   location) and ivar types. Methods missing from the DefMap become
+   synthetic items (provenance `compiler`, location = generating call);
+   ivar types fill unknown ivars. Facts are labelled and replaced on the
+   next successful run.
+6. **Compiler-confirmed types.** `tool context` for the def under the
+   cursor, run in the background after a hover on an unchanged saved
+   file and cached by (file revision, def); later hovers show
+   `compiler: T` beside the inferred type.
+7. **Verification and docs.**
+
+Exit criterion (design doc): compiler facts improve semantic results
+without blocking normal requests.
+
 ### Phase 8 — workspace identity
 
 - `DefId`-keyed reference index, incrementally maintained.
