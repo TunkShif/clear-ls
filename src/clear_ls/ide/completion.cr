@@ -136,10 +136,28 @@ module ClearLS::IDE
         sig = first.try(&.item.signature)
         detail = sig ? "#{name}#{sig}" : name
         detail += "  (+#{sites.size - 1} overloads)" if sites.size > 1
+        tier = member_tier(name, sites)
         CompletionItem.new(name, first.try(&.item.kind.macro?) ? CompletionKind::Macro : CompletionKind::Method,
           detail: detail, documentation: first.try(&.item.doc),
-          sort_text: "#{depth.to_s.rjust(2, '0')}#{name}", overloads: sites.size)
+          sort_text: "#{tier}#{depth.to_s.rjust(2, '0')}#{name}", overloads: sites.size)
       end.sort_by!(&.sort_text.not_nil!).first(MAX_ITEMS)
+    end
+
+    # Base types whose methods every value has; listed after the receiver's
+    # own methods.
+    GENERIC_OWNERS = %w(Object Reference Value Struct Class Comparable Kernel)
+
+    # Sort tier: 0 the receiver's methods, 1 methods from universal base
+    # types, 2 operators (`==`, `+`, `[]`, ...).
+    private def member_tier(name : String, sites : Array(Semantics::Site)) : Int32
+      return 2 unless name[0].letter? || name[0] == '_'
+      map = @typing.def_map
+      generic = sites.all? do |s|
+        owner = map.namespace_at(s.file, s.item.range.start)
+        # `:nodoc:` methods are internal API.
+        GENERIC_OWNERS.includes?(map[owner].full_name) || s.item.doc.try(&.starts_with?(":nodoc:")) || false
+      end
+      generic ? 1 : 0
     end
 
     # -- `Foo::|` -------------------------------------------------------------------

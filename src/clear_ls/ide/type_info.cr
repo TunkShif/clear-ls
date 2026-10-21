@@ -54,6 +54,87 @@ module ClearLS::IDE
       {call, matches, inf.types[call.id]?}
     end
 
+    # `@x` / `@@x` anywhere in the file: declared type from the owner and
+    # its ancestors (`@x : T`, accessors, `initialize(@x : T)`), else the
+    # type inferred at this expression.
+    def var_hover(offset : UInt32) : {String, TextRange}?
+      node = @state.tree.root.descendant(offset, offset, named: true) || return nil
+      return nil unless node.kind.instance_var? || node.kind.class_var?
+      name = node.text
+      cvar = node.kind.class_var?
+      map = @typing.def_map
+      ns = map.namespace_at(@state.id, offset)
+      owner = ns == Semantics::DefMap::PROGRAM ? nil : ns
+      ctx = Types::DefContext.new(ns, @typing.self_type(ns), owner.try { |o| map[o].type_params } || [] of String)
+      t = Types::Infer.ivar_type(map, table, owner, name, cvar, ctx)
+      if table.unknown?(t) && (hit = @typing.infer_at(@state, @bodies, offset))
+        body, inf = hit
+        body.exprs.each do |e|
+          next unless e.range == node.range
+          et = inf.types[e.id]? || next
+          t = et unless table.unknown?(et)
+        end
+      end
+      ty = table.unknown?(t) ? declared_text(owner, name, cvar) : table.to_s(t)
+      kind = cvar ? "class variable" : "instance variable"
+      owner_name = owner.try { |o| map[o].full_name }
+      md = String.build do |io|
+        io << "```crystal
+" << name
+        io << " : " << ty if ty
+        io << "
+```
+
+" << kind
+        io << " of `" << owner_name << '`' if owner_name
+      end
+      {md, node.range}
+    end
+
+    # Restriction text of a declaration when it does not parse to a type.
+    private def declared_text(owner : Semantics::TypeId?, name : String, cvar : Bool) : String?
+      owner || return nil
+      kind = cvar ? Items::ItemKind::ClassVar : Items::ItemKind::InstanceVar
+      @typing.def_map.lookup_member(owner, name).find(&.item.kind.==(kind)).try(&.item.detail)
+    end
+
+    # On a def's name or its `self.` receiver: the declaration's signature.
+    def def_hover(offset : UInt32) : {String, TextRange}?
+      node = @state.tree.root.descendant(offset, offset, named: true) || return nil
+      def_node = node.parent || return nil
+      return nil unless def_node.kind.method_def? || def_node.kind.abstract_method_def? || def_node.kind.macro_def?
+      name_node = def_node.field(Syntax::Field::Name)
+      recv_node = def_node.fields(Syntax::Field::ClassNode).find(&.named?)
+      return nil unless node == name_node || node == recv_node
+      map = @typing.def_map
+      ns = map.namespace_at(@state.id, def_node.start_byte)
+      site = map[ns].members.each_value.flat_map(&.itself).find do |s|
+        s.file == @state.id && s.item.range.start == def_node.start_byte
+      end || return nil
+      item = site.item
+      owner = map[ns].full_name
+      md = String.build do |io|
+        io << "```crystal
+"
+        io << item.visibility.to_s.downcase << ' ' unless item.visibility.public?
+        io << (item.kind.macro? ? "macro " : "def ")
+        io << owner << (item.signature.try(&.receiver) ? "." : "#") unless owner.empty?
+        io << item.name << item.signature << "
+```"
+        if node == recv_node && !owner.empty?
+          io << "
+
+class method: `self` is `" << owner << ".class`"
+        end
+        if doc = item.doc
+          io << "
+
+" << doc
+        end
+      end
+      {md, node.range}
+    end
+
     def method_hover(offset : UInt32) : {String, TextRange}?
       call, matches, ret = call_at(offset) || return nil
       return nil if matches.empty?

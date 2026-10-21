@@ -145,6 +145,14 @@ module ClearLS::Items
           k = var.kind.instance_var? ? ItemKind::InstanceVar : ItemKind::ClassVar
           dest << item(k, var.text, node, var, vis, detail: node.field_text(Syntax::Field::Type))
         end
+      when .assign?
+        # `@x = 1` / `@@x = 0` in a type body: an ivar/cvar with an initial
+        # value (typed from the value text later).
+        lhs = node.field(Syntax::Field::Lhs)
+        if lhs && owner && (lhs.kind.instance_var? || lhs.kind.class_var?)
+          k = lhs.kind.instance_var? ? ItemKind::InstanceVar : ItemKind::ClassVar
+          dest << item(k, lhs.text, node, lhs, vis, detail: node.field_text(Syntax::Field::Rhs))
+        end
       when .include?, .extend?
         if owner && (target = node.named_children.find { |c| !c.kind.error? && !c.kind.comment? })
           (kind.include? ? owner.includes : owner.extends) << target.text
