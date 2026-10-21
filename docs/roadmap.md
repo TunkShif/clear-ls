@@ -250,6 +250,38 @@ inserted on the same line (handled) or typed.
   instances, recursion and widening budgets, block/collection contracts.
 - Features: typed collection chains, block parameter types, more inlay hints.
 
+Already done in Phase 3: substitution from receivers, includes, and
+`forall`; shallow yield summaries. Measured blockers (unknown locals by
+cause, stdlib / this repo): viable call without declared return 506 / 89,
+unknown receiver 633 / 67 (mostly downstream of the former), unresolved
+name 185 / 28.
+
+Steps (one commit each):
+
+1. **Summary engine.** `Types::Summaries` per Typing generation: return
+   (and yield) summaries of unannotated defs keyed by (def, self type,
+   argument types), computed on demand by inferring the def's body with
+   params bound to the call's argument types; states Computing → Complete,
+   recursion yields the partial result (or unknown), depth and total-work
+   budgets. Replaces the separate yield summary path. Unit specs with the
+   fake prelude (`Item#label`, recursive defs, mutual recursion).
+2. **Use summaries in inference.** `declared_return` falls back to the
+   summary; `return` values, implicit last expression, and NoReturn paths
+   all join. Coverage/regression diff on repo and stdlib.
+3. **`typeof` and element types.** `typeof(expr)` in restrictions and
+   bodies (`[] of typeof(...)`), `Enumerable.element_type`, `.not_nil!`
+   in type position → `compact_map`, `compact`, `flatten`, `sum`, `to_h`.
+4. **Collection/block contracts.** Remaining exit-criterion chains that
+   summaries cannot reach (primitive-backed or macro-generated stdlib
+   code): tuple `[]` with literal index, `Hash#[]`/`[]?`, `reduce`,
+   `find`, measured by the chains fixture.
+5. **Features.** Inlay hints for unannotated method returns; hover shows
+   inferred return types (labelled inferred).
+6. **Verification and docs.**
+
+Exit criterion (design doc): Array(T), Hash(K, V), tuple, block, map,
+compact_map, find, and reduce chains retain useful concrete types.
+
 ### Phase 7 — compiler integration
 
 - Async `crystal build --no-codegen -f json` diagnostics.
