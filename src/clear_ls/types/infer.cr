@@ -60,6 +60,11 @@ module ClearLS::Types
     # Types for unrestricted params by index in the def's signature, from
     # the call being summarised.
     property param_args = [] of TyId
+    # Type of `yield` in this body: the caller's block value (summaries
+    # for one call site), else unknown.
+    property yield_value : TyId? = nil
+    # Inferring a def for a summary (not a body the user is editing).
+    property summarising = false
 
     @env = {} of HIR::BindingId => TyId
 
@@ -101,8 +106,26 @@ module ClearLS::Types
       @main_pass = false
       @reached = @in.keys.to_set
       solve_dead
+      final_binding_types
       self
     end
+
+    # Joins of every value assigned to each binding, taken from one final
+    # replay of each analysed block, so values from earlier (not yet
+    # converged) worklist iterations do not leak in.
+    private def final_binding_types : Nil
+      seeded = @binding_types.select { |b, _| k = @body.binding(b).kind; k.param? || k.block_param? }
+      @binding_types = seeded
+      @collecting = true
+      cfg.blocks.each do |b|
+        entry = @in[b.id.value]? || next
+        replay(b, entry) { false }
+      end
+    ensure
+      @collecting = false
+    end
+
+    @collecting = false
 
     # Tuple values of `return a, b` (the jump itself has type NoReturn).
     @jump_values = {} of HIR::ExprId => TyId
@@ -253,6 +276,7 @@ module ClearLS::Types
 
     private def assign(b : HIR::BindingId, ty : TyId) : Nil
       @env[b] = ty
+      return if @replaying && !@collecting
       prev = @binding_types[b]?
       @binding_types[b] = prev ? join(prev, ty) : ty
     end
@@ -321,7 +345,10 @@ module ClearLS::Types
       compute_order
       @in[0] = entry
       @pending[0] = true
-      while r = @pending.index(true)
+      # Hard cap on block transfers: oscillating values (block results that
+      # feed back into their own parameters) must not hang the server.
+      budget = cfg.blocks.size * (MAX_VISITS + 2) * 4
+      while (r = @pending.index(true)) && (budget -= 1) >= 0
         @pending[r] = false
         b = cfg.blocks[@by_rank[r]]
         alive = transfer(b, @in[b.id.value])
@@ -335,11 +362,16 @@ module ClearLS::Types
 
     # Runs a block's operations from *env*. Returns whether its end is
     # reachable.
+    # Block holding each closure's `Enter`.
+    @enter_block = {} of HIR::ExprId => Int32
+    @reentries = Hash(Int32, Int32).new(0)
+
     private def transfer(b : Flow::Block, env : Env) : Bool
       @env = env.dup
       alive = true
       b.ops.each do |op|
         if op.kind.enter?
+          @enter_block[op.expr] = b.id.value
           enter(op.expr)
           next
         end
@@ -359,6 +391,13 @@ module ClearLS::Types
     # A value read by an expression in another block changed (a closure's
     # value, a branch value of an `if`): reanalyse that block.
     private def notify_consumer(id : HIR::ExprId, from : Flow::BlockId) : Nil
+      if @body.expr(id).kind.block? && (head = @enter_block[id]?)
+        # The block's value feeds its own params (yield summaries keyed by
+        # the block value): re-enter the closure, within the visit budget
+        # (values can oscillate between iterations).
+        @reentries[head] += 1
+        enqueue(head) if @in.has_key?(head) && @reentries[head] <= MAX_VISITS
+      end
       cur = @parent[id]?
       while c = cur
         if blk = cfg.eval_block[c]?
@@ -549,7 +588,11 @@ module ClearLS::Types
              ts.each_with_index do |t, i|
                (@yield_types[i]? || (@yield_types << [] of TyId; @yield_types[i])) << t
              end
-             @table.unknown
+             # Value of the caller's block, when the summary was asked for
+             # one call site; otherwise NoReturn: the block's value is not
+             # known yet and contributes nothing (`Pending` seed), so
+             # `memo = yield memo, e` keeps memo's other assignments.
+             @yield_value || (@summarising ? @table.pending : @table.unknown)
            when .other?
              if e.syntax.uninitialized_var?
                e.type_text.try { |t| parse_type(t) } || @table.unknown
@@ -960,7 +1003,10 @@ module ClearLS::Types
       recv_t = call.receiver.try { |r| operand(r) }
       return [] of TyId if name.in?("as", "as?")
       return [@table.without_nil(recv_t)] if name == "try" && recv_t
-      block_types_for(resolve_call(call).candidates)
+      # The block's value from the previous closure iteration feeds yield
+      # summaries whose arguments depend on it (`reduce(memo) { |acc, x| }`).
+      block_ret = call.block.try { |b| @types[b]? }
+      block_types_for(resolve_call(call).candidates, block_ret)
     end
 
     # -- calls --------------------------------------------------------------------
@@ -1234,14 +1280,14 @@ module ClearLS::Types
 
     # Block arg types from `& : T, U -> R` / `&block : T -> R` restrictions,
     # else from the `yield`s in the method body (shallow summary).
-    private def block_types_for(cands : Array(CallCandidate)) : Array(TyId)
+    private def block_types_for(cands : Array(CallCandidate), block_ret : TyId? = nil) : Array(TyId)
       cands.each do |c|
         m = c.match
         sig = m.site.item.signature || next
         bp = sig.params.find(&.kind.block?)
         r = bp.try(&.restriction)
         unless r
-          ts = yield_summary(m, c.self_type, c)
+          ts = yield_summary(m, c.self_type, c, block_ret)
           return ts unless ts.empty?
           next
         end
@@ -1249,9 +1295,42 @@ module ClearLS::Types
         t = TypeExprParser.parse(r, @table, m.owner, owner.type_params + sig.free_vars, c.self_type)
         pt = @table[t]
         next unless pt.kind.proc?
-        return pt.args[0...-1].map { |a| Subst.apply(@table, a, m.bindings) }
+        # Unbound `forall` vars stay open (`U` of `each_with_object` without
+        # an argument type); the owner's own params (`T` inside Array) are
+        # meaningful there.
+        bindings = arg_bindings(c)
+        return pt.args[0...-1].map do |a|
+          x = Subst.apply(@table, a, bindings)
+          # Keep open vars inside generic code (`forall U` callers can still
+          # read `U`); only the def's own unbound vars become unknown when
+          # the caller has no type params of that name.
+          sig.free_vars.any? { |fv| mentions_param?(x, fv) && !@ctx.type_params.includes?(fv) } ? @table.unknown : x
+        end
       end
       [] of TyId
+    end
+
+    private def mentions_param?(t : TyId, name : String) : Bool
+      ty = @table[t]
+      return ty.param == name if ty.kind.type_param?
+      ty.args.any? { |x| mentions_param?(x, name) }
+    end
+
+    # Receiver bindings plus `forall` vars bound from the restrictions of
+    # the parameters the arguments went to.
+    private def arg_bindings(c : CallCandidate) : Hash(String, TyId)
+      m = c.match
+      bindings = m.bindings.dup
+      sig = m.site.item.signature || return bindings
+      return bindings if sig.free_vars.empty?
+      owner = map[m.owner]
+      tparams = owner.type_params + sig.free_vars
+      (c.arg_params + c.named_params).each_with_index do |pi, i|
+        next unless pi && (r = sig.params[pi].restriction) && (a = c.arg_types[i]?)
+        next if sig.params[pi].kind.double_splat?
+        Subst.unify(@table, TypeExprParser.parse(r, @table, m.owner, tparams, c.self_type), a, bindings)
+      end
+      bindings
     end
 
     # Return type of one candidate, with generic and `forall` substitution.
@@ -1272,26 +1351,16 @@ module ClearLS::Types
         # `def initialize` via `self.new`.
         return self_t if item.name == "new"
         # Unannotated def: summary of its body for this call shape.
-        t = summary(c).returns
-        return @table.no_return if t == @table.no_return
+        t = summary(c, block_ret).returns
+        return t if t == @table.no_return || t == @table.pending
         return nil if @table.unknown?(t)
         r = Subst.apply(@table, t, m.bindings)
-        return Subst.open?(@table, r) ? nil : r
+        return still_open?(r) ? nil : r
       end
       tparams = owner.type_params + sig.free_vars
       ret = TypeExprParser.parse(text, @table, m.owner, tparams, self_t)
-      bindings = m.bindings.dup
+      bindings = arg_bindings(c)
       unless sig.free_vars.empty?
-        # Bind free vars from the restrictions of the parameters the
-        # arguments bound to, and from the block.
-        types = c.arg_types
-        (c.arg_params + c.named_params).each_with_index do |pi, i|
-          next unless pi && (r = sig.params[pi].restriction) && (a = types[i]?)
-          next if sig.params[pi].kind.double_splat?
-          pattern = TypeExprParser.parse(r, @table, m.owner, tparams, self_t)
-          # `*args : T` binds T per element.
-          Subst.unify(@table, pattern, a, bindings)
-        end
         if (bp = sig.params.find(&.kind.block?)) && (r = bp.restriction) && block_ret
           pt = TypeExprParser.parse(r, @table, m.owner, tparams, self_t)
           if @table[pt].kind.proc?
@@ -1300,7 +1369,16 @@ module ClearLS::Types
         end
       end
       result = Subst.apply(@table, ret, bindings)
-      Subst.open?(@table, result) ? nil : result
+      still_open?(result) ? nil : result
+    end
+
+    # A type param left after substitution that is not one of the current
+    # body's own type params (`T` inside `Array(T)` code is meaningful;
+    # an unbound `U` from a callee's `forall` is not).
+    private def still_open?(t : TyId) : Bool
+      ty = @table[t]
+      return !@ctx.type_params.includes?(ty.param.not_nil!) if ty.kind.type_param?
+      ty.args.any? { |x| still_open?(x) }
     end
 
     # `self` in a method's signature: the receiver instance type.
@@ -1311,7 +1389,7 @@ module ClearLS::Types
 
     # Summary of a candidate's body for this call: params without a
     # restriction take the argument types bound to them.
-    private def summary(c : CallCandidate) : Summaries::Summary
+    private def summary(c : CallCandidate, block_ret : TyId? = nil) : Summaries::Summary
       cache = @summaries || return Summaries::Summary.new(@table.unknown, [] of TyId)
       loader = @source_loader || return cache.unknown_summary
       m = c.match
@@ -1320,13 +1398,26 @@ module ClearLS::Types
       args = [] of TyId
       if sig
         args = Array(TyId).new(sig.params.size, @table.unknown)
+        bound = Set(Int32).new
         (c.arg_params + c.named_params).each_with_index do |pi, i|
-          next unless pi && (t = c.arg_types[i]?)
+          next unless pi
+          bound << pi
+          next unless t = c.arg_types[i]?
           next unless sig.params[pi].kind.positional? && sig.params[pi].restriction.nil?
           args[pi] = t
         end
+        # Omitted params with a literal default (`if_none = nil`): the
+        # default's type.
+        sig.params.each_with_index do |p, i|
+          next if bound.includes?(i) || !p.kind.positional? || p.restriction
+          d = p.default || next
+          dt = Infer.value_text_type(d, @table, m.owner)
+          args[i] = dt unless @table.unknown?(dt)
+        end
       end
-      cache.get(m.site, c.self_type, args) do |eff_args|
+      # The block's value is part of the call shape (`reduce`'s memo).
+      shape = block_ret && !@table.unknown?(block_ret) ? args + [block_ret] : args
+      cache.get(m.site, c.self_type, shape) do |eff_args|
         node = loader.call(m.site) || next nil
         owner = map[m.owner]
         ctx = DefContext.new(m.owner, c.self_type, owner.type_params + (sig.try(&.free_vars) || [] of String))
@@ -1334,7 +1425,10 @@ module ClearLS::Types
         inner.source_loader = loader
         inner.summaries = cache
         inner.summary_depth = summary_depth
-        inner.param_args = positional_param_args(sig, eff_args)
+        inner.summarising = true
+        n = sig.try(&.params.size) || 0
+        inner.param_args = positional_param_args(sig, eff_args.size > n ? eff_args[0, n] : eff_args)
+        inner.yield_value = eff_args[n]? if eff_args.size > n
         inner.with_source(node.tree.text).run
         yields = inner.yield_types.map { |ts| union_or_unknown(ts.uniq) }
         Summaries::Summary.new(inner.return_type, yields)
@@ -1355,12 +1449,12 @@ module ClearLS::Types
 
     # Joined types of each `yield` argument in the candidate's body, with
     # the receiver's generic bindings.
-    private def yield_summary(m : MethodMatch, receiver_type : TyId, c : CallCandidate? = nil) : Array(TyId)
+    private def yield_summary(m : MethodMatch, receiver_type : TyId, c : CallCandidate? = nil, block_ret : TyId? = nil) : Array(TyId)
       return [] of TyId if summary_depth <= 0
       cand = c || return [] of TyId
-      summary(cand).yields.map do |t|
+      summary(cand, block_ret).yields.map do |t|
         r = Subst.apply(@table, t, m.bindings)
-        Subst.open?(@table, r) ? @table.unknown : r
+        still_open?(r) ? @table.unknown : r
       end
     end
 

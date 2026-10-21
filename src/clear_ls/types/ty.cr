@@ -14,6 +14,10 @@ module ClearLS::Types
     Metaclass # `Foo.class`, the type of the constant `Foo`
     TypeParam # unresolved generic parameter `T` inside its owner
     NoReturn
+    # A value not computed yet (fixed-point seed: a recursive call's result,
+    # a summary's `yield`). Vanishes from unions like NoReturn but does not
+    # end control flow; standing alone it reads as unknown.
+    Pending
   end
 
   # Structural type. Generic args, union members, tuple elements, and proc
@@ -42,10 +46,12 @@ module ClearLS::Types
 
     getter unknown : TyId
     getter no_return : TyId
+    getter pending : TyId
 
     def initialize(@def_map)
       @unknown = intern(Ty.new(TyKind::Unknown))
       @no_return = intern(Ty.new(TyKind::NoReturn))
+      @pending = intern(Ty.new(TyKind::Pending))
     end
 
     def [](id : TyId) : Ty
@@ -113,7 +119,7 @@ module ClearLS::Types
         t = self[m]
         case t.kind
         when .union?     then t.args.each { |a| flat << a unless flat.includes?(a) }
-        when .no_return? then next
+        when .no_return?, .pending? then next
         when .unknown?   then return @unknown
         else                  flat << m unless flat.includes?(m)
         end
@@ -129,7 +135,8 @@ module ClearLS::Types
     end
 
     def unknown?(id : TyId) : Bool
-      self[id].kind.unknown?
+      k = self[id].kind
+      k.unknown? || k.pending?
     end
 
     def nil_type?(id : TyId) : Bool
@@ -154,6 +161,7 @@ module ClearLS::Types
       case t.kind
       in .unknown?    then io << '?'
       in .no_return?  then io << "NoReturn"
+      in .pending?    then io << '?'
       in .type_param? then io << t.param
       in .named?
         io << @def_map[t.def_id.not_nil!].full_name

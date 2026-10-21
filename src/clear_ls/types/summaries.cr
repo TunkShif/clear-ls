@@ -11,7 +11,7 @@ module ClearLS::Types
   # Summaries are computed when a call needs them and cached for the
   # lifetime of the TypeTable (one DefMap generation). Recursion (a def
   # whose summary is being computed is called again, directly or through
-  # other defs) answers NoReturn for the inner call, so the outer summary
+  # other defs) answers Pending for the inner call, so the outer summary
   # is built from the non-recursive paths, like a first fixed-point
   # iteration. Results computed while a recursion was cut are only cached
   # for the outermost def of the cycle (inner ones would keep the cut). Budgets bound nesting depth and total work per Typing.
@@ -64,9 +64,9 @@ module ClearLS::Types
         @hits += 1
         return cached
       end
-      # Recursive call: contributes nothing to the outer summary (NoReturn
+      # Recursive call: contributes nothing to the outer summary (Pending
       # vanishes from unions), like the first iteration of a fixed point.
-      return Summary.new(@table.no_return, [] of TyId) if @in_progress.includes?(k)
+      return Summary.new(@table.pending, [] of TyId) if @in_progress.includes?(k)
       return unknown_summary if @depth >= MAX_DEPTH || @computed >= MAX_TOTAL
       @in_progress << k
       @depth += 1
