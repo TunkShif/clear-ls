@@ -244,7 +244,7 @@ call's line to parse: an unclosed `(` before `end` makes Tree-sitter
 swallow the enclosing def, so the call is only found after a `)` is
 inserted on the same line (handled) or typed.
 
-### Phase 6 — generics and summaries
+### Phase 6 — generics and summaries (done)
 
 - Generic substitution, on-demand return summaries, call-site-keyed method
   instances, recursion and widening budgets, block/collection contracts.
@@ -281,6 +281,36 @@ Steps (one commit each):
 
 Exit criterion (design doc): Array(T), Hash(K, V), tuple, block, map,
 compact_map, find, and reduce chains retain useful concrete types.
+
+Status: implemented as planned; step 4 needed far fewer contracts than
+expected. `Types::Summaries` caches (def, file revision, self type,
+argument types [, block value]) → joined return and yield types, computed
+by inferring the def's body with params bound to the call's argument
+types (restricted params too, when the argument fits: `Int#//(other :
+Int::Primitive)` called with Int32). Recursion and unknown block values
+are `Pending`: they vanish from unions without ending control flow, like a
+first fixed-point iteration; results depending on a cut are not cached
+below the cycle head. Budgets: depth 12, 8 shapes per (def, receiver),
+20k summaries per generation, a per-solve step cap. Through summaries
+alone, `reduce`, `find`, `Hash#[]`/`[]?`, `group_by`, `to_h`,
+`compact_map`, `compact`, and user defs without annotations type
+correctly. Contracts (only for stdlib collection owners when resolution
+leaves the result unknown): tuple `[]` with a literal index, `sum`,
+`flatten`, `zip`. Constants are inferred as expressions (`%w()`, `[...]`,
+calls); tables over 4 KB from a prefix.
+
+Measurements (`--release`, vs Phase 5 incl. post-phase hover fixes):
+typed locals and block args 89.6% in this repo (73.5%), 59.8% in the
+stdlib (43.3%); per-local type diff against each step's predecessor
+showed no unexplained regressions. Inference over this repo's 639 defs
+takes 0.46 s cold (0.26 s); worst stdlib def 43 ms cold; warm hover
+0.1–0.3 ms. All chains in the exit fixture (`docs/handoff-tools/chains.cr`)
+are typed.
+
+Not yet: closure-captured variables, ivar types from assignments in
+methods, macro-generated defs (`{% for %}`), `responds_to?` narrowing.
+Remaining unknowns are mostly untyped params of stdlib defs analysed
+without a caller and macro-heavy code.
 
 ### Phase 7 — compiler integration
 

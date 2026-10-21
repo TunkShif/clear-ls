@@ -1,8 +1,12 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 5 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 6 —
 
+- return types of unannotated methods inferred per call (summaries), so
+  collection chains (`map`, `compact_map`, `find`, `reduce`, `group_by`,
+  `to_h`, hash and tuple indexing) keep concrete types; inferred returns
+  in hover and inlay hints;
 - flow-sensitive local types: branch joins, narrowing by `if x`, `nil?`,
   `is_a?`, `&&`/`||`/`!`, `case`/`in`, early exits, loops, rescue;
 - completion: members of inferred receivers, `Foo::` paths, constants,
