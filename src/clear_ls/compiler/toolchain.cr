@@ -22,6 +22,12 @@ module ClearLS::Compiler
       Job.new(@crystal, args, chdir: @root, timeout: @timeout)
     end
 
+    # `crystal tool format -`: formatted *text* on stdout; a syntax error
+    # exits 1 with the message on stderr.
+    def format(text : String) : Job
+      Job.new(@crystal, ["tool", "format", "--no-color", "-"], chdir: @root, input: text, timeout: 10.seconds)
+    end
+
     # Problems from a finished `#check` job: the compile error (if any),
     # then the warnings. Empty when the job did not complete.
     def self.problems(result : Job::Result, base_dir : String) : Array(Problem)

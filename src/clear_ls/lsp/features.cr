@@ -1,5 +1,6 @@
 require "./server"
 require "./diagnostics"
+require "./formatting"
 require "../ide/analysis"
 require "../ide/semantic_tokens"
 require "../ide/completion"
@@ -48,6 +49,7 @@ module ClearLS::LSP
         completionProvider:      {triggerCharacters: [".", ":", "@"], resolveProvider: false},
         inlayHintProvider:       true,
         implementationProvider:  true,
+        documentFormattingProvider: true,
         callHierarchyProvider:   true,
         signatureHelpProvider:   {triggerCharacters: ["(", ","], retriggerCharacters: [" "]},
         semanticTokensProvider:  {
@@ -78,6 +80,7 @@ module ClearLS::LSP
       when "textDocument/inlayHint"      then inlay_hint(params)
       when "textDocument/signatureHelp"  then signature_help(params)
       when "textDocument/implementation" then implementation(params)
+      when "textDocument/formatting"     then formatting(params)
       when "textDocument/prepareCallHierarchy" then prepare_call_hierarchy(params)
       when "callHierarchy/outgoingCalls" then outgoing_calls(params)
       when "callHierarchy/incomingCalls" then [] of Nil

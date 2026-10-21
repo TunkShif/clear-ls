@@ -74,3 +74,35 @@ describe "compiler diagnostics" do
     end
   end
 end
+
+describe "formatting" do
+  it "diffs whole lines" do
+    Server.line_diff("a\nb\nc\n", "a\nb\nc\n").should be_nil
+    r, t = Server.line_diff("a\n b\nc\n", "a\nb\nc\n").not_nil!
+    {r.start, r.end, t}.should eq({2, 5, "b\n"})
+    r, t = Server.line_diff("a\nb", "a\nb\n").not_nil!
+    {r.start, r.end, t}.should eq({2, 3, "b\n"})
+    r, t = Server.line_diff("x\n", "").not_nil!
+    {r.start, r.end, t}.should eq({0, 2, ""})
+  end
+
+  it "formats the buffer (unsaved text) with crystal tool format" do
+    with_client({"a.cr" => "def foo\n  1\nend\n"}) do |c|
+      u = c.open("a.cr")
+      c.notify("textDocument/didChange", {textDocument: {uri: u, version: 2},
+        contentChanges: [{text: "def foo\n  1\nend\n\ndef bar( x )\n x+1\nend\n"}]})
+      edits = c.request("textDocument/formatting", {textDocument: {uri: u}, options: {tabSize: 2, insertSpaces: true}}).as_a
+      edits.size.should eq 1
+      edits[0]["range"].should eq JSON.parse(%({"start":{"line":4,"character":0},"end":{"line":6,"character":0}}))
+      edits[0]["newText"].should eq "def bar(x)\n  x + 1\n"
+    end
+  end
+
+  it "returns null on a syntax error" do
+    with_client({"a.cr" => "def foo(\n"}) do |c|
+      u = c.open("a.cr")
+      c.request("textDocument/formatting", {textDocument: {uri: u}, options: {tabSize: 2, insertSpaces: true}}).raw.should be_nil
+      c.notifications("window/logMessage").last["message"].as_s.should contain "syntax error"
+    end
+  end
+end

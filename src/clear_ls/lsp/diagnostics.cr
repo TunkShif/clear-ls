@@ -12,13 +12,15 @@ module ClearLS::LSP
   # with the saved text.
   #
   # `initializationOptions.compiler`:
-  # - `enabled` (default true)
+  # - `enabled` (default true): background checks; explicit requests such
+  #   as formatting use the compiler regardless
   # - `path`: crystal executable (default `$CRYSTAL` or `crystal`)
   # - `entries`: main files to check instead of the shard targets
   # - `debounceMs` (default 150)
   class Server
     @compiler_options = JSON::Any.new({} of String => JSON::Any)
     @checker : Compiler::Checker? = nil
+    @toolchain : Compiler::Toolchain? = nil
     @entry_points : Compiler::EntryPoints? = nil
     # Entry points checked since the last change on disk.
     @checked = Set(String).new
@@ -33,13 +35,20 @@ module ClearLS::LSP
       @compiler_options["enabled"]?.try(&.as_bool?) != false
     end
 
+    # The `crystal` executable for the workspace.
+    def toolchain : Compiler::Toolchain
+      @toolchain ||= begin
+        crystal = @compiler_options["path"]?.try(&.as_s?) || ENV["CRYSTAL"]? || "crystal"
+        Compiler::Toolchain.new(crystal, @index.try(&.project.root) || @root)
+      end
+    end
+
     private def start_compiler : Nil
       return unless compiler_enabled?
       root = index.project.root
-      crystal = @compiler_options["path"]?.try(&.as_s?) || ENV["CRYSTAL"]? || "crystal"
       entries = @compiler_options["entries"]?.try(&.as_a?).try &.compact_map { |e| e.as_s?.try { |s| File.expand_path(s, root) } }
       @entry_points = Compiler::EntryPoints.new(root, entries)
-      checker = Compiler::Checker.new(Compiler::Toolchain.new(crystal, root),
+      checker = Compiler::Checker.new(toolchain,
         ->(file : String, problems : Array(Compiler::Problem)) { publish_problems(file, problems) })
       @compiler_options["debounceMs"]?.try(&.as_i?).try { |ms| checker.debounce = ms.milliseconds }
       @checker = checker
