@@ -531,13 +531,18 @@ describe "Types::Infer accessor defaults" do
       class Box
         getter items = [] of String
         class_getter count = 0
+        getter! cfg : Int32
       end
       def m(b : Box)
         x = b.items
         n = Box.count
+        c = b.cfg
+        d = b.cfg?
       end
       CR
     type_of_local(r, "x").should eq "Array(String)"
     type_of_local(r, "n").should eq "Int32"
+    type_of_local(r, "c").should eq "Int32"
+    type_of_local(r, "d").should eq "Int32?"
   end
 end

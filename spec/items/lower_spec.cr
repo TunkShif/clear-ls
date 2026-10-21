@@ -156,7 +156,8 @@ describe Lower do
         instancevar @ok : Bool @2:12 [macro]
         def self.count() @3:15 [macro]
         classvar @@count : 0 @3:15 [macro]
-        def z!() : String @4:10 [macro]
+        def z() : String @4:10 [macro]
+        def z?() : String? @4:10 [macro]
         instancevar @z : String @4:10 [macro]
 
       OUT

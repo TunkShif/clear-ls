@@ -257,9 +257,13 @@ module ClearLS::Items
           name = name_node.kind.string_node? ? string_value(name_node) : name_node.text.lchop(':')
           receiver = class_level ? "self" : nil
           if spec[:getter]
-            sig = Signature.new([] of Param, type, [] of String, receiver, false, false, nil)
-            dest << Item.new(ItemKind::Def, name + spec[:suffix], node.range, name_node.range,
-              visibility: vis, origin: Origin::Macro, doc: doc_for(node), conditions: @conds.dup, signature: sig)
+            # `getter! x : T` defines `x : T` (raises on nil) and `x? : T?`.
+            getters = spec[:suffix] == "!" ? [{name, type}, {name + "?", type.try { |t| "#{t}?" }}] : [{name + spec[:suffix], type}]
+            getters.each do |(gname, gtype)|
+              sig = Signature.new([] of Param, gtype, [] of String, receiver, false, false, nil)
+              dest << Item.new(ItemKind::Def, gname, node.range, name_node.range,
+                visibility: vis, origin: Origin::Macro, doc: doc_for(node), conditions: @conds.dup, signature: sig)
+            end
           end
           if spec[:setter]
             param = Param.new(ParamKind::Positional, name, nil, type, nil, name_node.range)
