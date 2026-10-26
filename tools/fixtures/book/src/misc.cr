@@ -130,18 +130,18 @@ __t(M2::K.new.v)
 __t(Int32::MAX)
 __t(Float64::INFINITY)
 @[Flags]
-enum Perm
+enum MPerm
   Read
   Write
 end
-__t(Perm::Read | Perm::Write)
-__t(Perm::Read.read?)
-__t(Perm::Read.value)
+__t(MPerm::Read | MPerm::Write)
+__t(MPerm::Read.read?)
+__t(MPerm::Read.value)
 enum Big : UInt8
   A = 1
 end
 __t(Big::A.value)
-__t(Perm.values)
+__t(MPerm.values)
 lib C
   struct S
     a : Int32

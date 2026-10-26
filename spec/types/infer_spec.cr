@@ -307,6 +307,65 @@ describe Types::Infer do
   end
 end
 
+describe "Types::Infer primitives" do
+  it "types primitives, size forms, pointerof, ivar reads, and comparisons" do
+    r = infer(<<-CR, 1)
+      class Dog
+        @x : Int32 = 1
+        def ==(other)
+          false
+        end
+      end
+      def m(d : Dog, u : Int32 | String)
+        a = d.class
+        b = u.class
+        c = Dog.class
+        e = Dog.name
+        f = Pointer(Int32).malloc(1)
+        g = 1
+        h = pointerof(g)
+        i = sizeof(Int32)
+        j = offsetof(Dog, @x)
+        k = d.@x
+        l = d == d
+        n = 1 / 2
+        o = 1.5 // 2
+      end
+      CR
+    {"a" => "Dog.class", "b" => "Int32.class | String.class", "c" => "Class", "e" => "String",
+     "f" => "Pointer(Int32)", "h" => "Pointer(Int32)", "i" => "Int32", "j" => "Int32",
+     "k" => "Int32", "l" => "Bool", "n" => "Float64", "o" => "Float64"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+
+  it "types special match variables, try per member, and select" do
+    r = infer(<<-CR)
+      class Regex
+        class MatchData; end
+      end
+      def m(n : Int32?)
+        if "abc" =~ /b/
+          a = $~
+          b = $1
+          c = $1?
+        end
+        d = 1.try { |v| "s" }
+        e = nil.try { |v| 1 }
+        f = n.try { |v| "s" }
+        g = select
+            when x = zork
+              1
+            end
+      end
+      CR
+    {"a" => "Regex::MatchData", "b" => "String", "c" => "String?", "d" => "String",
+     "e" => "Nil", "f" => "String?", "g" => "Int32?"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+end
+
 describe "Types::Infer nil handling" do
   it "handles `|| return`, `|| default`, `try`, `not_nil!`" do
     r = infer(<<-CR)
@@ -314,13 +373,16 @@ describe "Types::Infer nil handling" do
         a = x || return
         b = y || 0
         t = x.try { |s| s.size }
+        u = y.try { |v| v.abs }
         d = x.not_nil!.size
       end
       CR
     type_of_local(r, "a").should eq "String"
     type_of_local(r, "b").should eq "Int32"
     type_of_local(r, "s").should eq "String"
-    type_of_local(r, "t").should eq "Int32?"
+    # `x || return` narrowed x to String: `try` always runs (compiler: Int32).
+    type_of_local(r, "t").should eq "Int32"
+    type_of_local(r, "u").should eq "Int32?"
     type_of_local(r, "d").should eq "Int32"
   end
 end

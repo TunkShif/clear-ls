@@ -137,6 +137,21 @@ module ClearLS::Types
 
     # Joined type of every value the body returns (unknown when any path's
     # value is unknown); NoReturn when no path returns.
+    MACRO_KINDS = {Syntax::Kind::MacroIf, Syntax::Kind::MacroUnless, Syntax::Kind::MacroFor,
+                   Syntax::Kind::MacroExpression, Syntax::Kind::MacroStatement,
+                   Syntax::Kind::MacroVerbatim, Syntax::Kind::MacroBegin}
+
+    # Does the body contain macro code (`{% for %}`, `{{ }}`) that lowering
+    # keeps opaque and that returns? A summary of the remaining code would
+    # miss those values (`Range#bsearch` returns from a `{% for %}`).
+    def opaque_macros? : Bool
+      src = @source || return false
+      @body.exprs.any? do |x|
+        x.kind.missing? && x.syntax.in?(MACRO_KINDS) &&
+          src.byte_slice(x.range.start, x.range.size).matches?(/\breturn\b/)
+      end
+    end
+
     def return_type : TyId
       srcs = cfg.returns.select { |s| @live_out.includes?(s.block.value) }
       return @table.no_return if srcs.empty?
@@ -267,7 +282,10 @@ module ClearLS::Types
     @param_texts = {} of HIR::BindingId => String
 
     # Param texts from the source (splat markers are not in HIR).
+    @source : String? = nil
+
     def with_source(text : String) : self
+      @source = text
       @body.bindings.each do |b|
         next unless b.kind.param? || b.kind.block_param?
         @param_texts[b.id] = text.byte_slice(b.decl_range.start, b.decl_range.size)
@@ -601,16 +619,37 @@ module ClearLS::Types
              # `memo = yield memo, e` keeps memo's other assignments.
              @yield_value || (@summarising ? @table.pending : @table.unknown)
            when .other?
-             if e.syntax.uninitialized_var?
+             case e.syntax
+             when .uninitialized_var?
                e.type_text.try { |t| parse_type(t) } || @table.unknown
+             when .pointerof?
+               e.children.first?.try { |c| @table.named?("Pointer", [operand(c)]) } || @table.unknown
+             when .sizeof?, .instance_sizeof?, .alignof?, .instance_alignof?, .offsetof?
+               @table.named!("Int32")
              else
                @table.unknown
              end
+           when .global?       then special_var_type(e)
            else
              @table.unknown
            end
       @types[id] = ty
       ty
+    end
+
+    # `$~` / `$1` (the last regex match in this scope): `$~` and `$1` raise
+    # when there is no match, the `?` forms are nilable. `$?` is the last
+    # `Process::Status`. Other globals are not modelled.
+    private def special_var_type(e : HIR::Expr) : TyId
+      return @table.unknown unless e.syntax.special_variable?
+      name = e.name || return @table.unknown
+      t = case name.rchop('?')
+          when "$~" then @table.named?("Regex::MatchData")
+          when "$?" then @table.named?("Process::Status")
+          when /\A\$\d+\z/ then @table.named?("String")
+          end
+      t ||= @table.unknown
+      name.ends_with?('?') && !@table.unknown?(t) ? @table.nilable(t) : t
     end
 
     # Namespace lookup for code outside defs (`class Foo; self.x; end`),
@@ -765,6 +804,12 @@ module ClearLS::Types
 
     private def const_type(e : HIR::Expr) : TyId
       text = e.name || return @table.unknown
+      # `alias IntP = Pointer(Int32)` keeps its args through the parser
+      # (lookup_path alone drops them).
+      if !text.includes?('(') && (raw = alias_at(text)) && map[raw].kind.alias?
+        t = parse_type(text)
+        return @table.metaclass(t) unless @table.unknown?(t)
+      end
       if id = map.lookup_path(text, @ctx.ns)
         info = map[id]
         if info.kind.alias?
@@ -797,6 +842,16 @@ module ClearLS::Types
 
     private def flags_enum?(id : Semantics::TypeId) : Bool
       map[id].sites.any? { |s| s.item.annotations.any? { |a| a == "Flags" || a == "::Flags" } }
+    end
+
+    # The type item *text* names, without following aliases.
+    private def alias_at(text : String) : Semantics::TypeId?
+      names = text.lchop("::").split("::")
+      cur = text.starts_with?("::") ? Semantics::DefMap::PROGRAM : @ctx.ns
+      names.each_with_index do |n, i|
+        cur = map.lookup_path_item(n, cur, lookup_self: i == 0, lookup_in_namespace: i == 0) || return nil
+      end
+      cur
     end
 
     # The enum that declares *site* when *site* is one of its members
@@ -1228,9 +1283,24 @@ module ClearLS::Types
       end
 
       if name == "try" && recv_t && e.block
-        # `x.try { |v| ... }`: v is x without Nil; result is block value or Nil.
+        # `x.try { |v| ... }`: v is x without Nil. The block runs for the
+        # non-nil members (`Object#try`), `Nil#try` returns nil. With an
+        # unknown receiver the result is still the block's value or nil.
         inner = block_ret || @table.unknown
-        return @table.unknown?(inner) ? inner : @table.nilable(inner)
+        if @table.unknown?(recv_t)
+          return @table.unknown?(inner) ? inner : @table.nilable(inner)
+        end
+        members = @table.members(recv_t)
+        has_nil = members.any? { |m| @table.nil_type?(m) }
+        return nil_t if members.all? { |m| @table.nil_type?(m) }
+        return inner if @table.unknown?(inner) || !has_nil
+        return @table.nilable(inner)
+      end
+
+      # `obj.@x`: the receiver's ivar.
+      if name.starts_with?('@') && recv_t
+        ivar_owner = @table[recv_t].def_id
+        return ivar_owner && @table[recv_t].kind.named? ? Infer.ivar_type(map, @table, ivar_owner, name, false, @ctx) : @table.unknown
       end
 
       recv_t ||= implicit_receiver(e)
@@ -1252,6 +1322,15 @@ module ClearLS::Types
         return gen
       end
       declared = return_type_of(res, block_ret)
+      if @table.unknown?(declared)
+        # Number operators whose resolved stdlib bodies don't summarise
+        # (`Float#//`, macro-generated `Int#/`), then comparisons: `==`,
+        # `<`, ... are Bool in practice (declared returns win above).
+        if prim = primitive_op(receiver_type, name, args)
+          return prim
+        end
+        return @table.named!("Bool") if COMPARISONS.includes?(name) && args.size == 1 && !res.candidates.empty?
+      end
       # Contracts only fill in what resolution could not type, and only
       # for stdlib owners (user code overriding `sum` keeps its type).
       if partially_unknown?(declared) && stdlib_candidates?(res) && (c = contract(e, receiver_type, name, args, block_ret))
@@ -1358,6 +1437,7 @@ module ClearLS::Types
     ARITH       = %w(+ - * &+ &- &*)
     INT_ONLY    = %w(| & ^ unsafe_shl unsafe_shr unsafe_div unsafe_mod)
     COMPARE     = %w(== != < <= > >=)
+    COMPARISONS = %w(== != === < <= > >=)
     CONVERSIONS = {"to_i" => "Int32", "to_u" => "UInt32", "to_f" => "Float64"}
 
     # Number primitives the stdlib declares in `{% for %}` loops
@@ -1397,7 +1477,19 @@ module ClearLS::Types
         return args[0] if r_int && !a_int && !name.starts_with?('&')
       end
       return recv if INT_ONLY.includes?(name) && r_int && a_int
-      return args[0] if name == "/" && !r_int && !a_int && rn == an
+      case name
+      when "/"
+        # Int / Int is Float64; otherwise the wider float involved.
+        return @table.named!("Float64") if r_int && a_int
+        return @table.named!(rn == "Float64" || an == "Float64" ? "Float64" : "Float32")
+      when "//"
+        return recv
+      when "%", "remainder"
+        return recv unless r_int && !a_int
+      when "<=>"
+        # Floats can be NaN.
+        return r_int && a_int ? @table.named!("Int32") : @table.nilable(@table.named!("Int32"))
+      end
       nil
     end
 
@@ -1513,6 +1605,17 @@ module ClearLS::Types
             next unless site.item.kind.def? || site.item.kind.macro?
             ms << MethodMatch.new(site, owner_of(def_id, site), bindings)
           end
+          # A type is also a `Class` instance (`Foo.name`, `Foo.class`).
+          if ms.empty? && (cls = map.lookup_path("::Class"))
+            map.lookup_member(cls, name).each do |site|
+              next unless site.item.kind.def? || site.item.kind.macro?
+              ms << MethodMatch.new(site, owner_of(cls, site), {} of String => TyId)
+            end
+            unless ms.empty?
+              groups << {member, ms}
+              next
+            end
+          end
         end
         groups << {self_for(member), ms} unless ms.empty?
       end
@@ -1627,6 +1730,11 @@ module ClearLS::Types
         end
         # `def initialize` via `self.new`.
         return self_t if item.name == "new"
+        # Compiler primitives have empty bodies: their type is known here
+        # or not at all (an empty body would summarise as Nil).
+        if prim = primitive_name(item)
+          return primitive_return(prim, c)
+        end
         # Unannotated def: summary of its body for this call shape.
         t = summary(c, block_ret).returns
         return t if t == @table.no_return || t == @table.pending
@@ -1638,6 +1746,33 @@ module ClearLS::Types
       ret = TypeExprParser.parse(text, @table, m.owner, tparams, self_t)
       result = Subst.apply(@table, ret, free_var_bindings(c, block_ret))
       still_open?(result) ? nil : result
+    end
+
+    # `:pointer_malloc` of `@[Primitive(:pointer_malloc)]`.
+    private def primitive_name(item : Items::Item) : String?
+      item.annotations.each do |a|
+        if m = a.match(/\A:{0,2}Primitive\(:(\w+)/)
+          return m[1]
+        end
+      end
+      nil
+    end
+
+    # Types of the primitives declared without a return type (the others
+    # use their declared one).
+    private def primitive_return(prim : String, c : CallCandidate) : TyId?
+      self_t = c.self_type
+      case prim
+      when "class"
+        # Per receiver member: `(Int32 | String).class` is a union of
+        # metaclasses; `self_type` is one member already. A metaclass's
+        # class is `Class`.
+        st = @table[self_t]
+        return nil if st.kind.unknown?
+        st.kind.metaclass? ? @table.named?("Class") : @table.metaclass(self_t)
+      when "pointer_malloc", "pointer_new"
+        self_t
+      end
     end
 
     # Receiver and argument bindings, plus `forall` vars bound from the
@@ -1674,15 +1809,19 @@ module ClearLS::Types
 
     # Summary of a candidate's body for this call: params without a
     # restriction take the argument types bound to them.
-    private def summary(c : CallCandidate, block_ret : TyId? = nil) : Summaries::Summary
+    # *for_yields*: the caller wants the yield (block argument) types,
+    # which depend on the argument types more than on the block value.
+    private def summary(c : CallCandidate, block_ret : TyId? = nil, for_yields = false) : Summaries::Summary
       cache = @summaries || return Summaries::Summary.new(@table.unknown, [] of TyId)
       loader = @source_loader || return cache.unknown_summary
       m = c.match
       sig = m.site.item.signature
       return cache.unknown_summary if sig.try(&.is_abstract)
       args = [] of TyId
+      defaults = [] of TyId
       if sig
         args = Array(TyId).new(sig.params.size, @table.unknown)
+        defaults = Array(TyId).new(sig.params.size, @table.unknown)
         bound = Set(Int32).new
         (c.arg_params + c.named_params).each_with_index do |pi, i|
           next unless pi
@@ -1707,19 +1846,30 @@ module ClearLS::Types
           next if bound.includes?(i) || !p.kind.positional? || p.restriction
           d = p.default || next
           dt = Infer.value_text_type(d, @table, m.owner)
-          args[i] = dt unless @table.unknown?(dt)
+          next if @table.unknown?(dt)
+          args[i] = dt
+          defaults[i] = dt
         end
       end
-      # The block's value is part of the call shape (`reduce`'s memo).
-      shape = block_ret && !@table.unknown?(block_ret) ? args + [block_ret] : args
-      cache.get(m.site, c.self_type, shape) do |eff_args|
+      # The block's value is part of the call shape (`reduce`'s memo). Over
+      # the shape cap, yield types fall back to the argument types alone;
+      # return types keep the block value (and literal defaults) instead,
+      # since without it `yield` is Pending and `if v; yield v; end` would
+      # summarise to Nil.
+      known_block = block_ret && !@table.unknown?(block_ret) ? block_ret : nil
+      shape = known_block ? args + [known_block] : args
+      fallback = known_block ? (for_yields ? args : defaults + [known_block]) : nil
+      cache.get(m.site, c.self_type, shape, fallback: fallback) do |eff_args|
         node = loader.call(m.site) || next nil
         owner = map[m.owner]
         # Type params the receiver carries from the caller (`Pointer(UC)`
         # inside a `forall UC` def) are meaningful in the callee too.
         tparams = owner.type_params + (sig.try(&.free_vars) || [] of String)
         param_names(c.self_type, tparams)
-        ctx = DefContext.new(m.owner, c.self_type, tparams)
+        # `def self.x` bodies run on the metaclass (`self.new`, sibling
+        # class methods); `c.self_type` is the instance for signatures.
+        body_self = sig.try(&.receiver) && !@table.unknown?(c.self_type) ? @table.metaclass(c.self_type) : c.self_type
+        ctx = DefContext.new(m.owner, body_self, tparams)
         inner = Infer.new(HIR::LowerBody.lower(node), ctx, @table)
         inner.source_loader = loader
         inner.summaries = cache
@@ -1730,7 +1880,7 @@ module ClearLS::Types
         inner.yield_value = eff_args[n]? if eff_args.size > n
         inner.with_source(node.tree.text).run
         yields = inner.yield_types.map { |ts| union_or_unknown(ts.uniq) }
-        Summaries::Summary.new(inner.return_type, yields)
+        Summaries::Summary.new(inner.opaque_macros? ? @table.unknown : inner.return_type, yields)
       end
     end
 
@@ -1762,7 +1912,7 @@ module ClearLS::Types
     private def yield_summary(m : MethodMatch, receiver_type : TyId, c : CallCandidate? = nil, block_ret : TyId? = nil) : Array(TyId)
       return [] of TyId if summary_depth <= 0
       cand = c || return [] of TyId
-      summary(cand, block_ret).yields.map do |t|
+      summary(cand, block_ret, for_yields: true).yields.map do |t|
         r = Subst.apply(@table, t, m.bindings)
         still_open?(r) ? @table.unknown : r
       end

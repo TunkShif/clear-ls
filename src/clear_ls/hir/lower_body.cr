@@ -71,7 +71,7 @@ module ClearLS::HIR
       when .class_var?
         add(ExprKind::ClassVar, node.range, name: node.text, name_range: node.range)
       when .global_var?, .special_variable?
-        add(ExprKind::Global, node.range, name: node.text, name_range: node.range)
+        add(ExprKind::Global, node.range, syntax: node.kind, name: node.text, name_range: node.range)
       when .self_node?
         add(ExprKind::Self, node.range)
       when .constant?, .generic_instance_type?
@@ -98,7 +98,8 @@ module ClearLS::HIR
         lower_proc(node)
       when .if?, .unless?, .conditional?, .elsif?, .modifier_if?, .modifier_unless?
         lower_if(node)
-      when .case?
+      when .case?, .select?
+        # `select` is a `case` without subject: one `when` per action.
         lower_case(node)
       when .while?, .until?
         lower_children(node, k.while? ? ExprKind::While : ExprKind::Until)
@@ -128,6 +129,14 @@ module ClearLS::HIR
         lower_collection(node)
       when .typeof?
         lower_children(node, ExprKind::TypeOf)
+      when .pointerof?
+        # `pointerof(x)`: the operand is evaluated for its type (and reads
+        # the local); the value is `Pointer(T)`.
+        kids = node.named_children.reject(&.kind.comment?).map { |c| lower(c) }
+        add(ExprKind::Other, node.range, syntax: node.kind, children: kids)
+      when .sizeof?, .instance_sizeof?, .alignof?, .instance_alignof?, .offsetof?
+        # Type operands are not expressions; the value is an Int32.
+        add(ExprKind::Other, node.range, syntax: node.kind)
       when .uninitialized_var?
         add(ExprKind::Other, node.range, syntax: node.kind, type_text: node.named_child(0).try(&.text))
       when .error?, .unknown?
@@ -136,7 +145,7 @@ module ClearLS::HIR
       when .macro_if?, .macro_unless?, .macro_for?, .macro_expression?, .macro_statement?,
            .macro_verbatim?, .macro_begin?
         # Macro bodies are opaque text; their locals are not modelled yet.
-        add(ExprKind::Missing, node.range)
+        add(ExprKind::Missing, node.range, syntax: node.kind)
       when .comment?, .heredoc_body?
         add(ExprKind::Other, node.range)
       when .method_def?, .abstract_method_def?, .macro_def?, .fun_def?, .lib_def?
@@ -408,7 +417,7 @@ module ClearLS::HIR
 
     # `[subject or Nop, When..., else Seq?]`.
     private def lower_case(node : Syntax::Node) : ExprId
-      kids = [node.field(Syntax::Field::Cond).try { |c| lower(c) } || nop(node)]
+      kids = [(node.kind.case? ? node.field(Syntax::Field::Cond).try { |c| lower(c) } : nil) || nop(node)]
       node.named_children.each do |c|
         case c.kind
         when .when?, .in?

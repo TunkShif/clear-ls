@@ -10,7 +10,8 @@ module ClearLS::Flow
   # - `if`/`unless`/ternary: conditions are split on `&&`, `||`, `!` into
   #   branch chains; the join evaluates the `if` from its branch values.
   # - `case`: one test per `when` condition; `case/in` without a match is
-  #   unreachable, `case/when` without `else` yields Nil.
+  #   unreachable, `case/when` without `else` yields Nil. `select` is a
+  #   case without subject whose actions don't narrow.
   # - `while`/`until`: loop head with the condition; `break` → after,
   #   `next` → head.
   # - call blocks and proc literals: closure bodies that run 0..n times,
@@ -229,7 +230,14 @@ module ClearLS::Flow
         end
         conds.each do |cond|
           lower(cond)
-          test = subject ? Test.new(TestKind::CaseWhen, cond, subject) : Test.new(TestKind::Truthy, cond)
+          # `select` actions are not truth tests: no narrowing.
+          test = if e.syntax.select?
+                   nil
+                 elsif subject
+                   Test.new(TestKind::CaseWhen, cond, subject)
+                 else
+                   Test.new(TestKind::Truthy, cond)
+                 end
           miss = new_block
           finish(Terminator::Branch, [entry, miss], test)
           @cur = miss

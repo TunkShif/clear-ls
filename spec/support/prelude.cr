@@ -8,6 +8,13 @@ PRELUDE = <<-CR
     end
     def try(& : self -> U) forall U
     end
+    @[Primitive(:class)]
+    def class
+    end
+  end
+  class Class
+    def name : String
+    end
   end
   class Reference; end
   struct Value; end
@@ -96,7 +103,14 @@ PRELUDE = <<-CR
   struct Tuple(*T); end
   struct NamedTuple(**T); end
   struct Range(B, E); end
-  struct Pointer(T); end
+  struct Pointer(T)
+    @[Primitive(:pointer_malloc)]
+    def self.malloc(size : UInt64)
+    end
+    def self.malloc(size : Int = 1)
+      malloc(size.to_u64)
+    end
+  end
   struct Proc(*T); end
   class Set(T)
     include Enumerable(T)

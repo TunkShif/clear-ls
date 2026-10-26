@@ -294,7 +294,7 @@ types (restricted params too, when the argument fits: `Int#//(other :
 Int::Primitive)` called with Int32). Recursion and unknown block values
 are `Pending`: they vanish from unions without ending control flow, like a
 first fixed-point iteration; results depending on a cut are not cached
-below the cycle head. Budgets: depth 12, 8 shapes per (def, receiver),
+below the cycle head. Budgets: depth 12, 8 shapes (16 since Phase 8) per (def, receiver),
 20k summaries per generation, a per-solve step cap. Through summaries
 alone, `reduce`, `find`, `Hash#[]`/`[]?`, `group_by`, `to_h`,
 `compact_map`, `compact`, and user defs without annotations type
@@ -444,6 +444,13 @@ Steps (one commit each, wrong results first):
    `Nil`, with contracts for `class`, `malloc`, `==`, `/`, `unsafe_as`,
    `null`, `name`; lowering for `pointerof`/`sizeof`-family nodes and
    `$~`/`$1`; `try` per union member.
+   *Done:* book 233/290 (+22), new `primitives.cr` 56/57 (+1 accepted:
+   `spawn`); fixed six older bugs on the way (book-gaps O1–O6: class-method
+   self, abstract/override ranking, nominal tuples, summary shape cap,
+   macro returns, generic aliases). Coverage repo 93.8% (91.6%), stdlib
+   67.1% (59.9%), same timings; regression diff repo 0 regressed / 40
+   improved, stdlib 4 / 376, the 4 being former wrong `NoReturn`/`Nil`
+   answers now unknown.
 4. **`break` values** (E1–E3). `while`/`until` value = breaks + `Nil`
    unless the condition is `true`; a block's `break` joins the call's
    type.

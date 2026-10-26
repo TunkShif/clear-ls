@@ -27,9 +27,9 @@ module ClearLS::Types
     # Defs summarised per generation before giving up (protects against
     # pathological fan-out in big files; cached entries are free).
     MAX_TOTAL = 20_000
-    # Argument type combinations kept per def; further shapes reuse the
-    # unparameterised summary.
-    MAX_SHAPES = 8
+    # Call shapes (argument types, block value) kept per def and receiver;
+    # further shapes reuse a coarser one.
+    MAX_SHAPES = 16
 
     getter computed = 0
     getter hits = 0
@@ -59,15 +59,17 @@ module ClearLS::Types
     # Summary of the def at *site* for *self_t* and *args* (one type per
     # parameter position of the def; unknown entries leave the declared or
     # unknown type). *compute* infers the body and returns the summary.
-    def get(site : Semantics::Site, self_t : TyId, args : Array(TyId), & : Array(TyId) -> Summary?) : Summary
+    def get(site : Semantics::Site, self_t : TyId, args : Array(TyId), fallback : Array(TyId)? = nil, & : Array(TyId) -> Summary?) : Summary
       rev = @revision_of.try(&.call(site.file)) || 0_u64
       def_key = {site.file.value.to_i32, site.item.range.start, rev}
       # Unknown args carry no information: normalise so shapes are shared.
       args = [] of TyId if args.all? { |a| @table.unknown?(a) }
       # Shape cap per (def, self): each receiver type is its own instance.
+      # Over the cap, the caller's coarser *fallback* shape is used, else
+      # the unparameterised one.
       shape_key = {def_key, self_t.value}
       if !args.empty? && @shapes[shape_key] >= MAX_SHAPES && !@cache.has_key?(key(def_key, self_t, args))
-        args = [] of TyId
+        args = fallback.try { |f| f.all? { |a| @table.unknown?(a) } ? nil : f } || [] of TyId
       end
       k = key(def_key, self_t, args)
       if cached = @cache[k]?

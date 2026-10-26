@@ -38,13 +38,14 @@ accepted deviation. Of the 98 mismatches, 25 are wrong results and the
 rest are unknown or wider than the compiler's type.
 
 Progress (book fixtures; the second number counts the fixtures added
-during this phase, `autocast.cr` and `enums.cr`):
+during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`):
 
 | After | Match | Wrong left |
 |---|---|---|
 | baseline | 191/290 | 25 |
 | step 1 (A, B) | 202/290 + 19/19 | 21 |
 | step 2 (C) | 211/290 + 46/47 | 19 |
+| step 3 (D) | 233/290 + 103/104 | 10 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
@@ -101,15 +102,29 @@ Crystal 1.22 in `fixtures/book/src/autocast.cr`):
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| D1 | `Dog.new.class`, `pet.class`, `Person.new.class` | `Dog.class` | `Nil` | wrong: the empty `@[Primitive]` body is summarised as `Nil` |
-| D2 | `Pointer(Int32).malloc(1)`, `IntP.malloc(1)` | `Pointer(Int32)` | `Nil` | wrong: same cause, through `malloc(size.to_u64)` |
-| D3 | `i == 1` | `Bool` | `?` | unknown: `Value#==(other)` has no return type |
-| D4 | `i / 2` | `Float64` | `?` | unknown: macro-generated in `number.cr` |
-| D5 | `pointerof(x)`, `sizeof`/`instance_sizeof`/`alignof`/`offsetof` | `Pointer(Int32)`, `Int32` | `?` | unknown: own grammar nodes, never lowered (the code expects calls) |
-| D6 | `x.unsafe_as(Float32)`, `Pointer(Int32).null`, `Person.name`, `Int32.class` | `Float32`, `Pointer(Int32)`, `String`, `Class` | `?` | unknown |
-| D7 | `$~`, `$1` after `=~` | `Regex::MatchData`, `String` | `?` | unknown (`special_variable`) |
-| D8 | `select … end`, `spawn { }` | `Int32?`, `Fiber` | `?` | unknown |
-| D9 | `1.try { … }`, `nil.try { 1 }` | `String`, `Nil` | `String?`, `Int32?` | wider: `try` should apply per union member (`Nil` → `Nil`) |
+| D1 | `Dog.new.class`, `pet.class`, `Person.new.class` | `Dog.class` | `Nil` | **fixed (step 3)**; was wrong: empty `@[Primitive]` bodies summarised as `Nil`. Primitives without a return type are typed in `primitive_return` (`class`, `pointer_malloc`, `pointer_new`) or unknown |
+| D2 | `Pointer(Int32).malloc(1)`, `IntP.malloc(1)` | `Pointer(Int32)` | `Nil` | **fixed (step 3)**; `IntP` also needed aliases to generic instances (`alias Bytes = Slice(UInt8)`) to keep their args |
+| D3 | `i == 1` | `Bool` | `?` | **fixed (step 3)**: comparison operators whose resolved defs have no type are Bool |
+| D4 | `i / 2` | `Float64` | `?` | **fixed (step 3)**: `/`, `//`, `%`, `<=>` number rules (checked against the compiler) |
+| D5 | `pointerof(x)`, `sizeof`/`instance_sizeof`/`alignof`/`offsetof` | `Pointer(Int32)`, `Int32` | `?` | **fixed (step 3)**: lowered; `obj.@x` reads the ivar |
+| D6 | `x.unsafe_as(Float32)`, `Pointer(Int32).null`, `Person.name`, `Int32.class` | `Float32`, `Pointer(Int32)`, `String`, `Class` | `?` | **fixed (step 3)**: `T.class` restrictions unify with type arguments; `def self.x` bodies run on the metaclass; types answer `Class` methods |
+| D7 | `$~`, `$1` after `=~` | `Regex::MatchData`, `String` | `?` | **fixed (step 3)**; `$1?`/`$~?` are nilable |
+| D8 | `select … end`, `spawn { }` | `Int32?`, `Fiber` | `?` | `select` **fixed (step 3)** (a `case` without subject whose actions don't narrow). `spawn` is an accepted deviation: the stdlib defines it inside `{% begin %}` with a macro in its parameter list, which the item tree does not see |
+| D9 | `1.try { … }`, `nil.try { 1 }` | `String`, `Nil` | `String?`, `Int32?` | **fixed (step 3)**: per receiver member |
+
+### O. Found while fixing (not in the book)
+
+Older inference bugs that the book fixes exposed, fixed in the step that
+hit them:
+
+| ID | Problem | Fix (step) |
+|---|---|---|
+| O1 | Summaries of `def self.x` bodies ran on the instance: `new`, sibling class methods unknown | metaclass `self` in class-method bodies (3) |
+| O2 | An abstract def and its implementation in an includer both stayed viable for unknown arguments, so the abstract one's missing return made the call unknown (`Array#unsafe_fetch(i)`) | an override with the same restrictions hides the overridden def (3) |
+| O3 | `Tuple(A, B)` written nominally (`Array(Tuple(Int32, Int32, P))`) did not index like `{A, B}` | parsed as the structural tuple (3) |
+| O4 | Over the 8-shape cap a summary lost the caller's block value; `yield` became Pending and `if v; yield v; end` summarised to `Nil` (and the results depended on which defs ran first) | cap 16; over it, return summaries keep the block value and literal defaults, yield summaries keep the argument types (3) |
+| O5 | Bodies whose `return` sits inside `{% %}` (`Range#bsearch`) summarised from the remaining code | such bodies return unknown (3) |
+| O6 | `alias A = G(T)` resolved to bare `G`, losing `T` (`Bytes` was `Slice`) | the parser follows the alias's target text (3) |
 
 ### E. Loops, `break`, and `next`
 
@@ -212,6 +227,7 @@ These came up in the comparison but are not about inference. They stay in
 | Where | clear-ls | Compiler | Why |
 |---|---|---|---|
 | `flow.cr:59` | `Int32 \| String` once | `Int32`, then `Int32 \| String` | The compiler prints once per loop fixed-point step; clear-ls shows the joined fixed point |
+| `primitives.cr:85` | `spawn { }` unknown | `Fiber` | `def spawn` is inside `{% begin %}` with a macro in its parameter list; macro bodies are not modelled (N) |
 
 ## Decisions
 

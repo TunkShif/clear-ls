@@ -227,7 +227,8 @@ module ClearLS::Types
         comps = viable(cands, site, types, cast: true) unless comps.any?(&.[1].compatible?)
         definite = comps.select(&.[1].compatible?).map(&.[0])
         kept = comps.reject do |(c, _)|
-          definite.any? { |d| d != c && shadows?(d, c, cands, site) }
+          definite.any? { |d| d != c && shadows?(d, c, cands, site) } ||
+            comps.any? { |(d, _)| d != c && overrides?(d, c, cands, site) }
         end
         kept.each do |(c, k)|
           c.compat = c.compat.best(k)
@@ -263,6 +264,14 @@ module ClearLS::Types
     private def shadows?(d : CallCandidate, c : CallCandidate, order : Array(CallCandidate), site : CallSite) : Bool
       return false unless at_least_as_specific?(d, c, site)
       !at_least_as_specific?(c, d, site) || order.index!(d) < order.index!(c)
+    end
+
+    # *d* redefines *c* in a nearer ancestor with the same restrictions
+    # (an override or an abstract def's implementation): whatever the
+    # argument types, *c* is never called.
+    private def overrides?(d : CallCandidate, c : CallCandidate, order : Array(CallCandidate), site : CallSite) : Bool
+      return false unless d.match.owner != c.match.owner && order.index!(d) < order.index!(c)
+      at_least_as_specific?(d, c, site) && at_least_as_specific?(c, d, site)
     end
 
     # Every argument's restriction in *a* is within *b*'s (no restriction is

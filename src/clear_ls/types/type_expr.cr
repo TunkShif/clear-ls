@@ -203,9 +203,24 @@ module ClearLS::Types
       if !path.includes?("::") && @type_params.includes?(path)
         return @table.type_param(path)
       end
+      # `Tuple(A, B)` is the structural tuple `{A, B}` (args may be splats
+      # or type params, which stay nominal).
+      if path.lchop("::") == "Tuple" && !args.empty? && !@text[start...@pos].includes?('*') &&
+         args.none? { |a| @table[a].kind.type_param? }
+        return @table.tuple(args)
+      end
       # Built in, not declared in the stdlib.
       return @table.no_return if path.in?("NoReturn", "::NoReturn") && args.empty?
       def_id = @table.def_map.lookup_path(path, @ns) || return @table.unknown
+      # lookup_path follows aliases to their target type, dropping generic
+      # args (`alias IntP = Pointer(Int32)` → Pointer): parse the alias's
+      # target text instead.
+      if args.empty? && (raw = unresolved_alias(path)) && raw != def_id
+        rinfo = @table.def_map[raw]
+        if target = rinfo.sites.first?.try(&.item.detail)
+          return @table.alias_target(raw) { TypeExprParser.parse(target, @table, rinfo.namespace || Semantics::DefMap::PROGRAM) }
+        end
+      end
       info = @table.def_map[def_id]
       if info.kind.alias? && args.empty? && (target = info.sites.first?.try(&.item.detail))
         # `alias Stdio = Redirect | IO`: the aliased type (recursive aliases
@@ -215,6 +230,17 @@ module ClearLS::Types
         end
       end
       @table.named(def_id, args)
+    end
+
+    # The alias item *path* names (not followed), if it is one.
+    private def unresolved_alias(path : String) : Semantics::TypeId?
+      map = @table.def_map
+      names = path.lchop("::").split("::")
+      cur = path.starts_with?("::") ? Semantics::DefMap::PROGRAM : @ns
+      names.each_with_index do |n, i|
+        cur = map.lookup_path_item(n, cur, lookup_self: i == 0, lookup_in_namespace: i == 0) || return nil
+      end
+      map[cur].kind.alias? ? cur : nil
     end
 
     # Numeric generic args (`StaticArray(UInt8, 4)`) are kept as Unknown.
@@ -336,6 +362,9 @@ module ClearLS::Types
         if a.kind == p.kind
           p.args.zip?(a.args) { |pp, aa| unify(table, pp, aa, bindings) if aa }
         end
+      when .metaclass?
+        # `type : T.class` ~ `Float32` (the constant): T = Float32.
+        unify(table, p.args[0], a.args[0], bindings) if a.kind.metaclass?
       when .union?
         # `T?` ~ `String?` or `T?` ~ `String`: bind T to the non-nil part.
         non_nil = p.args.reject { |m| table.nil_type?(m) }

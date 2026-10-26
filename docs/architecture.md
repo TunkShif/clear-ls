@@ -107,7 +107,12 @@ IDE: `CallContext` (textual enclosing-call scan), `SignatureHelp`,
 the block value (`yield_value`), then runs an inner `Infer` in
 `summarising` mode. `Pending` (`ty.cr`) is the fixed-point seed: it
 vanishes from unions, doesn't end control flow, and reads as unknown.
-Budgets: depth 12, 8 shapes per (def, receiver), 20k summaries per
+Over the shape cap, return summaries keep the block value (a missing one
+makes `yield` Pending) and yield summaries keep the argument types.
+`@[Primitive]` defs without a return type are typed by `primitive_return`
+instead of their empty bodies; bodies with a `return` inside `{% %}`
+summarise to unknown.
+Budgets: depth 12, 16 shapes per (def, receiver), 20k summaries per
 generation. `Infer#contract` covers stdlib methods whose types come from
 macros. Constants: `const_expr_type`; big tables via `truncated_value`.
 
