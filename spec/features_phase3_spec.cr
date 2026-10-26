@@ -68,6 +68,17 @@ describe "LSP phase 3 features" do
     end
   end
 
+  it "hovers declared locals with their flow type and the declaration" do
+    app = {"src/d.cr" => "def m\n  n : Int32 | String = 1\n  n\nend\n"}
+    with_client(app, PRELUDE_FILES) do |c|
+      u = c.open("src/d.cr")
+      h = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/d.cr", "  n\n", 2)})
+      v = h["contents"]["value"].as_s
+      v.should start_with("```crystal\nn : Int32\n```")
+      v.should contain("(declared `Int32 | String`)")
+    end
+  end
+
   it "hovers and navigates method calls through inferred receivers" do
     with_client(TYPED_APP, PRELUDE_FILES) do |c|
       u = c.open("src/app.cr")
@@ -148,6 +159,36 @@ describe "LSP phase 3 features" do
       u = c.open("src/w.cr")
       res = c.request("textDocument/completion", {textDocument: {uri: u}, position: c.pos("src/w.cr", "  ad\n", 4)})
       labels(res).should contain("add_item")
+    end
+  end
+
+  it "completes only what every member of a union responds to" do
+    app = {"src/u.cr" => <<-CR}
+      class Foo
+        def shared_m : Int32
+          1
+        end
+      end
+      class Bar < Foo
+        def only_bar : Int32
+          1
+        end
+      end
+      class Baz < Foo; end
+      x = rand > 0.5 ? Bar.new : Baz.new
+      x.s
+      y = rand > 0.5 ? Bar.new : nil
+      y.o
+      CR
+    with_client(app, PRELUDE_FILES) do |c|
+      u = c.open("src/u.cr")
+      res = c.request("textDocument/completion", {textDocument: {uri: u}, position: c.pos("src/u.cr", "x.s", 3)})
+      labels(res).should contain("shared_m")
+      res = c.request("textDocument/completion", {textDocument: {uri: u}, position: c.pos("src/u.cr", "x.s", 2)})
+      labels(res).should_not contain("only_bar")
+      # Nilable unions still offer the non-nil member's methods.
+      res = c.request("textDocument/completion", {textDocument: {uri: u}, position: c.pos("src/u.cr", "y.o", 3)})
+      labels(res).should contain("only_bar")
     end
   end
 

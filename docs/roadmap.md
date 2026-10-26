@@ -493,6 +493,11 @@ Steps (one commit each, wrong results first):
    0; stdlib inference +3% time. `book_diff.py` now indexes each fixture
    alone (fixtures reuse class names).
 9. **Union shape** (M1–M5), per decisions 1–4 and 6.
+   *Done:* book 271/290 + 9 accepted (the union-shape examples), new
+   `union_shape.cr` 14/14 (2 accepted); completion filters union members;
+   abstract dispatch; tuple-union indexing; declared-local flow types;
+   types as values; `(A | B).class` display. Regression diff 0 regressed,
+   repo +5, stdlib +26; coverage stdlib 71.0% (70.5%), +3% time.
 10. **C bindings** (L1–L2).
 11. **Verification and docs.** Book diff, coverage and regression diff,
     `make nvim-check`, roadmap and README.

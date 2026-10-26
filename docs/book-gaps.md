@@ -39,8 +39,8 @@ rest are unknown or wider than the compiler's type.
 
 Progress (book fixtures; the second number counts the fixtures added
 during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
-`loops.cr`, `procs.cr`, `splats.cr`, `closures.cr`, `ivars.cr`, `narrowing.cr`;
-their accepted deviations are counted as matches):
+`loops.cr`, `procs.cr`, `splats.cr`, `closures.cr`, `ivars.cr`, `narrowing.cr`,
+`union_shape.cr`; their accepted deviations are counted as matches):
 
 | After | Match | Wrong left |
 |---|---|---|
@@ -53,6 +53,7 @@ their accepted deviations are counted as matches):
 | step 6 (G) | 250/290 + 174/174 | 2 |
 | step 7 (H, I) | 256/290 + 195/195 | 0 |
 | step 8 (J, K) | 267/290 + 228/228 | 0 |
+| step 9 (M) | 271/290 + 9 accepted; 242/242 | 0 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
@@ -210,7 +211,19 @@ assigned only in one branch of `initialize` (it doesn't make it nilable).
 ### M. Union shape
 
 These are not wrong, just shaped differently from the compiler's types.
-How each is handled: [Decisions](#decisions).
+How each is handled: [Decisions](#decisions). Implemented in step 9; the
+book's examples are marked as accepted deviations (`# cls:`).
+
+- M1: unions stay exact; completion on a union offers only methods every
+  member responds to (the non-nil members of a nilable union), and an
+  abstract def without a return type returns the join of its
+  implementations in concrete descendants (up to 8).
+- M2: `t[i]`, `nt[:k]` and `a, b = t` on unions of (named) tuples give
+  per-position unions.
+- M3: `x : T = v` and later assignments take the value's type when it
+  fits T, else T; hover adds "(declared `T`)".
+- M4: unchanged (declared returns are the contract).
+- M5: `A | B` on types and `T?` in expression position are metaclasses.
 
 | ID | Example | Compiler | clear-ls |
 |---|---|---|---|

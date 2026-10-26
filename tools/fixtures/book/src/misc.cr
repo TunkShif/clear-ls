@@ -33,7 +33,7 @@ rescue ex
 end
 begin
 rescue ex2 : ArgumentError | KeyError
-  __t(ex2)
+  __t(ex2) # cls: (ArgumentError | KeyError)  decision 1: rescue unions stay exact
 end
 d = begin
   1

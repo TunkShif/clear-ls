@@ -745,6 +745,8 @@ module ClearLS::Types
                @table.named!("Int32")
              when .method_proc?
                method_proc_type(e)
+             when .nilable_constant?
+               e.type_text.try { |tt| t = parse_type(tt); @table.unknown?(t) ? nil : @table.metaclass(t) } || @table.unknown
              else
                @table.unknown
              end
@@ -1370,7 +1372,13 @@ module ClearLS::Types
       many = values.size == 1 && targets.size > 1
       if many
         t = @table[values[0]]
-        elems = t.kind.tuple? ? t.args : nil
+        elems = if t.kind.tuple?
+                  t.args
+                elsif t.kind.union? && !t.args.empty? && t.args.all? { |m| @table[m].kind.tuple? && @table[m].args.size == @table[t.args[0]].args.size }
+                  # A union of same-size tuples: per-position unions.
+                  n = @table[t.args[0]].args.size
+                  (0...n).map { |i| union_or_unknown(t.args.map { |m| @table[m].args[i] }) }
+                end
       end
       targets.each_with_index do |tgt, i|
         ty = if es = elems
@@ -1417,10 +1425,32 @@ module ClearLS::Types
     private def visit_type_decl(e : HIR::Expr) : TyId
       value = e.children[0]?.try { |c| operand(c) }
       b = e.binding
-      declared = b.try { |bid| @body.binding(bid).restriction }.try { |r| parse_type(r) }
-      ty = declared || value || @table.unknown
+      declared = b.try { |bid| declared_local(bid) }
+      # Decision 3: the value's type within the declaration (`x : Int32? =
+      # nil` is Nil here); without a value, the declared type.
+      ty = if declared && value
+             declared_flow(declared, value)
+           else
+             declared || value || @table.unknown
+           end
       b.try { |bid| assign(bid, ty) }
       ty
+    end
+
+    # Declared type of a `x : T` local, if any.
+    private def declared_local(b : HIR::BindingId) : TyId?
+      bd = @body.binding(b)
+      return nil unless bd.kind.type_decl?
+      bd.restriction.try { |r| t = parse_type(r); @table.unknown?(t) ? nil : t }
+    end
+
+    # Assigning *value* to a local declared *declared*: the value's members
+    # that fit (autocast literals take the declared type); the declared
+    # type when nothing fits or the value is unknown.
+    private def declared_flow(declared : TyId, value : TyId) : TyId
+      return declared if @table.unknown?(value)
+      kept = @table.members(value).select { |m| subtype?(m, declared) }
+      kept.size == @table.members(value).size ? @table.union(kept) : declared
     end
 
     private def write_target(target : HIR::ExprId, ty : TyId) : Nil
@@ -1431,6 +1461,10 @@ module ClearLS::Types
       end
       @types[target] = ty
       if (b = t.binding) && t.kind.local_ref?
+        # A local declared `x : T` stays within T on later assignments.
+        if declared = declared_local(b)
+          ty = declared_flow(declared, ty)
+        end
         assign(b, ty)
       end
     end
@@ -1719,6 +1753,9 @@ module ClearLS::Types
       if res.candidates.empty? && (gen = generated_method(receiver_type, name, args))
         return gen
       end
+      if (u = type_union_op(receiver_type, name, args))
+        return u
+      end
       declared = return_type_of(res, block_ret)
       if @table.unknown?(declared)
         # Number operators whose resolved stdlib bodies don't summarise
@@ -1810,6 +1847,15 @@ module ClearLS::Types
       CallSite.new(args, [] of {String, CallArg}, false, false)
     end
 
+    # `A | B` on types (`Class.|`, whose body is `typeof(...)`): the
+    # metaclass of the union.
+    private def type_union_op(recv : TyId, name : String, args : Array(TyId)) : TyId?
+      return nil unless name == "|" && args.size == 1
+      a, b = @table[recv], @table[args[0]]
+      return nil unless a.kind.metaclass? && b.kind.metaclass?
+      @table.metaclass(@table.union([a.args[0], b.args[0]]))
+    end
+
     # Methods the compiler defines without source: `Proc#call`, enum
     # member predicates (`Color::Red` → `#red?`).
     private def generated_method(recv : TyId, name : String, args : Array(TyId)) : TyId?
@@ -1837,6 +1883,13 @@ module ClearLS::Types
     # block/collection contracts). Only applied to stdlib receivers.
     private def contract(e : HIR::Expr, recv : TyId, name : String, args : Array(TyId), block_ret : TyId?) : TyId?
       t = @table[recv]
+      # A union of (named) tuples: each member's answer, joined (decision
+      # 2: unions of tuples stay unions; indexing gives the per-position
+      # union).
+      if t.kind.union? && t.args.all? { |m| k = @table[m].kind; k.tuple? || k.named_tuple? }
+        parts = t.args.map { |m| contract(e, m, name, args, block_ret).as(TyId?) || return nil }
+        return union_or_unknown(parts)
+      end
       case t.kind
       when .tuple?
         # `t[0]` with a literal index: that element (the compiler types
@@ -1851,6 +1904,18 @@ module ClearLS::Types
             return name == "[]?" ? nil_t : @table.no_return
           end
           return union_or_unknown(t.args) if name == "[]"
+        end
+      when .named_tuple?
+        # `nt[:x]` / `nt["x"]` with a literal key.
+        if name.in?("[]", "[]?") && e.children.size == 1
+          arg = @body.expr(e.children[0])
+          if arg.kind.literal? && (arg.syntax.symbol_node? || arg.syntax.string_node?) && (src = @source)
+            key = src.byte_slice(arg.range.start, arg.range.size).lchop(':').strip('"')
+            if i = t.names.index(key)
+              return t.args[i]
+            end
+            return name == "[]?" ? nil_t : @table.no_return
+          end
         end
       when .named?
         owner = map[t.def_id.not_nil!].full_name
@@ -2269,6 +2334,11 @@ module ClearLS::Types
       owner = map[m.owner]
       self_t = c.self_type
       text = sig.return_type
+      if text.nil? && sig.is_abstract
+        # Virtual dispatch (decision 1): an abstract def without a return
+        # type returns what its implementations in concrete subtypes do.
+        return virtual_return(c, block_ret)
+      end
       if text.nil?
         # `getter x = [] of T`: the type of the ivar the macro declares.
         if item.origin.macro? && sig.params.empty? && item.name[0].letter?
@@ -2321,6 +2391,30 @@ module ClearLS::Types
       when "pointer_malloc", "pointer_new"
         self_t
       end
+    end
+
+    MAX_VIRTUAL = 8
+
+    # Join of the returns of an abstract def's implementations in the
+    # descendants of the receiver type (at most MAX_VIRTUAL of them).
+    private def virtual_return(c : CallCandidate, block_ret : TyId?) : TyId?
+      recv = @table[c.self_type]
+      return nil unless recv.kind.named?
+      name = c.match.site.item.name
+      key = c.match.site.item.signature.try(&.receiver) ? "self.#{name}" : name
+      impls = [] of TyId
+      map.descendants(recv.def_id.not_nil!).each do |d|
+        info = map[d]
+        sites = info.members[key]? || next
+        site = sites.find { |s| s.item.kind.def? && !s.item.signature.try(&.is_abstract) } || next
+        sub = @table.named(d, info.type_params.map { |p| @table.type_param(p) })
+        cand = resolver.bind(MethodMatch.new(site, d, generic_bindings(d, [] of TyId)), sub,
+          CallSite.new(c.arg_types[0, c.arg_params.size].map { |t| CallArg.new(t) }, [] of {String, CallArg}, false, !block_ret.nil?)) || next
+        t = declared_return(cand, block_ret) || return nil
+        impls << t
+        return nil if impls.size > MAX_VIRTUAL
+      end
+      impls.empty? ? nil : union_or_unknown(impls.uniq)
     end
 
     # Receiver and argument bindings, plus `forall` vars bound from the

@@ -25,6 +25,11 @@ module ClearLS::IDE
       t = inf.binding_type(b.id) if table.unknown?(t) && !(ref.kind.read? && expr)
       ty = table.unknown?(t) ? b.restriction : table.to_s(t)
       md = "```crystal\n#{b.name}#{ty ? " : #{ty}" : ""}\n```\n\n#{KIND_NAMES[b.kind]}"
+      # `x : T = v`: the flow type above, the declaration as a note when it
+      # differs (decision 3).
+      if b.kind.type_decl? && (r = b.restriction) && ty && ty != r
+        md += " (declared `#{r}`)"
+      end
       {md, ref.range}
     end
 

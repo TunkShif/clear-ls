@@ -196,7 +196,11 @@ module ClearLS::Types
         io << "-> "
         to_s(t.args.last, io)
       in .metaclass?
+        inner = self[t.args[0]]
+        paren = inner.kind.union? || inner.kind.proc?
+        io << '(' if paren
         to_s(t.args[0], io)
+        io << ')' if paren
         io << ".class"
       end
     end

@@ -131,6 +131,13 @@ module ClearLS::IDE
           end
         end
       end
+      # A union (`Bar | Baz`) offers what every member responds to, like
+      # the compiler's virtual type of the common ancestor (decision 1 in
+      # book-gaps.md): a method only one member has would not compile.
+      members = table.members(recv_t).reject { |m| table.nil_type?(m) && table.members(recv_t).size > 1 }
+      if members.size > 1
+        by_name.select! { |name, _| members.all? { |m| member_has?(m, name) } }
+      end
       by_name.map do |name, (sites, depth)|
         first = sites.first?
         sig = first.try(&.item.signature)
@@ -149,6 +156,25 @@ module ClearLS::IDE
 
     # Sort tier: 0 the receiver's methods, 1 methods from universal base
     # types, 2 operators (`==`, `+`, `[]`, ...).
+    # Does a value of type *member* respond to *name* (own or inherited
+    # def/macro, or a class-side one for metaclasses)?
+    private def member_has?(member : Types::TyId, name : String) : Bool
+      table = @typing.table
+      map = @typing.def_map
+      t = table[member]
+      owner = case t.kind
+              when .named?                then t.def_id
+              when .metaclass?            then table[t.args[0]].def_id
+              when .tuple?, .named_tuple? then map.lookup_path("::Tuple")
+              when .proc?                 then map.lookup_path("::Proc")
+              end
+      return true unless owner
+      key = t.kind.metaclass? ? "self.#{name}" : name
+      map.lookup_member(owner, key).any? { |s| s.item.kind.def? || s.item.kind.macro? } ||
+        (t.kind.metaclass? && map.extends(owner).any? { |e| !map.lookup_member(e, name).empty? }) ||
+        (t.kind.metaclass? && name == "new")
+    end
+
     private def member_tier(name : String, sites : Array(Semantics::Site)) : Int32
       return 2 unless name[0].letter? || name[0] == '_'
       map = @typing.def_map

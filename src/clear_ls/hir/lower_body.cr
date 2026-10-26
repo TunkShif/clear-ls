@@ -76,6 +76,9 @@ module ClearLS::HIR
         add(ExprKind::Self, node.range)
       when .constant?, .generic_instance_type?
         add(ExprKind::Const, node.range, name: node.text, name_range: node.range)
+      when .nilable_constant?
+        # `Int32?` as a value: the metaclass of `Int32 | Nil`.
+        add(ExprKind::Other, node.range, syntax: node.kind, type_text: node.text)
       when .integer?, .float_node?, .string_node?, .char_node?, .symbol_node?, .true_node?,
            .false_node?, .nil_node?, .regex_node?, .chained_string?, .command?, .pseudo_constant?,
            .heredoc_start?

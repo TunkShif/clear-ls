@@ -575,6 +575,40 @@ describe "Types::Infer ivar rules and narrowing" do
   end
 end
 
+describe "Types::Infer union shape" do
+  it "dispatches abstract defs, indexes tuple unions, keeps declared locals in range" do
+    r = infer(<<-CR, 2)
+      abstract class A
+        abstract def talk
+      end
+      class D < A
+        def talk : String
+        end
+      end
+      class C < A
+        def talk : Char
+        end
+      end
+      def m(a : A, c : Bool)
+        x = a.talk
+        t = c ? {1, "s"} : {true, nil}
+        y = t[0]
+        p, q = t
+        n : Int32 | Float64 = 1
+        z = n
+        u = Int32 | String
+        v = Int32?
+      end
+      CR
+    {"x" => ["String | Char", "Char | String"], "y" => ["Int32 | Bool", "Bool | Int32"],
+     "q" => ["String?"], "z" => ["Int32"], "u" => ["(Int32 | String).class", "(String | Int32).class"],
+     "v" => ["(Int32?).class"]}.each do |name, tys|
+      # Union member order follows interning order.
+      tys.should contain(type_of_local(r, name))
+    end
+  end
+end
+
 describe "Types::Infer nil handling" do
   it "handles `|| return`, `|| default`, `try`, `not_nil!`" do
     r = infer(<<-CR)

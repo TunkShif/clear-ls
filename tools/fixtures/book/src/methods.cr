@@ -33,7 +33,7 @@ __t(ext(to: 3))
 def ret_restr : Int32 | String
   1
 end
-__t(ret_restr)
+__t(ret_restr) # cls: (Int32 | String)  decision 4: the declared return is the contract
 def nil_ret : Nil
   1
 end
