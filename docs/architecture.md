@@ -112,6 +112,11 @@ makes `yield` Pending) and yield summaries keep the argument types.
 Summaries also record the `with x yield` receiver (`Summary#with_self`),
 which becomes the implicit `self` of the caller's block (`@block_self`,
 `Infer#with_self_at` for completion).
+Locals used in proc literals or captured blocks (`@captured`) are solved
+twice: the second solve gives every assignment their joined type and
+skips truthiness narrowing for them. `method_groups` drops defs that a
+later same-key def redefines (`Infer.redefines?`); `previous_def`/`super`
+resolve through `redef_call` using `current_def`.
 `@[Primitive]` defs without a return type are typed by `primitive_return`
 instead of their empty bodies; bodies with a `return` inside `{% %}`
 summarise to unknown.

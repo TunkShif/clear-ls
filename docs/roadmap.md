@@ -478,6 +478,11 @@ Steps (one commit each, wrong results first):
    union of all their assignments; `previous_def` replaces instead of
    overloading; `super`; generic args from `initialize`; `new` in class
    methods.
+   *Done:* book 255/290 (+5), new `closures.cr` 21/21; no wrong book
+   entries left. Captured locals use a second solve with their joined
+   type; redefinitions follow the compiler's restriction key (checked:
+   defaulted trailing params and param names don't count). Regression
+   diff repo 0 / +1, stdlib 0 / +23 (O7); coverage stdlib 67.5% (67.1%).
 8. **Ivar rules and narrowing** (J1–J4, K1–K3), per decision 5 in
    book-gaps.md.
 9. **Union shape** (M1–M5), per decisions 1–4 and 6.

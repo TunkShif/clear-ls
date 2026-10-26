@@ -455,6 +455,67 @@ describe "Types::Infer splats" do
   end
 end
 
+describe "Types::Infer closures and redefinitions" do
+  it "joins every assignment of a captured local and does not narrow it" do
+    r = infer(<<-CR)
+      def m(c : Bool)
+        x = 1
+        pr = -> { x = "s" }
+        x = 'c'
+        y = x # here
+        z = c ? 1 : nil
+        -> { z }
+        if z
+          w = z # narrowed?
+        end
+        v = 1
+        [1].each { v = "s" }
+        v = 'c'
+        u = v
+      end
+      CR
+    type_of_local(r, "y").should eq "Int32 | String | Char"
+    type_of_local(r, "w").should eq "Int32?"
+    type_of_local(r, "u").should eq "Char"
+  end
+
+  it "resolves previous_def, super, and generic args from initialize" do
+    r = infer(<<-CR, 6)
+      class R
+        def m : Int32
+        end
+        def m
+          previous_def
+        end
+      end
+      class P
+        def f : Char
+        end
+      end
+      class C < P
+        def f
+          super
+        end
+      end
+      class Box(T)
+        def initialize(@v : T)
+        end
+        def v : T
+        end
+      end
+      def m
+        a = R.new.m
+        b = C.new.f
+        c = Box.new(1)
+        d = c.v
+      end
+      CR
+    {"a" => "Int32", "b" => "Char", "c" => "Box(Int32)", "d" => "Int32"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+end
+
 describe "Types::Infer nil handling" do
   it "handles `|| return`, `|| default`, `try`, `not_nil!`" do
     r = infer(<<-CR)

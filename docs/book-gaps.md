@@ -39,8 +39,8 @@ rest are unknown or wider than the compiler's type.
 
 Progress (book fixtures; the second number counts the fixtures added
 during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
-`loops.cr`, `procs.cr`, `splats.cr`; their accepted deviations are counted as
-matches):
+`loops.cr`, `procs.cr`, `splats.cr`, `closures.cr`; their accepted deviations are
+counted as matches):
 
 | After | Match | Wrong left |
 |---|---|---|
@@ -51,6 +51,7 @@ matches):
 | step 4 (E) | 238/290 + 118/121 | 7 |
 | step 5 (F) | 246/290 + 150/150 | 5 |
 | step 6 (G) | 250/290 + 174/174 | 2 |
+| step 7 (H, I) | 255/290 + 195/195 | 0 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
@@ -129,6 +130,7 @@ hit them:
 | O3 | `Tuple(A, B)` written nominally (`Array(Tuple(Int32, Int32, P))`) did not index like `{A, B}` | parsed as the structural tuple (3) |
 | O4 | Over the 8-shape cap a summary lost the caller's block value; `yield` became Pending and `if v; yield v; end` summarised to `Nil` (and the results depended on which defs ran first) | cap 16; over it, return summaries keep the block value and literal defaults, yield summaries keep the argument types (3) |
 | O5 | Bodies whose `return` sits inside `{% %}` (`Range#bsearch`) summarised from the remaining code | such bodies return unknown (3) |
+| O7 | Bodies with a `return` inside `{% if flag? %}` summarised to unknown since O5, losing e.g. `Crystal::System.effective_cpu_count : Int32` | only `{% for %}`/`{{ }}` returns make a summary unknown; flag-conditional ones are platform variants (7) |
 | O6 | `alias A = G(T)` resolved to bare `G`, losing `T` (`Bytes` was `Slice`) | the parser follows the alias's target text (3) |
 
 ### E. Loops, `break`, and `next`
@@ -164,16 +166,16 @@ hit them:
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| H1 | `x = 1; -> { x = "s" }; x = 'a'; x` and captured blocks (`&block`) | `Char \| Int32 \| String` | `Char` | wrong: a local assigned inside a proc or captured block has the union of all its assignments everywhere (closures.md) |
+| H1 | `x = 1; -> { x = "s" }; x = 'a'; x` and captured blocks (`&block`) | `Char \| Int32 \| String` | `Char` | **fixed (step 7)**: locals used in a proc literal or a captured block (`&block` without `yield`) take the join of all their assignments and are not narrowed by truthiness (`is_a?`/`nil?`/`case` still narrow, as in the compiler) |
 
 ### I. Methods: redefinition, `super`, generics
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| I1 | second `def m` calling `previous_def` | `Float64` | `Int32` | wrong: the redefinition is kept as an overload of the original |
-| I2 | `def foo; super.to_s; end` | `String` | `?` | unknown: `super` |
-| I3 | `MyBox.new(1)`, `.value` | `MyBox(Int32)`, `Int32` | `MyBox`, `?` | unknown: type args from `initialize(@value : T)` |
-| I4 | `def self.create; new("a"); end` | `Person` | `?` | unknown: `new` inside a class method |
+| I1 | second `def m` calling `previous_def` | `Float64` | `Int32` | **fixed (step 7)**: a later def with the same restriction key (defaulted trailing params ignored, as in the compiler) hides the earlier one; `previous_def` calls it |
+| I2 | `def foo; super.to_s; end` | `String` | `?` | **fixed (step 7)**: bare `super` forwards the def's arguments |
+| I3 | `MyBox.new(1)`, `.value` | `MyBox(Int32)`, `Int32` | `MyBox`, `?` | **fixed (step 7)**: unified from the `initialize` restrictions |
+| I4 | `def self.create; new("a"); end` | `Person` | `?` | **fixed (step 3, O1)** |
 
 ### J. Instance and class variables
 

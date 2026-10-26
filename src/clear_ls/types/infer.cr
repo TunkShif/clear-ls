@@ -104,12 +104,78 @@ module ClearLS::Types
         e.block.try { |b| @parent[b] = e.id }
       end
       seed_params
-      solve(@env.dup)
+      find_captured
+      start = @env.dup
+      solve(start)
+      unless @captured.empty?
+        # Captured locals: re-solve with the joins of the first pass as
+        # their type everywhere (assignments seen later now count before).
+        @captured.each { |b| (t = @binding_types[b]?) && (@captured_types[b] = t) }
+        reset_solution
+        solve(start.dup)
+      end
       @main_pass = false
       @reached = @in.keys.to_set
       solve_dead
       final_binding_types
       self
+    end
+
+    # Clears per-solve state for a second solve of the same body (types
+    # and resolutions are overwritten by it).
+    private def reset_solution : Nil
+      @in.clear
+      @end_env.clear
+      @live_out.clear
+      @visits.clear
+      @reentries.clear
+      @jump_values.clear
+      @yield_types.clear
+      @with_self = nil
+      seeded = @binding_types.select { |b, _| k = @body.binding(b).kind; k.param? || k.block_param? }
+      @binding_types = seeded
+    end
+
+    # Locals of this body used inside a proc literal or a captured block
+    # (closures.md): their type is the join of every assignment anywhere,
+    # and they are never narrowed (the closure may run at any time).
+    @captured = Set(HIR::BindingId).new
+    # Join of all assignments so far, per captured local.
+    @captured_types = {} of HIR::BindingId => TyId
+
+    private def find_captured : Nil
+      @body.exprs.each do |e|
+        next unless e.kind.block?
+        owner = cfg.closure_owner[e.id]?.try { |o| @body.expr(o) } || next
+        next unless owner.kind.proc_literal? || capturing_call?(owner)
+        own = e.scope
+        @body.exprs.each do |x|
+          next unless x.kind.local_ref? && e.range.covers?(x.range)
+          b = x.binding || next
+          @captured << b unless k_in_scope?(b, own)
+        end
+      end
+    end
+
+    # A call whose block parameter is captured (`def f(&block)` without
+    # `yield`): every candidate stores the block rather than yielding.
+    private def capturing_call?(call : HIR::Expr) : Bool
+      return false unless call.kind.call? && call.block
+      cands = resolve_call(call).candidates
+      !cands.empty? && cands.all? do |c|
+        sig = c.match.site.item.signature || next false
+        bp = sig.params.find(&.kind.block?) || next false
+        !bp.name.nil? && !yields?(c.match.site)
+      end
+    end
+
+    @yields_cache = {} of {Int32, UInt32} => Bool
+
+    private def yields?(site : Semantics::Site) : Bool
+      @yields_cache[{site.file.value.to_i32, site.item.range.start}] ||= begin
+        node = @source_loader.try(&.call(site))
+        node ? node.tree.text.byte_slice(node.start_byte, node.end_byte - node.start_byte).matches?(/\byield\b/) : true
+      end
     end
 
     # Joins of every value assigned to each binding, taken from one final
@@ -148,8 +214,11 @@ module ClearLS::Types
     # miss those values (`Range#bsearch` returns from a `{% for %}`).
     def opaque_macros? : Bool
       src = @source || return false
+      # `{% if flag?(...) %}` / `{% unless %}` blocks: the value returned
+      # inside is a platform variant of the code around it; summarising
+      # without it is a best effort. Loops and expansions generate code.
       @body.exprs.any? do |x|
-        x.kind.missing? && x.syntax.in?(MACRO_KINDS) &&
+        x.kind.missing? && x.syntax.in?(MACRO_KINDS) && !x.syntax.macro_if? && !x.syntax.macro_unless? &&
           src.byte_slice(x.range.start, x.range.size).matches?(/\breturn\b/)
       end
     end
@@ -316,6 +385,10 @@ module ClearLS::Types
     # -- environment ------------------------------------------------------------
 
     private def assign(b : HIR::BindingId, ty : TyId) : Nil
+      if @captured.includes?(b) && (all = @captured_types[b]?)
+        # Captured (second pass): the join of every assignment in the body.
+        ty = join(all, ty)
+      end
       @env[b] = ty
       return if @replaying && !@collecting
       prev = @binding_types[b]?
@@ -483,6 +556,11 @@ module ClearLS::Types
       test = b.test || return env
       @env = env
       facts = edge_facts(test, i == 0)
+      # Captured locals are not narrowed by truthiness (`if x`, if_var.md);
+      # the compiler still narrows them by `is_a?`, `nil?` and `case`.
+      if test.kind.truthy? && !@captured.empty?
+        truthy_locals(test.cond).each { |k| facts.delete(k) if @captured.includes?(k) }
+      end
       return env if facts.empty?
       refined = env.dup
       facts.each do |k, t|
@@ -1288,6 +1366,19 @@ module ClearLS::Types
       result
     end
 
+    # Locals that *cond* tests by truthiness (`x`, `x = v`, through `!`,
+    # `&&`, `||`).
+    private def truthy_locals(cond : HIR::ExprId) : Array(HIR::BindingId)
+      e = @body.expr(cond)
+      case e.kind
+      when .local_ref? then e.binding.try { |b| [b] } || [] of HIR::BindingId
+      when .assign?    then e.children[0]?.try { |t| @body.expr(t).binding }.try { |b| [b] } || [] of HIR::BindingId
+      when .not?, .and?, .or?, .seq?
+        e.children.flat_map { |c| truthy_locals(c) }
+      else [] of HIR::BindingId
+      end
+    end
+
     private def narrow_to(current : TyId, target : TyId) : TyId
       return target if @table.unknown?(current)
       kept = @table.members(current).select { |m| subtype?(m, target) }
@@ -1447,6 +1538,10 @@ module ClearLS::Types
         return @table.nilable(inner)
       end
 
+      if (r = redef_call(e))
+        return r
+      end
+
       # `obj.@x`: the receiver's ivar.
       if name.starts_with?('@') && recv_t
         ivar_owner = @table[recv_t].def_id
@@ -1460,9 +1555,11 @@ module ClearLS::Types
       end
       res = resolve_call(e)
       if name == "new" && res.candidates.empty?
-        # `Foo.new` without an explicit `self.new`: instance of Foo.
+        # `Foo.new` without an explicit `self.new`: instance of Foo, with
+        # generic args bound from the `initialize` it calls
+        # (`MyBox.new(1)` → MyBox(Int32)).
         rt = @table[receiver_type]
-        return rt.args[0] if rt.kind.metaclass?
+        return instance_from_initialize(e, rt.args[0]) if rt.kind.metaclass?
       end
       @resolutions[e.id] = res
       if res.candidates.empty? && (prim = primitive_op(receiver_type, name, args))
@@ -1487,6 +1584,79 @@ module ClearLS::Types
         return c
       end
       declared
+    end
+
+    private def instance_from_initialize(call : HIR::Expr, inst : TyId) : TyId
+      it = @table[inst]
+      return inst unless it.kind.named? && it.args.empty?
+      def_id = it.def_id.not_nil!
+      tparams = map[def_id].type_params
+      return inst if tparams.empty?
+      open = @table.named(def_id, tparams.map { |p| @table.type_param(p) })
+      res = resolver.resolve(method_groups(open, "initialize"), call_site(call))
+      bindings = {} of String => TyId
+      res.candidates.each do |c|
+        sig = c.match.site.item.signature || next
+        (c.arg_params + c.named_params).each_with_index do |pi, i|
+          next unless pi && (r = sig.params[pi].restriction) && (a = c.arg_types[i]?)
+          next if @table.unknown?(a) || !sig.params[pi].kind.positional?
+          pattern = TypeExprParser.parse(r, @table, c.match.owner, map[c.match.owner].type_params + sig.free_vars)
+          Subst.unify(@table, pattern, a, bindings)
+        end
+      end
+      args = tparams.map { |p| bindings[p]? }
+      return inst if args.any?(&.nil?)
+      @table.named(def_id, args.compact)
+    end
+
+    # The def this body belongs to (for `previous_def` and `super`).
+    property current_def : Semantics::Site? = nil
+
+    # `previous_def` / `super` (with or without arguments): the def this
+    # one redefines, or the same method in the nearest ancestor. Bare
+    # forms pass the current def's own arguments.
+    private def redef_call(e : HIR::Expr) : TyId?
+      name = e.name || return nil
+      return nil unless e.receiver.nil? && name.in?("previous_def", "super")
+      cur = @current_def || return @table.unknown
+      owner = @ctx.ns
+      sig = cur.item.signature
+      class_side = !sig.try(&.receiver).nil?
+      key = class_side ? "self.#{cur.item.name}" : cur.item.name
+      cands = if name == "previous_def"
+                (map[owner].members[key]? || [] of Semantics::Site).select do |s|
+                  s != cur && s.item.kind.def? && Infer.redefines?(cur, s)
+                end.sort_by { |s| {s.file.value, s.item.range.start} }.last(1)
+              else
+                found = [] of Semantics::Site
+                map.ancestors(owner).each do |anc|
+                  next if anc == owner
+                  if (ss = map[anc].members[key]?) && !(defs = ss.select(&.item.kind.def?)).empty?
+                    found = defs
+                    break
+                  end
+                end
+                found
+              end
+      return @table.unknown if cands.empty?
+      # Arguments: as written, or the current def's params when bare.
+      site = e.text == "()" || !e.children.empty? || !e.named_args.empty? ? call_site(e) : bare_redef_site
+      self_t = class_side ? self_for(@ctx.self_type) : @ctx.self_type
+      st = @table[self_t]
+      bindings = st.kind.named? ? generic_bindings(st.def_id.not_nil!, st.args) : {} of String => TyId
+      matches = cands.map { |s| MethodMatch.new(s, owner_of(owner, s), bindings) }
+      return_type_of(resolver.resolve([{self_t, matches}], site), e.block.try { |b| block_value(b) })
+    end
+
+    # Call site for a bare `super` / `previous_def`: the current def's
+    # params, with their current types.
+    private def bare_redef_site : CallSite
+      args = [] of CallArg
+      @body.bindings.each do |b|
+        next unless b.kind.param?
+        args << CallArg.new(@env[b.id]? || @table.unknown)
+      end
+      CallSite.new(args, [] of {String, CallArg}, false, false)
     end
 
     # Methods the compiler defines without source: `Proc#call`, enum
@@ -1750,6 +1920,65 @@ module ClearLS::Types
     # instance types, `self.` methods (and `extend`ed modules) for
     # metaclasses. Unknown receivers have no groups.
     def method_groups(receiver_type : TyId, name : String) : Array({TyId, Array(MethodMatch)})
+      without_redefined(method_groups_all(receiver_type, name))
+    end
+
+    # Drops defs that a later def with the same restrictions redefines in
+    # the same type (reopened classes, `previous_def` chains): the
+    # compiler keeps only the last one.
+    private def without_redefined(groups : Array({TyId, Array(MethodMatch)})) : Array({TyId, Array(MethodMatch)})
+      groups.map do |(self_t, ms)|
+        kept = ms.reject do |m|
+          ms.any? { |o| o != m && o.owner == m.owner && Infer.redefines?(o.site, m.site) }
+        end
+        {self_t, kept}
+      end
+    end
+
+    # Does *later* redefine *earlier* (same owner type checked by caller)?
+    # The compiler's key: positional restrictions (defaults ignored), the
+    # splat/double-splat/block shape, and required named params.
+    def self.redefines?(later : Semantics::Site, earlier : Semantics::Site) : Bool
+      return false unless later.item.name == earlier.item.name && later.item.kind == earlier.item.kind
+      ls = later.item.signature || return false
+      es = earlier.item.signature || return false
+      return false unless (ls.receiver.nil?) == (es.receiver.nil?)
+      return false unless redef_key(ls) == redef_key(es)
+      Infer.declared_after?(later, earlier)
+    end
+
+    # Positional params up to the first defaulted one (later defaulted
+    # params can be omitted, so `f(x, y = 1)` redefines `f(x)`), the
+    # splat/double-splat/block shape, and required named params.
+    def self.redef_key(sig : Items::Signature) : Array(String)
+      key = [] of String
+      splat = sig.params.index(&.kind.splat?)
+      defaulted = false
+      sig.params.each_with_index do |p, i|
+        case p.kind
+        in .positional?
+          if splat && i > splat
+            key << "named:#{p.call_name}:#{p.restriction}" if p.default.nil?
+          elsif p.default
+            defaulted = true
+          elsif !defaulted
+            key << "pos:#{p.restriction}"
+          end
+        in .splat?        then key << "*#{p.name ? "" : "marker"}:#{p.restriction}"
+        in .double_splat? then key << "**"
+        in .block?        then key << "&"
+        end
+      end
+      key
+    end
+
+    # Source order within a file; across files the DefMap's file order
+    # (which follows the require closure only approximately).
+    def self.declared_after?(a : Semantics::Site, b : Semantics::Site) : Bool
+      a.file == b.file ? a.item.range.start > b.item.range.start : a.file.value > b.file.value
+    end
+
+    private def method_groups_all(receiver_type : TyId, name : String) : Array({TyId, Array(MethodMatch)})
       groups = [] of {TyId, Array(MethodMatch)}
       @table.members(receiver_type).each do |member|
         t = @table[member]
@@ -2046,6 +2275,7 @@ module ClearLS::Types
         inner.summaries = cache
         inner.summary_depth = summary_depth
         inner.summarising = true
+        inner.current_def = m.site
         n = sig.try(&.params.size) || 0
         inner.param_args = positional_param_args(sig, eff_args.size > n ? eff_args[0, n] : eff_args)
         inner.yield_value = eff_args[n]? if eff_args.size > n

@@ -428,8 +428,11 @@ module ClearLS::HIR
       if b = node.field(Syntax::Field::Block)
         block = lower_block(b, nil)
       end
+      # `super()` / `previous_def(x)`: explicit (possibly empty) arguments,
+      # unlike bare `super`, which forwards the def's own arguments.
+      text = name.in?("super", "previous_def") && node.field(Syntax::Field::Arguments) ? "()" : nil
       add(ExprKind::Call, node.range, syntax: node.kind, name: name, name_range: method.try(&.range),
-        receiver: receiver, children: args, named_args: named, block: block, type_text: type_arg)
+        receiver: receiver, children: args, named_args: named, block: block, type_text: type_arg, text: text)
     end
 
     TYPE_ARG_METHODS = %w(as as? is_a? nilable? responds_to?).to_set

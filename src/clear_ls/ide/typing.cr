@@ -57,6 +57,7 @@ module ClearLS::IDE
       inf = Types::Infer.new(body, ctx, @table)
       inf.source_loader = ->(site : Semantics::Site) { def_node(site) }
       inf.summaries = @summaries
+      inf.current_def = def_site(state, ns, body.range)
       unless body_is_def?(state, body)
         # File-level body: inside `class Foo ... end` self is `Foo.class`.
         file = state.id
@@ -66,6 +67,14 @@ module ClearLS::IDE
         end
       end
       inf.with_source(state.text).run
+    end
+
+    # The DefMap site of the def whose body spans *range*.
+    private def def_site(state : FileState, ns : Semantics::TypeId, range : TextRange) : Semantics::Site?
+      @def_map[ns].members.each_value do |sites|
+        sites.each { |s| return s if s.file == state.id && s.item.range == range && s.item.kind.def? }
+      end
+      nil
     end
 
     private def body_is_def?(state : FileState, body : HIR::Body) : Bool
