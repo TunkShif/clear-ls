@@ -419,6 +419,42 @@ describe "Types::Infer procs and blocks" do
   end
 end
 
+describe "Types::Infer splats" do
+  it "types splat params, splatted arguments, and splats in literals and targets" do
+    r = infer(<<-CR, 4)
+      def sum(*xs)
+        xs
+      end
+      def ints(*xs : Int32)
+        xs
+      end
+      def opts(x, **kw)
+        kw
+      end
+      def add2(x : Int32, y : String) : Char
+      end
+      def m(t : {Int32, String}, n : {x: Int32, y: String}, arr : Array(Float64))
+        a = sum(1, "s")
+        b = ints(1, 2)
+        c = opts(1, y: 'c')
+        d = add2(*t)
+        e = add2(**n)
+        f = [1, *arr]
+        g = {*t, 'c'}
+        h, *i = 1, "s", 'c'
+        *j, k = t
+        l, *o = arr
+      end
+      CR
+    {"a" => "{Int32, String}", "b" => "{Int32, Int32}", "c" => "{y: Char}", "d" => "Char",
+     "e" => "Char", "f" => "Array(Int32 | Float64)", "g" => "{Int32, String, Char}",
+     "h" => "Int32", "i" => "{String, Char}", "j" => "{Int32}", "k" => "String",
+     "l" => "Float64", "o" => "Array(Float64)"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+end
+
 describe "Types::Infer nil handling" do
   it "handles `|| return`, `|| default`, `try`, `not_nil!`" do
     r = infer(<<-CR)

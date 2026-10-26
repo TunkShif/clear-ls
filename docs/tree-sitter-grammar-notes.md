@@ -56,6 +56,15 @@ Fixes belong upstream in the grammar; clear-ls does not patch it locally.
 
 ## Lowering quirks
 
+- Splats inside collection literals (`[1, *xs]`, `{*t, 1}`, `Set{*xs}`)
+  parse as an `ERROR` node holding only `*`, followed by the operand.
+  Body lowering rejoins the pair into a `Splat` element. When the operand
+  starts with `i`, `m` or `x`, the lexer reads those letters as regex
+  modifiers: `*xs` becomes `ERROR("*", regex_modifier "x")` followed by
+  `identifier "s"` (or no identifier for `*x`, `*mix`); lowering rejoins
+  the name. A literal operand (`{1, *{"a", 'b'}}`) is not recoverable:
+  the `{` goes into the ERROR node and the rest is mis-parsed.
+
 - In `x || return` and `x || return 1`, `return` parses as an `identifier`
   or a `call` named `return` (statement-level `return` is fine). Body
   lowering maps these back to `return`/`next`/`break`.

@@ -39,7 +39,8 @@ rest are unknown or wider than the compiler's type.
 
 Progress (book fixtures; the second number counts the fixtures added
 during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
-`loops.cr`, `procs.cr`; their accepted deviations are counted as matches):
+`loops.cr`, `procs.cr`, `splats.cr`; their accepted deviations are counted as
+matches):
 
 | After | Match | Wrong left |
 |---|---|---|
@@ -49,6 +50,7 @@ during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
 | step 3 (D) | 233/290 + 103/104 | 10 |
 | step 4 (E) | 238/290 + 118/121 | 7 |
 | step 5 (F) | 246/290 + 150/150 | 5 |
+| step 6 (G) | 250/290 + 174/174 | 2 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
@@ -151,12 +153,12 @@ hit them:
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| G1 | `def s(*xs : Int32)`, `s(1, 2)` | `Tuple(Int32, Int32)` | `Tuple(Int32)` | wrong: restriction applied as the whole tuple's element list |
-| G2 | `{1, *{"a", 'b'}}` | `Tuple(Int32, String, Char)` | `Tuple(Int32, ?, String, Char)` | wrong: the splat stays as an element |
-| G3 | `q, *rest = 1, "a", 'c'` | `rest : Tuple(String, Char)` | `String` | wrong |
-| G4 | `def sum(*elements)`, `def f(**opts)` inside the body | `Tuple(Int32, …)`, `NamedTuple(y: …)` | `Tuple`, `NamedTuple` | unknown: summaries don't bind splat params |
-| G5 | `add(*tup)`, `add(**nt)` | `Int32` | `?` | unknown: splatted arguments with known tuple types |
-| G6 | `[1, *coll]` | `Array(Float64 \| Int32)` | `Array(?)` | unknown |
+| G1 | `def s(*xs : Int32)`, `s(1, 2)` | `Tuple(Int32, Int32)` | `Tuple(Int32)` | **fixed (step 6)**: the tuple of the bound arguments |
+| G2 | `{1, *t}` | `Tuple(Int32, String, Char)` | `Tuple(Int32, ?, String, Char)` | **fixed (step 6)**: the grammar splits `*x` into ERROR + operand; lowering rejoins it. A literal operand (`{1, *{…}}`) mis-parses and stays unknown (accepted) |
+| G3 | `q, *rest = 1, "a", 'c'` | `rest : Tuple(String, Char)` | `String` | **fixed (step 6)**; `*rest` from an array is an `Array` |
+| G4 | `def sum(*elements)`, `def f(**opts)` | `Tuple(Int32, …)`, `NamedTuple(y: …)` | `Tuple`, `NamedTuple` | **fixed (step 6)** for calls; inside the def (no call) they stay `Tuple`/`NamedTuple` (accepted: the compiler types each instantiation) |
+| G5 | `add(*tup)`, `add(**nt)` | `Int32` | `?` | **fixed (step 6)**: tuple / named-tuple types expand into arguments |
+| G6 | `[1, *coll]`, `Set{1, *coll}` | `Array(Float64 \| Int32)` | `Array(?)` | **fixed (step 6)**: element type of the splatted enumerable |
 
 ### H. Closures
 
@@ -231,6 +233,8 @@ These came up in the comparison but are not about inference. They stay in
 |---|---|---|---|
 | `flow.cr:59` | `Int32 \| String` once | `Int32`, then `Int32 \| String` | The compiler prints once per loop fixed-point step; clear-ls shows the joined fixed point |
 | `loops.cr` `forever` | `NoReturn` | not typed | A def whose body is `while true` without `break`: the compiler doesn't instantiate code after it; clear-ls reports `NoReturn` |
+| `splats.cr` inside `sum`/`opts` | `Tuple`, `NamedTuple` | one type per call | A def body analysed on its own has no call; hover inside it shows the open shape (call sites get the exact tuple) |
+| `literals.cr:62` | `?` | `Tuple(Int32, String, Char)` | `{1, *{"a", 'b'}}`: the grammar mis-parses a splatted literal (tree-sitter-grammar-notes) |
 | `primitives.cr:85` | `spawn { }` unknown | `Fiber` | `def spawn` is inside `{% begin %}` with a macro in its parameter list; macro bodies are not modelled (N) |
 
 ## Decisions

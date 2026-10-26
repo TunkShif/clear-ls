@@ -140,7 +140,7 @@ module ClearLS::Flow
         e.children[n..].each { |v| lower(v) }
         # Local targets are writes, not reads; other targets (`@x`, `a.b`,
         # `a[i]`) evaluate their operands.
-        e.children[0, n].each { |t| lower(t) unless @body.expr(t).kind.local_ref? }
+        e.children[0, n].each { |t| lower(t) unless target_local?(t) }
         eval(id)
       when .op_assign?
         target, value = e.children[0]?, e.children[1]?
@@ -150,6 +150,12 @@ module ClearLS::Flow
       else
         lower_generic(e)
       end
+    end
+
+    # A local assignment target, also as `*rest`.
+    private def target_local?(t : HIR::ExprId) : Bool
+      x = @body.expr(t)
+      x.kind.local_ref? || (x.kind.splat? && x.children.size == 1 && @body.expr(x.children[0]).kind.local_ref?)
     end
 
     private def lower_generic(e : HIR::Expr) : Nil

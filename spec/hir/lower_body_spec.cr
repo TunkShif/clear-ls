@@ -30,6 +30,16 @@ describe HIR::LowerBody do
     body.bindings.find!(&.name.== "blk").kind.should eq HIR::BindingKind::BlockParam
   end
 
+  it "rejoins splats in collection literals and marks splat targets" do
+    body, src = body_of("def m(xs, t)\n  a = [1, *xs]\n  b = {*t, 2}\n  q, *r = 1, 2, 3\nend")
+    splats = body.exprs.select(&.kind.splat?).map { |e| src.byte_slice(e.range.start, e.range.size) }
+    splats.should eq ["*xs", "*t", "*r"]
+    # `xs` (lexed as modifier "x" + "s") still reads the param.
+    xs = body.bindings.find!(&.name.== "xs")
+    xs.references.map(&.kind).should eq [HIR::RefKind::Decl, HIR::RefKind::Read]
+    body.bindings.map(&.name).should contain "r"
+  end
+
   it "binds ivar params as locals too" do
     body, src = body_of("def initialize(@name : String, @@count = 0)\n  name.size + count\nend")
     name = body.bindings.find!(&.name.== "name")

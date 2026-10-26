@@ -264,12 +264,14 @@ module ClearLS::Types
              else
                @table.unknown
              end
-        # Splats: `*args : T` is a Tuple of T, `**opts` a NamedTuple.
+        # Splats: the call's tuple / named tuple when summarised for a
+        # call; otherwise unknown sizes (`Tuple`, `NamedTuple`).
         decl = param_decl_text(b)
+        given_known = given && !@table.unknown?(given)
         if decl.starts_with?("**")
-          ty = @table.named?("NamedTuple") || @table.unknown
+          ty = given_known ? given.not_nil! : (@table.named?("NamedTuple") || @table.unknown)
         elsif decl.starts_with?('*')
-          ty = r ? (@table.named?("Tuple", [ty]) || @table.unknown) : (@table.named?("Tuple") || @table.unknown)
+          ty = given_known ? given.not_nil! : (@table.named?("Tuple") || @table.unknown)
         elsif b.kind.block_param?
           ty = block_param_type(r, ty)
         end
@@ -807,7 +809,28 @@ module ClearLS::Types
     end
 
     private def collection(e : HIR::Expr) : TyId
-      elems = e.children.map { |c| operand(c) }
+      elems = [] of TyId
+      # `*x` elements: a tuple contributes its elements; in arrays (and
+      # array-likes) any enumerable contributes its element type.
+      tuple_splat_unknown = false
+      e.children.each do |c|
+        ce = @body.expr(c)
+        return @table.unknown if ce.kind.missing?
+        unless ce.kind.splat?
+          elems << operand(c)
+          next
+        end
+        st = operand(c)
+        t = @table[st]
+        if t.kind.tuple?
+          elems.concat(t.args)
+        elsif e.syntax.tuple_node?
+          tuple_splat_unknown = true
+        else
+          elems << (enumerable_element(st) || @table.unknown)
+        end
+      end
+      return @table.unknown if tuple_splat_unknown
       of_key = of_value = nil.as(TyId?)
       named = [] of {String, TyId}
       e.named_args.each do |(n, v)|
@@ -1140,15 +1163,34 @@ module ClearLS::Types
       n = e.target_count
       targets = e.children[0, n]
       values = e.children[n..].map { |v| operand(v) }
-      if values.size == 1 && targets.size > 1
-        # `a, b = tuple`: element types when the value is a tuple.
+      splat = targets.index { |t| @body.expr(t).kind.splat? }
+      # `a, b = tuple`: the tuple's elements; `a, b = xs`: the element type.
+      elems = values
+      many = values.size == 1 && targets.size > 1
+      if many
         t = @table[values[0]]
-        targets.each_with_index do |tgt, i|
-          elem = t.kind.tuple? ? (t.args[i]? || @table.unknown) : element_type(values[0])
-          write_target(tgt, elem)
-        end
-      else
-        targets.each_with_index { |tgt, i| write_target(tgt, values[i]? || @table.unknown) }
+        elems = t.kind.tuple? ? t.args : nil
+      end
+      targets.each_with_index do |tgt, i|
+        ty = if es = elems
+               if splat.nil?
+                 es[i]? || @table.unknown
+               elsif i < splat
+                 es[i]? || @table.unknown
+               elsif i == splat
+                 # `*rest` takes what the targets around it leave: a tuple.
+                 tail = targets.size - splat - 1
+                 count = es.size - splat - tail
+                 count >= 0 ? @table.tuple(es[splat, count]) : @table.unknown
+               else
+                 es[es.size - (targets.size - i)]? || @table.unknown
+               end
+             else
+               # Not a tuple: each target is an element; `*rest` an array.
+               el = element_type(values[0])
+               i == splat ? (@table.named?("Array", [el]) || @table.unknown) : el
+             end
+        write_target(tgt, ty)
       end
       @table.tuple(values)
     end
@@ -1182,6 +1224,10 @@ module ClearLS::Types
 
     private def write_target(target : HIR::ExprId, ty : TyId) : Nil
       t = @body.expr(target)
+      if t.kind.splat? && (inner = t.children[0]?)
+        @types[target] = ty
+        return write_target(inner, ty)
+      end
       @types[target] = ty
       if (b = t.binding) && t.kind.local_ref?
         assign(b, ty)
@@ -1669,18 +1715,33 @@ module ClearLS::Types
     def call_site(call : HIR::Expr) : CallSite
       args = [] of CallArg
       dsplat = false
+      named = [] of {String, CallArg}
       call.children.each do |c|
         a = @body.expr(c)
         case a.kind
-        when .splat?        then args << CallArg.new(@table.unknown, splat: true)
-        when .double_splat? then dsplat = true
+        when .splat?
+          # `*tuple`: its elements are the arguments; other splats hide
+          # the count.
+          st = a.children[0]?.try { |x| @table[operand(x)] }
+          if st && st.kind.tuple?
+            st.args.each { |t| args << CallArg.new(t) }
+          else
+            args << CallArg.new(@table.unknown, splat: true)
+          end
+        when .double_splat?
+          st = a.children[0]?.try { |x| @table[operand(x)] }
+          if st && st.kind.named_tuple?
+            st.names.each_with_index { |n, i| named << {n, CallArg.new(st.args[i])} }
+          else
+            dsplat = true
+          end
         else
           args << CallArg.new(operand(c), literal: a.kind.literal? ? a.syntax : nil)
         end
       end
-      named = call.named_args.map do |(n, v)|
+      call.named_args.each do |(n, v)|
         a = @body.expr(v)
-        {n, CallArg.new(operand(v), literal: a.kind.literal? ? a.syntax : nil)}
+        named << {n, CallArg.new(operand(v), literal: a.kind.literal? ? a.syntax : nil)}
       end
       CallSite.new(args, named, dsplat, !call.block.nil?)
     end
@@ -1947,6 +2008,9 @@ module ClearLS::Types
           end
           args[pi] = t
         end
+        # `*xs` / `**opts`: the tuple of the arguments they collect (only
+        # when the call's shape is known: no splatted arguments).
+        splat_param_types(c, sig).each { |pi, t| args[pi] = t }
         # Omitted params with a literal default (`if_none = nil`): the
         # default's type.
         sig.params.each_with_index do |p, i|
@@ -1989,6 +2053,32 @@ module ClearLS::Types
         yields = inner.yield_types.map { |ts| union_or_unknown(ts.uniq) }
         Summaries::Summary.new(inner.opaque_macros? ? @table.unknown : inner.return_type, yields, inner.with_self)
       end
+    end
+
+    # Types of a candidate's `*splat` (Tuple of its arguments) and
+    # `**double_splat` (NamedTuple of the extra named arguments) params.
+    private def splat_param_types(c : CallCandidate, sig : Items::Signature) : Hash(Int32, TyId)
+      result = {} of Int32 => TyId
+      return result unless c.structural.compatible?
+      sig.params.each_with_index do |p, pi|
+        next unless p.name
+        case p.kind
+        when .splat?
+          elems = c.arg_params.each_with_index.select { |(x, _)| x == pi }.map { |(_, i)| c.arg_types[i] }.to_a
+          result[pi] = @table.tuple(elems)
+        when .double_splat?
+          names = [] of String
+          types = [] of TyId
+          site_named = c.named_params
+          site_named.each_with_index do |x, i|
+            next unless x == pi
+            names << (c.named_names[i]? || "?")
+            types << c.arg_types[c.arg_params.size + i]
+          end
+          result[pi] = @table.named_tuple(names, types)
+        end
+      end
+      result
     end
 
     # Adds the type param names mentioned in *t* to *names*.

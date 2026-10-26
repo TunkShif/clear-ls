@@ -59,7 +59,7 @@ __t(Set{1, 2})
 __t(Set(Int32){1, 2})
 coll = [1.5]
 __t([1, *coll])
-__t({1, *{"a", 'b'}})
+__t({1, *{"a", 'b'}}) # cls: ?  grammar: `*{` in a tuple literal mis-parses (tree-sitter-grammar-notes)
 __t("a#{1}b")
 __t(<<-TXT)
   hi

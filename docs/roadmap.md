@@ -469,6 +469,11 @@ Steps (one commit each, wrong results first):
 6. **Splats** (G1–G6). Splat params (`*xs : T` per argument) and
    `**opts` from the call; splatted tuple/named-tuple arguments; splats in
    tuple, array and multi-assign literals.
+   *Done:* book 250/290 (+4, +1 accepted), new `splats.cr` 24/24 (2
+   accepted). Splats in collection literals needed a lowering workaround
+   for a grammar quirk (`*xs` lexed as regex modifier `x` + `s`, see
+   tree-sitter-grammar-notes). Regression diff 0/0 on repo and stdlib;
+   stdlib inference +4% time (more summary shapes: 4847 vs 4768).
 7. **Closures and redefinitions** (H1, I1–I4). Captured locals take the
    union of all their assignments; `previous_def` replaces instead of
    overloading; `super`; generic args from `initialize`; `new` in class

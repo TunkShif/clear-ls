@@ -54,6 +54,8 @@ module ClearLS::Types
     getter restrictions = {} of Int32 => TyId?
     # Argument types of the call (positional, then named).
     property arg_types = [] of TyId
+    # Names of the call's named arguments (same order as `named_params`).
+    property named_names = [] of String
 
     def initialize(@match, @self_type, @arg_params, @named_params, @structural)
     end
@@ -140,6 +142,7 @@ module ClearLS::Types
     def bind(m : MethodMatch, self_t : TyId, site : CallSite) : CallCandidate?
       c = bind_params(m, self_t, site) || return nil
       c.arg_types = site.args.map(&.type) + site.named.map(&.[1].type)
+      c.named_names = site.named.map(&.[0])
       c
     end
 
