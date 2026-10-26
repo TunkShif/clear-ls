@@ -51,7 +51,7 @@ counted as matches):
 | step 4 (E) | 238/290 + 118/121 | 7 |
 | step 5 (F) | 246/290 + 150/150 | 5 |
 | step 6 (G) | 250/290 + 174/174 | 2 |
-| step 7 (H, I) | 255/290 + 195/195 | 0 |
+| step 7 (H, I) | 256/290 + 195/195 | 0 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
