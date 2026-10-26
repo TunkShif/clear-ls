@@ -146,8 +146,9 @@ module ClearLS::LSP
       state = document(params)
       off = offset(state, params["position"])
       a = analysis(state)
-      if path = a.require_definition(off)
-        return [{uri: VFS.uri_for(path), range: {start: {line: 0, character: 0}, end: {line: 0, character: 0}}}]
+      paths = a.require_definitions(off)
+      unless paths.empty?
+        return paths.map { |path| {uri: VFS.uri_for(path), range: {start: {line: 0, character: 0}, end: {line: 0, character: 0}}} }
       end
       if r = locals(state).definition(off)
         return [{uri: state.uri, range: range_json(state, r)}]

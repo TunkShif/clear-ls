@@ -103,7 +103,27 @@ describe "LSP features" do
       defs = c.request("textDocument/definition", {textDocument: {uri: u}, position: c.pos("src/app.cr", "dep\"")})
       defs[0]["uri"].should eq c.uri("lib/dep/src/dep.cr")
       links = c.request("textDocument/documentLink", {textDocument: {uri: u}})
-      links.as_a.map(&.["target"].as_s).should eq [c.uri("src/models/user.cr"), c.uri("lib/dep/src/dep.cr")]
+      links.as_a.map(&.["target"].as_s).should eq [c.uri("src/models"), c.uri("lib/dep/src/dep.cr")]
+    end
+  end
+
+  it "lists every file of a glob require" do
+    with_client({
+      "src/app.cr"      => "require \"./models/*\"\nrequire \"./one\"\n",
+      "src/one.cr"      => "",
+      "src/models/a.cr" => "",
+      "src/models/b.cr" => "",
+    }) do |c|
+      u = c.open("src/app.cr")
+      h = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/app.cr", "models")})
+      h["contents"]["value"].as_s.should eq "```\nmodels/a.cr\nmodels/b.cr\n```\n\n2 files"
+      defs = c.request("textDocument/definition", {textDocument: {uri: u}, position: c.pos("src/app.cr", "models")})
+      defs.as_a.map(&.["uri"].as_s).should eq [c.uri("src/models/a.cr"), c.uri("src/models/b.cr")]
+      # A single file keeps the absolute-path hover.
+      h = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/app.cr", "one")})
+      h["contents"]["value"].as_s.should eq "```\n#{File.join(c.root, "src/one.cr")}\n```"
+      links = c.request("textDocument/documentLink", {textDocument: {uri: u}})
+      links.as_a.map(&.["target"].as_s).should eq [c.uri("src/models"), c.uri("src/one.cr")]
     end
   end
 

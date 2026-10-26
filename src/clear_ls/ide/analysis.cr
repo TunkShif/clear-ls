@@ -176,17 +176,18 @@ module ClearLS::IDE
     # -- definition / hover ------------------------------------------------------
 
     # Type and constant targets at *offset*. Require targets are files and
-    # come from `#require_definition`.
+    # come from `#require_definitions`.
     def definition(offset : UInt32) : Array(Location)
       resolve_path_at(offset).flat_map { |r| r[:sites] }.map { |s| Location.new(s.file, s.item.name_range) }
     end
 
     def hover(offset : UInt32) : HoverInfo?
       if node = require_node(offset)
-        if (path = require_path(node)) && (target = resolve_require(path).first?)
-          return HoverInfo.new("```\n#{target}\n```", node.range)
-        end
-        return nil
+        path = require_path(node) || return nil
+        targets = resolve_require(path)
+        return nil if targets.empty?
+        return HoverInfo.new("```\n#{targets[0]}\n```", node.range) unless glob?(path)
+        return HoverInfo.new(glob_hover(targets), node.range)
       end
       results = resolve_path_at(offset)
       first = results.first? || return nil
@@ -292,6 +293,8 @@ module ClearLS::IDE
       tree.root.walk do |node|
         if node.kind.require?
           if (path = require_path(node)) && (str = node.named_child(0)) && (target = resolve_require(path).first?)
+            # A glob has many targets; link to the directory it lists.
+            target = File.dirname(target) if glob?(path)
             links << LinkInfo.new(str.range, target)
           end
           false
@@ -321,11 +324,32 @@ module ClearLS::IDE
       @index.project.resolver.resolve(path, from)
     end
 
-    # Absolute path targeted by a `require` at *offset*, if any.
-    def require_definition(offset : UInt32) : String?
-      node = require_node(offset) || return nil
-      path = require_path(node) || return nil
-      resolve_require(path).first?
+    # Absolute paths targeted by a `require` at *offset* (every file of a
+    # `dir/*` / `dir/**` glob); empty when none.
+    def require_definitions(offset : UInt32) : Array(String)
+      node = require_node(offset) || return [] of String
+      path = require_path(node) || return [] of String
+      resolve_require(path)
+    end
+
+    MAX_GLOB_HOVER = 20
+
+    private def glob?(path : String) : Bool
+      path.ends_with?("/*") || path.ends_with?("/**")
+    end
+
+    # Files of a glob require, relative to the requiring file's directory.
+    private def glob_hover(targets : Array(String)) : String
+      base = VFS.path_for(@state.uri).try { |p| File.dirname(p) }
+      String.build do |io|
+        io << "```\n"
+        targets.first(MAX_GLOB_HOVER).each do |t|
+          io << (base ? Path[t].relative_to(base).to_s : t) << '\n'
+        end
+        io << "```"
+        io << "\n\n" << targets.size << " files" if targets.size > 1
+        io << " (" << targets.size - MAX_GLOB_HOVER << " more not shown)" if targets.size > MAX_GLOB_HOVER
+      end
     end
   end
 end
