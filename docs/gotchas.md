@@ -52,6 +52,11 @@ changing it. Grammar quirks are in
 
 - Closure blocks re-enter `Enter` each iteration and reset block locals;
   `own_scope?` distinguishes `&.foo` blocks (no scope) from real ones.
+- Completion/signature help analyse patched copies that reuse the file
+  id with a derived revision: call `Typing#infer_at(..., cache: false)`
+  for them, or two different patches of one revision share results.
+- `&.a.b` lowers to `b` with receiver `a`, both implicit-object calls;
+  only the outermost call's parent is the block.
 - The compiler narrows only locals (`if @a` leaves `@a` nilable); clear-ls
   does the same on purpose.
 - Rebuild probe binaries after source changes before comparing numbers.
@@ -65,6 +70,12 @@ changing it. Grammar quirks are in
   `fromRanges`).
 - Run headless Neovim with `-n`, or a crashed run leaves swap files that
   block the next one.
+- Neovim's `:e` is didClose + didOpen and drops the server's
+  diagnostics on close; the server must publish them again on didOpen
+  even when it doesn't rerun the compiler.
+- Clients don't re-request inlay hints/semantic tokens by themselves
+  when server-side knowledge changes (compiler facts); send
+  `workspace/*/refresh` (only if `refreshSupport` was advertised).
 
 ## Compiler integration
 

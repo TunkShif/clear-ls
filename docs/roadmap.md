@@ -538,11 +538,61 @@ line in a def body rebuilds the DefMap (`Origin::Assigned` items are
 declarations); captured-local detection resolves block calls a second
 time (bounded by a name pre-check).
 
+### Usage feedback after Phase 8 (done)
+
+Issues found in daily Neovim use (C1–C7), each fixed in its own commit
+with a spec and a headless Neovim observation:
+
+- C1 return-type inlay hint rendered inside the parens
+  (`def f(a : A : R)`): anchored after the `)`.
+- C2 `@|` missed ivars assigned only in a def body: already fixed by the
+  Phase 8 ivar rules (`Origin::Assigned`).
+- C3 after `:e` (didClose + didOpen) diagnostics vanished: didOpen now
+  republishes the last problems of programs already checked. Inlay
+  hints of locals typed by compiler facts stayed empty until the client
+  asked again: the server sends `workspace/inlayHint/refresh` and
+  `semanticTokens/refresh` when facts change.
+- C4 `xs.map(&.|)` offered the collection's methods: completion accepts
+  implicit-object calls and takes the block argument / case subject.
+  Also fixed: `&.a.b` left `b` untyped (repo +17 locals, stdlib one
+  wrong `NoReturn` fixed, 0 regressions; book diff unchanged), and
+  patched completion copies shared an inference cache key.
+- C7 glob `require "./x/*"` hovered/jumped to the first file only.
+
+Deferred: C5 (ivar definition) and C6 (workspace scope) below.
+
 ### Phase 9 — workspace identity
 
 - `DefId`-keyed reference index, incrementally maintained.
 - Features: workspace references and rename (exact identity only), type
   hierarchy, incoming calls, code actions.
+
+Planned before the reference index (from usage feedback):
+
+- **Workspace scope (C6).** Today the root is whatever the client sends
+  (Neovim's `.git` fallback made `scratchpad/` a root) and every `.cr`
+  file under it joins one DefMap, so unrelated fixtures' `class Item`
+  all answer definition of `Item`. Visibility should follow what the
+  compiler would compile:
+  - project file: prelude + require closure of the `shard.yml`
+    target(s) containing it (no targets: everything under `src/`);
+  - script inside a project (`scripts/x.cr` requiring `../src/app`):
+    its own closure, so it sees the project but not the reverse;
+  - loose file (no `shard.yml` above): prelude + its own closure;
+  - root = nearest `shard.yml`; nested directories with their own
+    `shard.yml` are separate projects and skipped by the source walk.
+  One shared item index; lookups filtered by a per-program visible-file
+  set (no index per program). Needed first: reference identity across
+  merged unrelated types is meaningless. Also prepares multi-root
+  (Phase 10).
+- **Ivar definitions (C5).** Go-to-definition on `@x` returns nothing
+  (hover works). Target, in order, the first category that exists:
+  explicit `@x : T` declaration; the accessor macro's name (`property
+  name = "hello"` → `name`); `initialize(@x)` params; else every `@x =
+  …` assignment. Compiler-fact-only ivars fall back to the generating
+  macro call when known. Prerequisite: lower `initialize(@x)` params to
+  ivar items (today `@|` completion scans the header text, current file
+  only). The same table feeds ivar references.
 
 ### Phase 10 — hardening
 

@@ -137,6 +137,8 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
 - `Workspace::CompilerFacts` merges facts into the DefMap
   (`DefMap#add_synthetic`), parsing headers once per facts object.
 - LSP side: `diagnostics.cr`, `formatting.cr`, `expand.cr`, `context.cr`.
+  didOpen republishes known problems; fact changes send
+  `workspace/inlayHint/refresh` and `semanticTokens/refresh`.
 
 ## Known limitations
 
