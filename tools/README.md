@@ -17,6 +17,7 @@ usage comment.
 | `hover_probe ROOT FILE` | hovers every named token of FILE through a real server; misses grouped by CST kind. `ALL=1`, `SHOW=1` |
 | `cfg_all DIR` | builds the CFG of every def (crash check + timing) |
 | `dump_cst_all FILE` | CST including anonymous tokens and field names |
+| `type_marks ROOT FILE...` | clear-ls type of every `__t(expr)` marker, spelled like the compiler; used by `book_diff.py` |
 
 Example: `bin/probes/coverage $PWD $PWD/src`, or with the stdlib as PREFIX
 (`crystal env CRYSTAL_PATH`).
@@ -27,6 +28,7 @@ Example: `bin/probes/coverage $PWD $PWD/src`, or with the stdlib as PREFIX
 |---|---|
 | `types_diff.py BEFORE AFTER [N]` | regressions/improvements between two `types_dump` outputs |
 | `lsp_bench.py` | stdio session against `bin/clear-ls` on this repo: semantic tokens, local definition/references/rename, hover timings |
+| `book_diff.py [FILE...]` | compiler `typeof` vs clear-ls for the `__t` markers in `fixtures/book/` (examples from the Crystal 1.22 syntax & semantics book) |
 | `gen_syntax.cr` | generates `src/clear_ls/syntax/kinds.cr` (`make syntax-gen`) |
 
 ## Headless Neovim checks (`tools/nvim/`, `tools/fixtures/`)
