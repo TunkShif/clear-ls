@@ -271,10 +271,12 @@ module ClearLS::IDE
       # typed code still lowers).
       patched, at = patch(text, start, offset, PLACEHOLDER)
       _, state = patched_node(patched, at)
+      with_self = nil.as(Types::TyId?)
       if state
         bodies = Bodies.new(state)
         if body = bodies.at(at)
           _, inf = @typing.infer_at(state, bodies, at) || {nil, nil}
+          with_self = inf.try(&.with_self_at(at))
           body.visible_bindings(at).each do |b|
             next unless b.name.starts_with?(prefix) && b.name != PLACEHOLDER && seen.add?(b.name)
             # Type at the cursor (flow-sensitive), else the join of writes.
@@ -289,7 +291,8 @@ module ClearLS::IDE
       # Methods callable on self (instance or class side) and top-level defs.
       map = @typing.def_map
       ns = map.namespace_at(@state.id, start)
-      self_t = @typing.self_type(ns)
+      # Inside `with x yield` blocks, calls without a receiver go to x.
+      self_t = with_self || @typing.self_type(ns)
       unless @typing.table.unknown?(self_t)
         method_items(self_t, prefix).each do |i|
           items << CompletionItem.new(i.label, i.kind, i.detail, i.documentation, "1#{i.sort_text}", i.insert_text, i.overloads) if seen.add?(i.label)

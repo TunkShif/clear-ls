@@ -109,6 +109,9 @@ the block value (`yield_value`), then runs an inner `Infer` in
 vanishes from unions, doesn't end control flow, and reads as unknown.
 Over the shape cap, return summaries keep the block value (a missing one
 makes `yield` Pending) and yield summaries keep the argument types.
+Summaries also record the `with x yield` receiver (`Summary#with_self`),
+which becomes the implicit `self` of the caller's block (`@block_self`,
+`Infer#with_self_at` for completion).
 `@[Primitive]` defs without a return type are typed by `primitive_return`
 instead of their empty bodies; bodies with a `return` inside `{% %}`
 summarise to unknown.

@@ -40,6 +40,8 @@ module ClearLS::Types
     getter binding_types : Hash(HIR::BindingId, TyId)
     # Types of `yield` arguments seen in this body, per position.
     getter yield_types = [] of Array(TyId)
+    # Join of the `with x yield` receivers in this body.
+    getter with_self : TyId? = nil
 
     MAX_UNION = 8
     # Times a block's entry state may change before changed bindings widen
@@ -269,10 +271,26 @@ module ClearLS::Types
         elsif decl.starts_with?('*')
           ty = r ? (@table.named?("Tuple", [ty]) || @table.unknown) : (@table.named?("Tuple") || @table.unknown)
         elsif b.kind.block_param?
-          ty = r ? ty : (@table.named?("Proc") || @table.unknown)
+          ty = block_param_type(r, ty)
         end
         assign(b.id, ty)
       end
+    end
+
+    # `&block`: a `Proc(Nil)` (the block takes no args; its value is
+    # dropped); `&block : T -> _` returns the caller's block value, which
+    # summaries know (`yield_value`).
+    private def block_param_type(restriction : String?, declared : TyId) : TyId
+      unless restriction
+        return @table.proc([] of TyId, nil_t)
+      end
+      pt = @table[declared]
+      if pt.kind.proc? && @table.unknown?(pt.args.last) && restriction.rstrip.ends_with?('_')
+        if (v = @yield_value) && !@table.unknown?(v)
+          return @table.proc(pt.args[0...-1], v)
+        end
+      end
+      declared
     end
 
     private def param_decl_text(b : HIR::Binding) : String
@@ -610,6 +628,10 @@ module ClearLS::Types
            when .yield?
              ts = e.children.map { |c| operand(c) }
              ts = [] of TyId if @replaying
+             if (r = e.receiver) && !@replaying
+               rt = operand(r)
+               @with_self = (ws = @with_self) ? join(ws, rt) : rt
+             end
              ts.each_with_index do |t, i|
                (@yield_types[i]? || (@yield_types << [] of TyId; @yield_types[i])) << t
              end
@@ -626,6 +648,8 @@ module ClearLS::Types
                e.children.first?.try { |c| @table.named?("Pointer", [operand(c)]) } || @table.unknown
              when .sizeof?, .instance_sizeof?, .alignof?, .instance_alignof?, .offsetof?
                @table.named!("Int32")
+             when .method_proc?
+               method_proc_type(e)
              else
                @table.unknown
              end
@@ -635,6 +659,20 @@ module ClearLS::Types
            end
       @types[id] = ty
       ty
+    end
+
+    # `->recv.name(T, U)`: Proc(T, U, R) with R the return of the overload
+    # those param types select.
+    private def method_proc_type(e : HIR::Expr) : TyId
+      name = e.name || return @table.unknown
+      params = (e.type_text || "").split('\u0000', remove_empty: true).map { |t| parse_type(t) }
+      return @table.unknown if params.any? { |p| @table.unknown?(p) }
+      recv = e.receiver.try { |r| operand(r) } || implicit_self(e)
+      groups = method_groups(recv, name)
+      groups = [{@table.unknown, top_level_sites(name)}] if groups.empty? && e.receiver.nil?
+      site = CallSite.new(params.map { |p| CallArg.new(p) }, [] of {String, CallArg}, false, false)
+      ret = return_type_of(resolver.resolve(groups, site), nil)
+      @table.proc(params, ret)
     end
 
     # `$~` / `$1` (the last regex match in this scope): `$~` and `$1` raise
@@ -660,9 +698,52 @@ module ClearLS::Types
       @type_body_self.try(&.call(e.range.start)) || @ctx.self_type
     end
 
-    # Implicit receiver: `self` at the call site.
+    # Implicit receiver: `self` at the call site, or the `with x yield`
+    # receiver of the innermost enclosing block that has one.
     private def implicit_self(e : HIR::Expr) : TyId
+      unless @block_self.empty?
+        cur = @parent[e.id]?
+        while c = cur
+          if ws = @block_self[c]?
+            return ws
+          end
+          cur = @parent[c]?
+        end
+      end
       self_at(e)
+    end
+
+    # The `with x yield` receiver for code at *offset*, if inside such a
+    # block.
+    def with_self_at(offset : UInt32) : TyId?
+      @block_self.select { |id, _| @body.expr(id).range.contains?(offset) }
+        .min_by? { |id, _| @body.expr(id).range.size }.try(&.[1])
+    end
+
+    @with_yield = {} of {Int32, UInt32, UInt32} => Bool
+
+    private def with_yield_def?(site : Semantics::Site) : Bool
+      r = site.item.range
+      @with_yield[{site.file.value.to_i32, r.start, r.end}] ||= begin
+        node = @source_loader.try(&.call(site))
+        !!node.try { |n| n.tree.text.byte_slice(n.start_byte, n.end_byte - n.start_byte).matches?(/\bwith\b[^\n]*\byield\b/) }
+      end
+    end
+
+    # `with` receivers per block expression (from the callee's summary).
+    @block_self = {} of HIR::ExprId => TyId
+
+    # The `with x yield` receiver of *call*'s viable candidates.
+    private def with_self_of(call : HIR::Expr) : TyId?
+      return nil if summary_depth <= 0
+      # Cheap textual pre-check: only defs whose source has `with ... yield`.
+      res = @resolutions[call.id]? || resolve_call(call)
+      cands = res.candidates.select { |c| with_yield_def?(c.match.site) }
+      return nil if cands.empty?
+      ts = cands.compact_map do |c|
+        summary(c, nil, for_yields: true).with_self.try { |t| Subst.apply(@table, t, c.match.bindings) }
+      end
+      ts.empty? ? nil : union_or_unknown(ts)
     end
 
     private def literal(e : HIR::Expr) : TyId
@@ -1190,7 +1271,8 @@ module ClearLS::Types
 
     private def eval_proc(e : HIR::Expr) : TyId
       blk = e.children[0]?.try { |c| @body.expr(c) } || return @table.unknown
-      ret = @types[blk.id]? || @table.unknown
+      # A declared return (`-> : Int32 | String { 1 }`) is the proc's type.
+      ret = e.type_text.try { |t| parse_type(t) } || @types[blk.id]? || @table.unknown
       params = block_args(blk).map { |b| @body.binding(b).restriction.try { |r| parse_type(r) } || @table.unknown }
       @table.proc(params, ret)
     end
@@ -1209,6 +1291,9 @@ module ClearLS::Types
       end
       owner = cfg.closure_owner[id]?.try { |o| @body.expr(o) }
       param_types = owner && owner.kind.call? ? closure_param_types(owner) : [] of TyId
+      if owner && owner.kind.call? && (ws = with_self_of(owner))
+        @block_self[id] = ws
+      end
       if e.syntax.implicit_object_call?
         @implicit_args[id] = param_types[0]? || @table.unknown
       end
@@ -1237,6 +1322,15 @@ module ClearLS::Types
       blk.scope.value != 0 && @body.scope(blk.scope).range == blk.range && @body.scope(blk.scope).kind.block?
     end
 
+    # Value a call's block produces: its body's value, or for `&proc` /
+    # `&->foo` the proc's return type.
+    private def block_value(b : HIR::ExprId) : TyId?
+      t = @types[b]? || return nil
+      return t unless @body.expr(b).syntax.block_argument?
+      pt = @table[t]
+      pt.kind.proc? ? pt.args.last : @table.unknown
+    end
+
     # Block arg types for a call's block.
     private def closure_param_types(call : HIR::Expr) : Array(TyId)
       name = call.name || return [] of TyId
@@ -1245,7 +1339,7 @@ module ClearLS::Types
       return [@table.without_nil(recv_t)] if name == "try" && recv_t
       # The block's value from the previous closure iteration feeds yield
       # summaries whose arguments depend on it (`reduce(memo) { |acc, x| }`).
-      block_ret = call.block.try { |b| @types[b]? }
+      block_ret = call.block.try { |b| block_value(b) }
       block_types_for(resolve_call(call).candidates, block_ret)
     end
 
@@ -1264,7 +1358,7 @@ module ClearLS::Types
     private def visit_call_value(e : HIR::Expr) : TyId
       recv_t = e.receiver.try { |r| operand(r) }
       args = e.children.map { |c| operand(c) }
-      block_ret = e.block.try { |b| @types[b]? }
+      block_ret = e.block.try { |b| block_value(b) }
       name = e.name || return block_ret || @table.unknown
 
       # Built-in pseudo-methods.
@@ -1355,6 +1449,9 @@ module ClearLS::Types
       t = @table[recv]
       if t.kind.proc? && name == "call"
         return t.args.last
+      end
+      if t.kind.proc? && name == "arity"
+        return @table.named!("Int32")
       end
       if t.kind.named? && name.ends_with?('?') && args.empty?
         info = map[t.def_id.not_nil!]
@@ -1890,7 +1987,7 @@ module ClearLS::Types
         inner.yield_value = eff_args[n]? if eff_args.size > n
         inner.with_source(node.tree.text).run
         yields = inner.yield_types.map { |ts| union_or_unknown(ts.uniq) }
-        Summaries::Summary.new(inner.opaque_macros? ? @table.unknown : inner.return_type, yields)
+        Summaries::Summary.new(inner.opaque_macros? ? @table.unknown : inner.return_type, yields, inner.with_self)
       end
     end
 

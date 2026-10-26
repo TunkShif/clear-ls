@@ -209,6 +209,12 @@ module ClearLS::Types
          args.none? { |a| @table[a].kind.type_param? }
         return @table.tuple(args)
       end
+      # `Proc(A, R)` is the structural proc `A -> R` (`Proc(*T, R)` and
+      # params stay nominal).
+      if path.lchop("::") == "Proc" && !args.empty? && !@text[start...@pos].includes?('*') &&
+         args.none? { |a| @table[a].kind.type_param? }
+        return @table.proc(args[0...-1], args.last)
+      end
       # Built in, not declared in the stdlib.
       return @table.no_return if path.in?("NoReturn", "::NoReturn") && args.empty?
       def_id = @table.def_map.lookup_path(path, @ns) || return @table.unknown

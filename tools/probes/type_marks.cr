@@ -39,7 +39,10 @@ def cname(table : Types::TypeTable, map : Semantics::DefMap, id : Types::TyId, n
   when .named_tuple?
     keys = t.names.map { |n| n =~ /\A[a-z_]\w*\z/ ? n : n.inspect }
     "NamedTuple(#{keys.zip(t.args).map { |(n, a)| "#{n}: #{cname(table, map, a, true)}" }.join(", ")})"
-  when .proc?       then "Proc(#{t.args.map { |a| cname(table, map, a, true) }.join(", ")})"
+  when .proc?
+    # The return type is a union in parentheses (`Proc((Int32 | String))`).
+    parts = t.args.map_with_index { |a, i| cname(table, map, a, i < t.args.size - 1) }
+    "Proc(#{parts.join(", ")})"
   when .metaclass?  then "#{cname(table, map, t.args[0])}.class"
   else                   "?"
   end

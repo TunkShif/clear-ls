@@ -16,7 +16,9 @@ module ClearLS::Types
   # iteration. Results computed while a recursion was cut are only cached
   # for the outermost def of the cycle (inner ones would keep the cut). Budgets bound nesting depth and total work per Typing.
   class Summaries
-    record Summary, returns : TyId, yields : Array(TyId)
+    # *with_self*: the receiver of `with x yield` (the block's implicit
+    # `self` for calls without a receiver), if any.
+    record Summary, returns : TyId, yields : Array(TyId), with_self : TyId? = nil
 
     # (file, def start, file revision, self type, argument types).
     alias Key = {Int32, UInt32, UInt64, Int32, Array(Int32)}

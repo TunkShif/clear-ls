@@ -39,7 +39,7 @@ rest are unknown or wider than the compiler's type.
 
 Progress (book fixtures; the second number counts the fixtures added
 during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
-`loops.cr`; their accepted deviations are counted as matches):
+`loops.cr`, `procs.cr`; their accepted deviations are counted as matches):
 
 | After | Match | Wrong left |
 |---|---|---|
@@ -48,6 +48,7 @@ during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
 | step 2 (C) | 211/290 + 46/47 | 19 |
 | step 3 (D) | 233/290 + 103/104 | 10 |
 | step 4 (E) | 238/290 + 118/121 | 7 |
+| step 5 (F) | 246/290 + 150/150 | 5 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
@@ -140,11 +141,11 @@ hit them:
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| F1 | `-> : Int32 \| String { 1 }`, `->(x) : Nil { … }` | declared return | body type | wrong: the proc's return annotation is ignored |
-| F2 | `[1].map(&pr)` | `Array(Int32)` | `Array(Proc(Int32, Int32))` | wrong: a passed proc's value is its return type, not the proc |
-| F3 | `->one`, `->plus_one(Int32)`, `->str.count(Char)` | `Proc(…)` | `?` | unknown (`method_proc`) |
-| F4 | `cap2 { … }` with `&block : Int32 -> _` | `Proc(Int32, Float64)` | `Proc(Int32, ?)` | unknown: `_` return should take the block's value |
-| F5 | `with "str" yield` → `upcase` in the block | `String` | `?` | unknown: implicit receiver from `with … yield` |
+| F1 | `-> : Int32 \| String { 1 }`, `->(x) : Nil { … }` | declared return | body type | **fixed (step 5)**; was wrong: the proc's return annotation was ignored |
+| F2 | `[1].map(&pr)` | `Array(Int32)` | `Array(Proc(Int32, Int32))` | **fixed (step 5)**; was wrong: a passed proc's value is its return type, not the proc |
+| F3 | `->one`, `->plus_one(Int32)`, `->str.count(Char)` | `Proc(…)` | `?` | **fixed (step 5)**: the overload the param types select |
+| F4 | `cap2 { … }` with `&block : Int32 -> _` | `Proc(Int32, Float64)` | `Proc(Int32, ?)` | **fixed (step 5)**: `_` takes the block's value; a bare `&block` is `Proc(Nil)` |
+| F5 | `with "str" yield` → `upcase` in the block | `String` | `?` | **fixed (step 5)**: summaries record the `with` receiver; calls and completion in the block use it |
 
 ### G. Splats and tuples
 

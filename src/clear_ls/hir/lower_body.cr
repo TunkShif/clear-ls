@@ -96,6 +96,8 @@ module ClearLS::HIR
         lower_block(node, nil)
       when .proc_node?
         lower_proc(node)
+      when .method_proc?
+        lower_method_proc(node)
       when .if?, .unless?, .conditional?, .elsif?, .modifier_if?, .modifier_unless?
         lower_if(node)
       when .case?, .select?
@@ -111,16 +113,19 @@ module ClearLS::HIR
         kind = {Syntax::Kind::Return => ExprKind::Return, Syntax::Kind::Break => ExprKind::Break,
                 Syntax::Kind::Next => ExprKind::Next, Syntax::Kind::Yield => ExprKind::Yield}[k]
         # Values sit in an `argument_list`; `return a, b` returns a tuple.
+        # `with x yield`: x is the yield's receiver, not an argument.
         kids = [] of ExprId
+        with_recv = node.kind.yield? ? node.field(Syntax::Field::With) : nil
+        recv = with_recv.try { |w| lower(w) }
         node.named_children.each do |c|
-          next if c.kind.comment?
+          next if c.kind.comment? || c == with_recv
           if c.kind.argument_list?
             c.named_children.each { |a| kids << lower(a) unless a.kind.comment? }
           else
             kids << lower(c)
           end
         end
-        add(kind, node.range, syntax: node.kind, children: kids)
+        add(kind, node.range, syntax: node.kind, children: kids, receiver: recv)
       when .and?, .or?
         lower_children(node, k.and? ? ExprKind::And : ExprKind::Or)
       when .not?
@@ -395,7 +400,19 @@ module ClearLS::HIR
                   add(ExprKind::Block, node.range)
                 end
               end
-      add(ExprKind::ProcLiteral, node.range, children: [inner])
+      # `->(x) : R { }`: the declared return type.
+      add(ExprKind::ProcLiteral, node.range, children: [inner], type_text: node.field_text(Syntax::Field::Type))
+    end
+
+    # `->foo`, `->foo(T, U)`, `->recv.foo(T)`: a proc of a method. The
+    # receiver is lowered (it is evaluated); the param types go in
+    # `type_text` (comma-separated).
+    private def lower_method_proc(node : Syntax::Node) : ExprId
+      recv = node.field(Syntax::Field::Receiver).try { |r| lower(r) }
+      method = node.field(Syntax::Field::Method)
+      types = node.field(Syntax::Field::Params).try(&.named_children.reject(&.kind.comment?).map(&.text)) || [] of String
+      add(ExprKind::Other, node.range, syntax: node.kind, name: method.try(&.text), name_range: method.try(&.range),
+        receiver: recv, type_text: types.join('\u0000'))
     end
 
     # -- control flow -----------------------------------------------------------

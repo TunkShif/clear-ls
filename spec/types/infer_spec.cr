@@ -366,6 +366,59 @@ describe "Types::Infer primitives" do
   end
 end
 
+describe "Types::Infer procs and blocks" do
+  it "types proc returns, method procs, proc block args, and captured blocks" do
+    r = infer(<<-CR, 3)
+      def typed(x : Int32) : String
+      end
+      def cap2(&block : Int32 -> _)
+        block
+      end
+      def capture(&block)
+        block
+      end
+      def m(xs : Array(Int32), s : String)
+        a = -> : Int32 | String { 1 }
+        b = ->(x : Int32) : Nil { x }
+        c = ->typed(Int32)
+        d = ->s.upcase
+        pr = ->(x : Int32) { "s" }
+        e = xs.map(&pr)
+        f = xs.map(&->typed(Int32))
+        g = cap2 { |i| "s" }
+        h = capture { 1 }
+        i = c.call(1)
+        j = Proc(Int32, String).new { |x| "s" }
+      end
+      CR
+    {"a" => "-> Int32 | String", "b" => "Int32 -> Nil", "c" => "Int32 -> String", "d" => "-> String",
+     "e" => "Array(String)", "f" => "Array(String)", "g" => "Int32 -> String", "h" => "-> Nil",
+     "i" => "String", "j" => "Int32 -> String"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+
+  it "uses the `with x yield` receiver as self inside the block" do
+    r = infer(<<-CR, 2)
+      class B
+        def add(x : Int32) : Char
+        end
+      end
+      def build(&)
+        with B.new yield
+      end
+      def m
+        build do
+          v = add(1)
+          w = upcase
+        end
+      end
+      CR
+    type_of_local(r, "v").should eq "Char"
+    type_of_local(r, "w").should eq "?"
+  end
+end
+
 describe "Types::Infer nil handling" do
   it "handles `|| return`, `|| default`, `try`, `not_nil!`" do
     r = infer(<<-CR)

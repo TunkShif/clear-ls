@@ -460,6 +460,12 @@ Steps (one commit each, wrong results first):
 5. **Procs and blocks** (F1–F5). Proc return annotations; `&proc`
    values; method procs (`->foo`, `->x.foo(T)`); `-> _` block returns;
    `with … yield` receivers.
+   *Done:* book 246/290 (+8), new `procs.cr` 29/29; also `Proc(A, R)`
+   written nominally is the structural proc, `Proc#arity`, and completion
+   inside `with … yield` blocks offers the receiver's methods. Regression
+   diff repo 0 regressed / 4 improved, stdlib 0 / 0; stdlib inference
+   +2% time (with-receiver lookup, only for defs whose source has
+   `with … yield`).
 6. **Splats** (G1–G6). Splat params (`*xs : T` per argument) and
    `**opts` from the call; splatted tuple/named-tuple arguments; splats in
    tuple, array and multi-assign literals.

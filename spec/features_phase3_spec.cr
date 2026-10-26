@@ -130,6 +130,27 @@ describe "LSP phase 3 features" do
     end
   end
 
+  it "completes methods of the `with x yield` receiver inside its block" do
+    app = {"src/w.cr" => <<-CR}
+      class Builder
+        def add_item(x : Int32) : Int32
+          x
+        end
+        def build(&)
+          with self yield
+        end
+      end
+      Builder.new.build do
+        ad
+      end
+      CR
+    with_client(app, PRELUDE_FILES) do |c|
+      u = c.open("src/w.cr")
+      res = c.request("textDocument/completion", {textDocument: {uri: u}, position: c.pos("src/w.cr", "  ad\n", 4)})
+      labels(res).should contain("add_item")
+    end
+  end
+
   it "completes instance variables" do
     with_client(TYPED_APP, PRELUDE_FILES) do |c|
       u = c.open("src/app.cr")
