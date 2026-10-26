@@ -60,7 +60,9 @@ module ClearLS::Workspace
       end
       @ivars.each do |f|
         owner = owner_type(map, f.owner) || next
-        next if map.ancestors(owner).any? { |a| map[a].members[f.name]?.try &.any?(&.item.kind.instance_var?) }
+        # Declared ivars win; ivars typed only from `@x = v` assignments in
+        # defs (`Origin::Assigned`) take the compiler's type instead.
+        next if map.ancestors(owner).any? { |a| map[a].members[f.name]?.try &.any? { |s| s.item.kind.instance_var? && !s.item.origin.assigned? } }
         info = map[owner]
         site = info.sites.first? || next
         item = Items::Item.new(Items::ItemKind::InstanceVar, f.name, site.item.name_range, site.item.name_range,

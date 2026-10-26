@@ -99,7 +99,7 @@ module ClearLS::IDE
     end
 
     private def compiler_ivar?(map : Semantics::DefMap, owner : Semantics::TypeId, name : String) : Bool
-      return false if map.ancestors(owner).any? { |a| map[a].members[name]?.try &.any? { |s| !s.item.origin.compiler? } }
+      return false if map.ancestors(owner).any? { |a| map[a].members[name]?.try &.any? { |s| !s.item.origin.compiler? && !s.item.origin.assigned? } }
       map.ancestors(owner).any? { |a| map[a].members[name]?.try &.any?(&.item.origin.compiler?) }
     end
 

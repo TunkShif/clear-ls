@@ -43,6 +43,11 @@ module ClearLS::Items
     Source # written in source
     Macro  # synthesised from a known macro call (getter, record, ...)
     Compiler # reported by the compiler (hooks, `{% for %}`, inferred ivars)
+    # `@x = value` inside a def (type_inference.md rules): `detail` is the
+    # value text, or for `@x = param` the param's restriction (`: T`) or
+    # default (`= v`) text; `signature` is nil. `doc` holds the enclosing
+    # def's name.
+    Assigned
   end
 
   # How a parameter binds arguments.

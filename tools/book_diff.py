@@ -12,7 +12,7 @@ A marker line may carry `# cls: TYPE  reason` for an accepted deviation
 (docs/book-gaps.md): clear-ls printing TYPE then counts as accepted, not
 as a mismatch.
 """
-import collections, os, re, subprocess, sys
+import collections, os, re, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIX = os.path.join(ROOT, "tools", "fixtures", "book")
@@ -37,7 +37,14 @@ for path in files:
     if comp.returncode != 0:
         print(f"### {os.path.basename(path)}: compile error\n{comp.stdout}{comp.stderr}")
         continue
-    cls = subprocess.run([PROBE, FIX, path], capture_output=True, text=True)
+    # The fixtures reuse class names across files and are compiled one at
+    # a time: index each file alone (with the marker helpers).
+    with tempfile.TemporaryDirectory() as tmp:
+        os.mkdir(os.path.join(tmp, "src"))
+        shutil.copy(os.path.join(FIX, "src", "h.cr"), os.path.join(tmp, "src", "h.cr"))
+        alone = os.path.join(tmp, "src", os.path.basename(path))
+        shutil.copy(path, alone)
+        cls = subprocess.run([PROBE, tmp, alone], capture_output=True, text=True)
     c, s = parse(comp.stdout), parse(cls.stdout)
     src = open(path).read().split("\n")
     ok = bad = accepted = 0

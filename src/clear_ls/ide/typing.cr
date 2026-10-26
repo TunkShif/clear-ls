@@ -24,6 +24,8 @@ module ClearLS::IDE
       @summaries = Types::Summaries.new(@table)
       vfs = @vfs
       @summaries.revision_of = ->(id : FileId) { vfs.file?(vfs.uri(id)).try(&.revision) || 0_u64 }
+      # Ivar rule 4: a class method whose last expression is `new(...)`.
+      Types::Infer.news_check = ->(site : Semantics::Site) { ends_in_new?(site) }
     end
 
     # Inference for the body containing *offset* in *state*.
@@ -67,6 +69,14 @@ module ClearLS::IDE
         end
       end
       inf.with_source(state.text).run
+    end
+
+    private def ends_in_new?(site : Semantics::Site) : Bool
+      node = def_node(site) || return false
+      body = node.field(Syntax::Field::Body) || return false
+      last = body.named_children.reject(&.kind.comment?).last? || return false
+      (last.kind.call? && last.field(Syntax::Field::Receiver).nil? && last.field_text(Syntax::Field::Method) == "new") ||
+        (last.kind.identifier? && last.text == "new")
     end
 
     # The DefMap site of the def whose body spans *range*.

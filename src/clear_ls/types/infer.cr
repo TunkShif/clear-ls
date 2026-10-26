@@ -583,10 +583,23 @@ module ClearLS::Types
     private def case_facts(cond : HIR::ExprId, subject : HIR::ExprId, truthy : Bool) : Env
       result = {} of HIR::BindingId => TyId
       s = @body.expr(subject)
+      c = @body.expr(cond)
+      # `case {a, b}` / `when {T, U}`: each element against its local. A
+      # match fixes every element; a miss says nothing about any one.
+      if s.kind.collection? && s.syntax.tuple_node? && c.kind.collection? && c.syntax.tuple_node?
+        return result unless truthy && s.children.size == c.children.size
+        s.children.zip(c.children) do |se, ce|
+          case_facts(ce, se, true).each { |k, v| result[k] = v }
+        end
+        return result
+      end
+      # `case x = expr`: the assigned local.
+      if s.kind.assign? && (tgt = s.children[0]?) && @body.expr(tgt).kind.local_ref?
+        s = @body.expr(tgt)
+      end
       return result unless s.kind.local_ref?
       b = s.binding || return result
       t = @env[b]? || return result
-      c = @body.expr(cond)
       target = case c.kind
                when .const?
                  ct = @table[operand(cond)]
@@ -606,6 +619,8 @@ module ClearLS::Types
                    when "nil?" then nil_t
                    when "is_a?" then c.type_text.try { |tt| parse_type(tt) }
                    end
+                 elsif c.bare_call? && c.name == "_"
+                   nil
                  end
                end
       return result if target.nil? || @table.unknown?(target)
@@ -1203,9 +1218,14 @@ module ClearLS::Types
       map.ancestors(owner).each do |anc|
         info = map[anc]
         types = [] of TyId
+        assigned = [] of Semantics::Site
         if sites = info.members[name]?
           sites.each do |site|
             next unless site.item.kind == kind
+            if site.item.origin.assigned?
+              assigned << site
+              next
+            end
             if d = site.item.detail
               t = TypeExprParser.parse(d, table, anc, info.type_params)
               t = value_text_type(d, table, anc) if table.unknown?(t)
@@ -1224,8 +1244,111 @@ module ClearLS::Types
           end
         end
         return table.union(types.uniq) unless types.empty?
+        unless assigned.empty?
+          return assigned_ivar_type(map, table, anc, name, class_var, assigned)
+        end
       end
       table.unknown
+    end
+
+    # Type of an undeclared ivar from its `@x = v` assignments in defs
+    # (type_inference.md rules 1-5): literals, `T.new`, class-method calls
+    # with a declared return, restricted or defaulted params. Unknown if
+    # any assignment can't be typed by these rules (the compiler would
+    # reject the program). Nil joins in when some `initialize` of the type
+    # doesn't assign it (or the type has none, for ivars only set later).
+    def self.assigned_ivar_type(map : Semantics::DefMap, table : TypeTable, owner : Semantics::TypeId,
+                                name : String, class_var : Bool, sites : Array(Semantics::Site)) : TyId
+      info = map[owner]
+      types = [] of TyId
+      sites.each do |site|
+        t = assigned_value_type(map, table, owner, site.item.detail || "")
+        return table.unknown if table.unknown?(t)
+        types << t
+      end
+      unless class_var
+        # Nil unless every `initialize` of the type assigns it.
+        inits = (info.members["initialize"]? || [] of Semantics::Site).select(&.item.kind.def?)
+        all_init = !inits.empty? && inits.all? do |i|
+          sites.any? { |s| s.file == i.file && i.item.range.covers?(s.item.range) }
+        end
+
+        types << table.named!("Nil") unless all_init
+      else
+        # Class vars are nil until assigned unless assigned at the type
+        # level (those are declarations, handled above).
+        types << table.named!("Nil")
+      end
+      table.union(types.uniq)
+    end
+
+    private def self.assigned_value_type(map : Semantics::DefMap, table : TypeTable, owner : Semantics::TypeId, text : String) : TyId
+      ns = map[owner].namespace || Semantics::DefMap::PROGRAM
+      if text.starts_with?(": ")
+        return TypeExprParser.parse(text[2..], table, owner, map[owner].type_params)
+      end
+      v = text.starts_with?("= ") ? text[2..] : text
+      t = value_text_type(v, table, owner)
+      return t unless table.unknown?(t)
+      t = literal_expr_type(v, table, owner)
+      return t unless table.unknown?(t)
+      # `Type.method(...)` (rule 4): a class method with a declared return,
+      # or `new`.
+      if m = v.match(/\A((?:::)?[A-Z][\w:]*(?:\([^)]*\))?)\.(\w+[?!]?)/)
+        tt = TypeExprParser.parse(m[1], table, owner)
+        tr = table[tt]
+        return table.unknown unless tr.kind.named?
+        id = tr.def_id.not_nil!
+        return tt if m[2] == "new"
+        map.lookup_member(id, "self.#{m[2]}").each do |site|
+          r = site.item.signature.try(&.return_type) || next
+          return TypeExprParser.parse(r, table, id, map[id].type_params, tt)
+        end
+        # Constructor-like class method without a return type whose body
+        # ends in `new(...)` (the book's rule 4 body case).
+        map.lookup_member(id, "self.#{m[2]}").each do |site|
+          return tt if class_method_news?(site)
+        end
+      end
+      table.unknown
+    end
+
+    # Literal values (`[1]`, `{1, "a"}`, `cond ? 1.5 : nil`, `1..2`) typed
+    # by inferring the text as a small body without calls into other
+    # code: only literals, collections, and `?:`/`||` joins of them.
+    # Rule 1 of type_inference.md (and its literal-only spirit).
+    def self.literal_expr_type(text : String, table : TypeTable, owner : Semantics::TypeId) : TyId
+      return table.unknown if text.size > 512
+      tree = Syntax::Parser.new.parse("__v = (#{text})")
+      rhs = tree.root.named_child(0).try(&.field(Syntax::Field::Rhs)) || return table.unknown
+      return table.unknown if rhs.has_error?
+      body = HIR::LowerBody.lower(rhs)
+      return table.unknown unless literal_value?(body, body.root)
+      ctx = DefContext.new(owner, table.unknown, [] of String)
+      inf = Infer.new(body, ctx, table).run
+      t = inf.type_of(body.root)
+      table.unknown?(t) ? table.unknown : t
+    end
+
+    # Literal forms: literals and collections of them; for `c ? a : b` and
+    # `if`, the branch values (the condition can be anything).
+    private def self.literal_value?(body : HIR::Body, id : HIR::ExprId) : Bool
+      e = body.expr(id)
+      case e.kind
+      when .literal?, .nop?        then true
+      when .collection?            then e.children.all? { |c| literal_value?(body, c) } && e.named_args.all? { |(_, v)| literal_value?(body, v) }
+      when .if?, .unless?          then e.children.size == 3 && literal_value?(body, e.children[1]) && literal_value?(body, e.children[2])
+      when .seq?                   then e.children.last?.try { |c| literal_value?(body, c) } || false
+      else                              false
+      end
+    end
+
+    # Constructor-like class methods are recognised by the caller-provided
+    # source check below (set by `Typing`); without it, not at all.
+    class_property news_check : Proc(Semantics::Site, Bool)? = nil
+
+    private def self.class_method_news?(site : Semantics::Site) : Bool
+      @@news_check.try(&.call(site)) || false
     end
 
     # -- assignment ---------------------------------------------------------------
@@ -1360,6 +1483,11 @@ module ClearLS::Types
               target = parse_type(tt)
               result[b] = truthy ? narrow_to(t, target) : exclude(t, target) unless @table.unknown?(target)
             end
+          when "responds_to?"
+            # `x.responds_to?(:m)`: the members that have a method `m`.
+            if (arg = e.children[0]?) && (sym = symbol_text(arg))
+              (r = responds_narrowing(t, sym, truthy)) && (result[b] = r)
+            end
           end
         end
       end
@@ -1377,6 +1505,29 @@ module ClearLS::Types
         e.children.flat_map { |c| truthy_locals(c) }
       else [] of HIR::BindingId
       end
+    end
+
+    # `:foo` / `:"foo="` as written.
+    private def symbol_text(id : HIR::ExprId) : String?
+      e = @body.expr(id)
+      return nil unless e.kind.literal? && e.syntax.symbol_node?
+      src = @source || return nil
+      src.byte_slice(e.range.start, e.range.size).lchop(':').strip('"')
+    end
+
+    # Members of *t* that respond (truthy) / don't respond to *name*; nil
+    # when unknown members make the split unsure.
+    private def responds_narrowing(t : TyId, name : String, truthy : Bool) : TyId?
+      return nil if @table.unknown?(t)
+      yes = [] of TyId
+      no = [] of TyId
+      @table.members(t).each do |m|
+        groups = method_groups(m, name)
+        has = groups.any? { |(_, ms)| !ms.empty? } || !primitive_op(m, name, [] of TyId).nil?
+        (has ? yes : no) << m
+      end
+      kept = truthy ? yes : no
+      kept.empty? ? nil : @table.union(kept)
     end
 
     private def narrow_to(current : TyId, target : TyId) : TyId

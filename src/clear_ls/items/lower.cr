@@ -100,7 +100,12 @@ module ClearLS::Items
            .annotation_def?, .c_struct_def?, .union_def?
         dest << lower_type(node, TYPE_DEFS[kind], vis, owner)
       when .method_def?, .abstract_method_def?
-        dest << lower_def(node, ItemKind::Def, vis, is_abstract: kind.abstract_method_def?)
+        d = lower_def(node, ItemKind::Def, vis, is_abstract: kind.abstract_method_def?)
+        dest << d
+        if owner && (sig = d.signature) && kind.method_def?
+          name = sig.receiver ? "self.#{d.name}" : d.name
+          dest.concat(assigned_ivars(node, sig, name))
+        end
         # Crystal forbids `def` inside `def`, so one there means error
         # recovery attached following defs to an unterminated body.
         if node.has_error? || @recovered
@@ -207,6 +212,45 @@ module ClearLS::Items
     end
 
     # -- defs, macros, funs --------------------------------------------------
+
+    # `@x = v` / `@@x = v` assignments in a def body, as `Origin::Assigned`
+    # ivar items of the owner (type_inference.md: the compiler types
+    # undeclared ivars from these syntactic forms). Nested blocks count;
+    # nested defs and type bodies don't.
+    private def assigned_ivars(def_node : Syntax::Node, sig : Signature, def_name : String) : Array(Item)
+      found = [] of Item
+      body = def_node.field(Syntax::Field::Body) || return found
+      params = sig.params.to_h { |p| {p.name || "", p} }
+      body.walk do |n|
+        next false if n.kind.method_def? || n.kind.class_def? || n.kind.struct_def? || n.kind.module_def? ||
+                      n.kind.macro_def? || n.kind.macro_content? || n.kind.proc_node?
+        if n.kind.assign? && (lhs = n.field(Syntax::Field::Lhs)) && (lhs.kind.instance_var? || lhs.kind.class_var?)
+          rhs = n.field(Syntax::Field::Rhs)
+          text = rhs.try(&.text) || ""
+          # `@x = name`: the param's restriction or default, if any.
+          if rhs && rhs.kind.identifier? && (p = params[rhs.text]?)
+            text = if r = p.restriction
+                     ": #{r}"
+                   elsif d = p.default
+                     "= #{d}"
+                   else
+                     "?"
+                   end
+          end
+          k = lhs.kind.instance_var? ? ItemKind::InstanceVar : ItemKind::ClassVar
+          found << Item.new(k, lhs.text, n.range, lhs.range, origin: Origin::Assigned, doc: def_name,
+            conditions: @conds.dup, detail: text)
+        end
+        # `LibX.f(out @x)` (rule 7): assigned, but typed by compiler facts
+        # only; recorded with an untypeable value.
+        if n.kind.out? && (iv = n.named_child(0)) && iv.kind.instance_var?
+          found << Item.new(ItemKind::InstanceVar, iv.text, n.range, iv.range, origin: Origin::Assigned, doc: def_name,
+            conditions: @conds.dup, detail: "?")
+        end
+        true
+      end
+      found
+    end
 
     private def lower_def(node : Syntax::Node, kind : ItemKind, vis : Visibility, *, is_abstract : Bool) : Item
       name_node = node.field(Syntax::Field::Name)

@@ -144,7 +144,9 @@ Not tied to a phase (phase-specific gaps are listed under each phase in
 the roadmap):
 
 - Items: `delegate`/`def_equals*` not synthesised from source; file-private
-  types not scoped.
+  types not scoped. `@x = v` in def bodies become `Origin::Assigned` ivar
+  items (typed by `Infer.assigned_ivar_type`), so editing such a line
+  rebuilds the DefMap.
 - Locals inside macro bodies are not modelled (lowered as `Missing`).
 - Module instance methods: `self` inside a module def is the module type,
   not "any includer".

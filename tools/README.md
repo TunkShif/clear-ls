@@ -45,7 +45,7 @@ assert; read the output against the expectations below.
 | `smoke` | `smoke/src/demo.cr` | typed hovers of locals/block args; member completion on inferred receivers; inlay hints; stdlib definition |
 | `calls` | `calls/src/demo.cr` | `IO#gets` overload narrowing (1 vs 4), signature help, named-arg completion, implementation, outgoing calls |
 | `chains` | `chains/src/c.cr` | every collection-chain local typed (no `nil`); inferred return in def hover |
-| `compiler` | `compiler/` (shard with target) | hover before the check, async diagnostic at 15:8, generated methods/ivars typed after it, cleared after fix+save, `compiler:` types for `twice`, `getter` expansion, formatting edit |
+| `compiler` | `compiler/` (shard with target) | hover before the check, `@label : String` before the check (assignment rule), async diagnostic at 15:8, generated methods/ivars typed after it, cleared after fix+save, `compiler:` types for `twice`, `getter` expansion, formatting edit |
 
 Shared helpers (`start`, `req`, `hover`, `set_line`, `finish`) are in
 `tools/nvim/common.lua`. A new phase adds a fixture directory and a script

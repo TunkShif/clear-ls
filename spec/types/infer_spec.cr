@@ -516,6 +516,65 @@ describe "Types::Infer closures and redefinitions" do
   end
 end
 
+describe "Types::Infer ivar rules and narrowing" do
+  it "types undeclared ivars from assignments in defs (type_inference.md)" do
+    r = infer(<<-CR, 3)
+      class Addr
+        def self.make : Addr
+        end
+      end
+      class P
+        def initialize(name : String, nick = "n")
+          @name = name
+          @nick = nick
+          @age = 0
+          @addr = Addr.new
+          @made = Addr.make
+          @vals = [1]
+        end
+        def lucky
+          @lucky = 42
+        end
+        def m
+          a = @name
+          b = @nick
+          c = @age
+          d = @addr
+          e = @made
+          f = @vals
+          g = @lucky
+        end
+      end
+      CR
+    {"a" => "String", "b" => "String", "c" => "Int32", "d" => "Addr", "e" => "Addr",
+     "f" => "Array(Int32)", "g" => "Int32?"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+
+  it "narrows by responds_to?, tuple case conditions, and case assignments" do
+    r = infer(<<-CR)
+      def m(y : Int32 | String, z : Char?)
+        if y.responds_to?(:upcase)
+          a = y
+        end
+        case {y, z}
+        when {String, Char}
+          b = y
+          c = z
+        end
+        case n = z
+        when Char
+          d = n
+        end
+      end
+      CR
+    {"a" => "String", "b" => "String", "c" => "Char", "d" => "Char"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+end
+
 describe "Types::Infer nil handling" do
   it "handles `|| return`, `|| default`, `try`, `not_nil!`" do
     r = infer(<<-CR)

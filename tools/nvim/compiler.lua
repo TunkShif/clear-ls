@@ -6,6 +6,10 @@ local function hover(line, col) local r, t = req("textDocument/hover", { textDoc
 -- 1. hover answers while the first check runs
 local h, t = hover(11, 0)
 print(("[%.0fms] hover w before check (%.1fms): %s"):format(ms(), t, h))
+-- 1b. an undeclared ivar is typed from its assignment before any check
+local su0 = vim.uri_from_fname(H.work .. "/src/shapes.cr")
+local sh0 = req("textDocument/hover", { textDocument = { uri = su0 }, position = { line = 18, character = 5 } })
+print("hover @label before check: " .. (sh0 and sh0.contents.value or "nil"):gsub("\n", " | "))
 -- 2. diagnostics arrive asynchronously
 vim.wait(15000, function() return #vim.diagnostic.get(0) > 0 end)
 for _, d in ipairs(vim.diagnostic.get(0)) do print(("[%.0fms] diagnostic %d:%d sev=%d %s"):format(ms(), d.lnum + 1, d.col + 1, d.severity, d.message)) end

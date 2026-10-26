@@ -485,6 +485,13 @@ Steps (one commit each, wrong results first):
    diff repo 0 / +1, stdlib 0 / +23 (O7); coverage stdlib 67.5% (67.1%).
 8. **Ivar rules and narrowing** (J1–J4, K1–K3), per decision 5 in
    book-gaps.md.
+   *Done:* book 267/290 (+11), new `ivars.cr` 22/22 (3 accepted) and
+   `narrowing.cr` 11/11. Undeclared ivars are items with
+   `Origin::Assigned`, so body edits that change them rebuild the DefMap
+   (fingerprint); compiler facts replace them. Coverage stdlib 70.5%
+   (67.6%), repo 93.7%; regression diff 0 regressed, stdlib +151, repo
+   0; stdlib inference +3% time. `book_diff.py` now indexes each fixture
+   alone (fixtures reuse class names).
 9. **Union shape** (M1–M5), per decisions 1–4 and 6.
 10. **C bindings** (L1–L2).
 11. **Verification and docs.** Book diff, coverage and regression diff,

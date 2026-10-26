@@ -39,8 +39,8 @@ rest are unknown or wider than the compiler's type.
 
 Progress (book fixtures; the second number counts the fixtures added
 during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
-`loops.cr`, `procs.cr`, `splats.cr`, `closures.cr`; their accepted deviations are
-counted as matches):
+`loops.cr`, `procs.cr`, `splats.cr`, `closures.cr`, `ivars.cr`, `narrowing.cr`;
+their accepted deviations are counted as matches):
 
 | After | Match | Wrong left |
 |---|---|---|
@@ -52,6 +52,7 @@ counted as matches):
 | step 5 (F) | 246/290 + 150/150 | 5 |
 | step 6 (G) | 250/290 + 174/174 | 2 |
 | step 7 (H, I) | 256/290 + 195/195 | 0 |
+| step 8 (J, K) | 267/290 + 228/228 | 0 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
@@ -181,21 +182,23 @@ hit them:
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| J1 | `@age = 0`, `@addr = Address.new`, `@vals = Array(Int32).new` | literal / `T.new` type | `?` | unknown: type_inference.md rules 1–2 |
-| J2 | `@nick = nick` with `nick = "x"`, `@p3 = obj` with `obj : Int64` | param restriction / default | `?` | unknown: rules 3, 5 |
-| J3 | `@x = Address.make`, `@x = LibX.compute`, `LibX.get(out @x)` | class method / fun / `out` type | `?` | unknown: rules 4, 6, 7 |
-| J4 | an ivar assigned outside every `initialize` | `T \| Nil` | — | missing `Nil` |
+| J1 | `@age = 0`, `@addr = Address.new`, `@vals = Array(Int32).new` | literal / `T.new` type | `?` | **fixed (step 8)**: `Origin::Assigned` ivar items from def bodies; literals include collections and `c ? a : b` of literals |
+| J2 | `@nick = nick` with `nick = "x"`, `@p3 = obj` with `obj : Int64` | param restriction / default | `?` | **fixed (step 8)** |
+| J3 | `@x = Address.make`, `@x = LibX.compute`, `LibX.get(out @x)` | class method / fun / `out` type | `?` | `Type.m` with a declared return or ending in `new` **fixed (step 8)**; lib funs and `out` are left to compiler facts (decision 5, accepted) |
+| J4 | an ivar assigned outside every `initialize` | `T \| Nil` | — | **fixed (step 8)**: Nil unless every `initialize` assigns it; class vars assigned in defs are nilable |
 
-Compiler facts already fill these after a successful check. This item
-covers code that hasn't been checked or saved yet.
+Compiler facts already fill these after a successful check and take
+precedence (assigned items are replaced by facts). This item covers code
+that hasn't been checked or saved yet. Note: the compiler rejects an ivar
+assigned only in one branch of `initialize` (it doesn't make it nilable).
 
 ### K. Narrowing
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| K1 | `if y.responds_to?(:upcase)` | `String` | `Int32 \| String` | wider |
-| K2 | `case {p1, p2}` / `when {String, Char}` | `String`, `Char` | unnarrowed | wider |
-| K3 | `case num = expr` / `when Int32` | `Int32` | `Int32?` | wider |
+| K1 | `if y.responds_to?(:upcase)` | `String` | `Int32 \| String` | **fixed (step 8)**: members with / without the method |
+| K2 | `case {p1, p2}` / `when {String, Char}` | `String`, `Char` | unnarrowed | **fixed (step 8)**: per element on a match; `_` skips |
+| K3 | `case num = expr` / `when Int32` | `Int32` | `Int32?` | **fixed (step 8)** |
 
 ### L. C bindings
 
@@ -237,6 +240,8 @@ These came up in the comparison but are not about inference. They stay in
 | `loops.cr` `forever` | `NoReturn` | not typed | A def whose body is `while true` without `break`: the compiler doesn't instantiate code after it; clear-ls reports `NoReturn` |
 | `splats.cr` inside `sum`/`opts` | `Tuple`, `NamedTuple` | one type per call | A def body analysed on its own has no call; hover inside it shows the open shape (call sites get the exact tuple) |
 | `literals.cr:62` | `?` | `Tuple(Int32, String, Char)` | `{1, *{"a", 'b'}}`: the grammar mis-parses a splatted literal (tree-sitter-grammar-notes) |
+| `ivars.cr` `@lib_age`, `@out_age` | `?` / from facts | `Int32` | Rules 6–7 (lib fun results, `out`) come from compiler facts only (decision 5) |
+| `ivars.cr` `Gen#x` | `T` | `Int32` | Generic def analysed on its own; `Gen.new(1).x` at the call site is `Int32` |
 | `primitives.cr:85` | `spawn { }` unknown | `Fiber` | `def spawn` is inside `{% begin %}` with a macro in its parameter list; macro bodies are not modelled (N) |
 
 ## Decisions
