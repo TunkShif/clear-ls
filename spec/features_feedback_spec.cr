@@ -177,6 +177,11 @@ describe "inferred return types" do
       got = hints.as_a.map { |x| {x["position"]["line"].as_i, x["label"].as_s} }
       got.should contain({4, " : String"})
       got.should contain({7, " : Int32"})
+      # After the closing paren of `def count(xs : Array(String))`, and after
+      # the name when there are no parens.
+      chars = hints.as_a.to_h { |x| {x["position"]["line"].as_i, x["position"]["character"].as_i} }
+      chars[7].should eq "  def count(xs : Array(String))".size
+      chars[4].should eq "  def label".size
       got.map(&.[0]).should_not contain(10) # raw(x): unknown
       got.map(&.[0]).should_not contain(13) # declared
       got.map(&.[0]).should_not contain(2)  # initialize

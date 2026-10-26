@@ -367,7 +367,7 @@ class method: `self` is `" << owner << ".class`"
         next false if n.end_byte < range.start || n.start_byte > range.end
         if n.kind.method_def?
           if n.field(Syntax::Field::Type).nil? && (name = n.field(Syntax::Field::Name)) && name.text != "initialize"
-            anchor = n.field(Syntax::Field::Params).try(&.end_byte) || name.end_byte
+            anchor = header_end(n, name)
             if range.touches?(anchor) && (rt = inferred_return(n))
               hints << InlayHint.new(anchor, " : #{rt}", :type)
             end
@@ -376,6 +376,15 @@ class method: `self` is `" << owner << ".class`"
         end
         true
       end
+    end
+
+    # End of a def header without its return type: after the `)` that
+    # closes the params (the `param_list` node stops before it), else
+    # after the name.
+    private def header_end(def_node : Syntax::Node, name : Syntax::Node) : UInt32
+      params = def_node.field(Syntax::Field::Params) || return name.end_byte
+      sib = params.next_sibling
+      sib && sib.type == ")" ? sib.end_byte : params.end_byte
     end
 
     private def in_type_body?(offset : UInt32) : Bool
