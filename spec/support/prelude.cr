@@ -37,6 +37,8 @@ PRELUDE = <<-CR
     end
   end
   struct UInt8 < Int; end
+  struct Int16 < Int; end
+  struct UInt64 < Int; end
   struct Float64 < Float; end
   struct Float32 < Float; end
   class String

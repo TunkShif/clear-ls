@@ -183,6 +183,10 @@ module ClearLS::HIR
           names << {key, lower(t)} unless names.any? { |(n, _)| n == key }
         end
       end
+      # Ranges with one bound: `type_text2` says which (`1..` → "begin").
+      if node.kind.range_node? && kids.size == 1
+        of2 = node.field(Syntax::Field::Begin) ? "begin" : "end"
+      end
       add(ExprKind::Collection, node.range, syntax: node.kind, children: kids, named_args: names,
         type_text: type_name || of1, type_text2: of2, text: node.field_text(Syntax::Field::Operator))
     end
@@ -226,7 +230,8 @@ module ClearLS::HIR
         end
         true
       end
-      add(ExprKind::Literal, node.range, syntax: node.kind, text: node.kind.integer? || node.kind.float_node? ? node.text : nil, children: kids)
+      text = node.kind.integer? || node.kind.float_node? || node.kind.pseudo_constant? ? node.text : nil
+      add(ExprKind::Literal, node.range, syntax: node.kind, text: text, children: kids)
     end
 
     # -- assignments ----------------------------------------------------------

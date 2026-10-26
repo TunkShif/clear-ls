@@ -90,7 +90,9 @@ a program point (hover, completion).
 ### Call resolution (Phase 5)
 
 `Types::CallResolver`: `bind` (structural: positional, named, defaults,
-splats, block), `compat`/`matches` (three-valued, literal autocasting),
+splats, block), `compat`/`matches` (three-valued; `autocast?` has the
+number autocasting rules, and `rank` tries an exact pass before a casting
+one),
 `rank` (union arguments expanded into ≤16 runtime combinations;
 `shadows?` drops a candidate only when a definitely matching one is at
 least as specific). `Infer#resolve_call`/`method_groups`/`resolutions`;

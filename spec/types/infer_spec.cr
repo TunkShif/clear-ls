@@ -104,6 +104,28 @@ describe Types::Infer do
     end
   end
 
+  it "types integer literals by value, open ranges, and pseudo-constants" do
+    r = infer(<<-CR)
+      def m
+        a = 2147483647
+        b = 2147483648
+        c = -2147483648
+        d = -2147483649
+        e = 0xFFFFFFFF
+        f = 0x8000_0000_0000_0000
+        g = ..2
+        h = 1..
+        i = __LINE__
+        j = __FILE__
+      end
+      CR
+    {"a" => "Int32", "b" => "Int64", "c" => "Int32", "d" => "Int64", "e" => "Int64",
+     "f" => "UInt64", "g" => "Range(Nil, Int32)", "h" => "Range(Int32, Nil)",
+     "i" => "Int32", "j" => "String"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+
   it "uses parameter restrictions and declared returns" do
     r = infer(<<-CR)
       def m(s : String, io : IO, n = 1)

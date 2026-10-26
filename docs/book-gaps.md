@@ -37,6 +37,16 @@ Baseline (Phase 7 end, Crystal 1.22.0): 191 of 290 markers match, 1 is an
 accepted deviation. Of the 98 mismatches, 25 are wrong results and the
 rest are unknown or wider than the compiler's type.
 
+Progress (book fixtures only; `autocast.cr` added in step 1 adds 19
+markers):
+
+| After | Match | Wrong left |
+|---|---|---|
+| baseline | 191/290 | 25 |
+| step 1 (A, B) | 202/290 + 19/19 | 21 |
+
+Entries marked **fixed (step N)** stay in the tables as a record.
+
 ## Categories
 
 IDs are used by the roadmap steps. *Wrong* = known but incorrect;
@@ -46,22 +56,36 @@ IDs are used by the roadmap steps. *Wrong* = known but incorrect;
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| A1 | `2147483648` | `Int64` | `Int32` | wrong: suffix-less literals are Int32 only when they fit, else Int64 (else UInt64) |
-| A2 | `..2` | `Range(Nil, Int32)` | `Range(Int32, Nil)` | wrong: begin-less range puts the end in `B` |
-| A3 | `__LINE__`, `__FILE__`, `__DIR__` | `Int32`, `String` | `?` | unknown (`pseudo_constant`) |
+| A1 | `2147483648` | `Int64` | `Int32` | **fixed (step 1)**; was wrong: suffix-less literals are Int32 only when they fit, else Int64 (else UInt64) |
+| A2 | `..2` | `Range(Nil, Int32)` | `Range(Int32, Nil)` | **fixed (step 1)**; was wrong: begin-less range puts the end in `B` |
+| A3 | `__LINE__`, `__FILE__`, `__DIR__` | `Int32`, `String` | `?` | **fixed (step 1)**; was unknown (`pseudo_constant`) |
 
 ### B. Autocasting and overload ranking
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| B1 | `over(1.5)` with `over(x : Int32)`, `over(x)` | `Char` | `Int32` | wrong: float literals never autocast to integers |
-| B2 | `cnt = 1; cnt += 2.0` | `Float64` | `Int32` | wrong: same cause (`Int32#+(Int32)` accepted `2.0`) |
-| B3 | `ov(1)` with `ov(x : Int32)`, `ov(x : Float64)` | `Int32` | `Int32 \| String` | wider: an exact match beats an autocast match |
-| B4 | `i ** 2` | `Int32` | `Float64 \| Int32` | wider: same cause |
+| B1 | `over(1.5)` with `over(x : Int32)`, `over(x)` | `Char` | `Int32` | **fixed (step 1)**; was wrong: float literals never autocast to integers |
+| B2 | `cnt = 1; cnt += 2.0` | `Float64` | `Int32` | **fixed (step 1)**; was wrong: same cause, and op-assign ignored the number primitives |
+| B3 | `ov(1)` with `ov(x : Int32)`, `ov(x : Float64)` | `Int32` | `Int32 \| String` | **fixed (step 1)**; was wider: an exact match beats an autocast match |
+| B4 | `i ** 2` | `Int32` | `Float64 \| Int32` | **fixed (step 1)**; was wider: same cause |
 
-Rule from autocasting.md: integer literals autocast to a number type the
-value fits in; float literals only to float types; symbols to enums. An
-exact type match wins over an autocast one.
+Rules implemented in step 1 (autocasting.md, each case checked against
+Crystal 1.22 in `fixtures/book/src/autocast.cr`):
+
+- Integer literals cast to any integer or float type, float literals only
+  to float types, `:sym` literals to enums. The literal's value is not
+  range-checked (an out-of-range literal is a compile error, which the
+  compiler reports).
+- Other number values cast only without precision loss: to a wider
+  integer of the same signedness, unsigned to a wider signed integer,
+  integers narrower than the float's mantissa to that float (Int16 to
+  Float32, Int32 to Float64), Float32 to Float64.
+- Overloads that fit without a cast win over those that need one, and an
+  unrestricted parameter is an exact fit. Several cast-only fits stay
+  ambiguous (the compiler reports an error there).
+- Summaries bind a restricted parameter to the argument's type only when
+  it fits without a cast (`x : Int64` called with an Int32 is an Int64
+  inside).
 
 ### C. Enums
 

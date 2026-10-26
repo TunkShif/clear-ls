@@ -636,7 +636,12 @@ module ClearLS::Types
       when .true_node?, .false_node? then @table.named!("Bool")
       when .nil_node?       then @table.named!("Nil")
       when .regex_node?     then @table.named!("Regex")
-      when .pseudo_constant? then @table.unknown
+      when .pseudo_constant?
+        case e.text
+        when "__LINE__", "__END_LINE__" then @table.named!("Int32")
+        when "__FILE__", "__DIR__"      then @table.named!("String")
+        else                                 @table.unknown
+        end
       else                       @table.unknown
       end
     end
@@ -654,7 +659,31 @@ module ClearLS::Types
         suf = m[1]
         return @table.named!(suf.starts_with?('i') ? "Int#{suf[1..]}" : "UInt#{suf[1..]}")
       end
-      @table.named!("Int32")
+      @table.named!(Infer.unsuffixed_int_type(text))
+    end
+
+    # Type of a suffix-less integer literal: Int32 if the value fits, else
+    # Int64, else UInt64 (literals.md, integers).
+    def self.unsuffixed_int_type(text : String) : String
+      t = text.delete('_')
+      neg = t.starts_with?('-')
+      t = t.lchop('-').lchop('+')
+      base = case t[0, 2]
+             when "0x" then 16
+             when "0o" then 8
+             when "0b" then 2
+             else           10
+             end
+      digits = base == 10 ? t : t[2..]
+      v = digits.to_u128?(base) || return "Int32"
+      if neg
+        return "Int32" if v <= 2_u128**31
+        return "Int64" if v <= 2_u128**63
+      else
+        return "Int32" if v < 2_u128**31
+        return "Int64" if v < 2_u128**63
+      end
+      "UInt64"
     end
 
     private def collection(e : HIR::Expr) : TyId
@@ -685,8 +714,13 @@ module ClearLS::Types
       when .named_tuple?
         @table.named_tuple(named.map(&.[0]), named.map(&.[1]))
       when .range_node?
-        b = elems[0]? || @table.named!("Nil")
-        en = elems[1]? || @table.named!("Nil")
+        # `..2` / `1..`: the missing bound is Nil (lowering records which
+        # bound a single child is).
+        b, en = case elems.size
+                when 2 then {elems[0], elems[1]}
+                when 1 then e.type_text2 == "begin" ? {elems[0], nil_t} : {nil_t, elems[0]}
+                else        {nil_t, nil_t}
+                end
         @table.named!("Range", [b, en])
       when .array_like?, .hash_like?
         # `Set{1, 2}` → Set(Int32)
@@ -859,7 +893,7 @@ module ClearLS::Types
     def self.value_text_type(value : String, table : TypeTable, ns : Semantics::TypeId) : TyId
       v = value.strip
       case v
-      when /\A-?\d[\d_]*(_?[iu]\d+)?\z/ then table.named!(v =~ /([iu]\d+)\z/ ? ($1.starts_with?('i') ? "Int#{$1[1..]}" : "UInt#{$1[1..]}") : "Int32")
+      when /\A-?\d[\d_]*(_?[iu]\d+)?\z/ then table.named!(v =~ /([iu]\d+)\z/ ? ($1.starts_with?('i') ? "Int#{$1[1..]}" : "UInt#{$1[1..]}") : unsuffixed_int_type(v))
       when /\A-?\d[\d_]*\.\d[\d_]*(_?f32)?\z/ then table.named!(v.ends_with?("f32") ? "Float32" : "Float64")
       when /\A".*"\z/m, /\A%[qQ]?[\(\[\{]/ then table.named!("String")
       when /\A:[\w?!]+\z/, /\A:"/ then table.named!("Symbol")
@@ -968,7 +1002,7 @@ module ClearLS::Types
            else
              # `x += 1` → return type of `x.+(1)`.
              op = e.name.try(&.rchop('=')) || "+"
-             call_return(current, op, [vt], nil) || current
+             call_return(current, op, [vt], nil) || primitive_op(current, op, [vt]) || current
            end
       write_target(target, ty)
       ty
@@ -1630,7 +1664,9 @@ module ClearLS::Types
           if sig.params[pi].restriction
             next if @table.unknown?(t)
             rt = resolver.restriction(c, pi) || next
-            next unless resolver.matches(t, rt, nil).compatible?
+            # Without autocasting: `x : Int64` called with an Int32 is an
+            # Int64 inside.
+            next unless resolver.matches_exactly(t, rt).compatible?
           end
           args[pi] = t
         end
@@ -1648,7 +1684,11 @@ module ClearLS::Types
       cache.get(m.site, c.self_type, shape) do |eff_args|
         node = loader.call(m.site) || next nil
         owner = map[m.owner]
-        ctx = DefContext.new(m.owner, c.self_type, owner.type_params + (sig.try(&.free_vars) || [] of String))
+        # Type params the receiver carries from the caller (`Pointer(UC)`
+        # inside a `forall UC` def) are meaningful in the callee too.
+        tparams = owner.type_params + (sig.try(&.free_vars) || [] of String)
+        param_names(c.self_type, tparams)
+        ctx = DefContext.new(m.owner, c.self_type, tparams)
         inner = Infer.new(HIR::LowerBody.lower(node), ctx, @table)
         inner.source_loader = loader
         inner.summaries = cache
@@ -1660,6 +1700,17 @@ module ClearLS::Types
         inner.with_source(node.tree.text).run
         yields = inner.yield_types.map { |ts| union_or_unknown(ts.uniq) }
         Summaries::Summary.new(inner.return_type, yields)
+      end
+    end
+
+    # Adds the type param names mentioned in *t* to *names*.
+    private def param_names(t : TyId, names : Array(String), depth = 0) : Nil
+      return if depth > 8
+      ty = @table[t]
+      if ty.kind.type_param?
+        names << ty.param.not_nil! unless names.includes?(ty.param.not_nil!)
+      else
+        ty.args.each { |a| param_names(a, names, depth + 1) }
       end
     end
 

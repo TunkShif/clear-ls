@@ -129,4 +129,54 @@ describe Types::CallResolver do
     got[%(s.g("a"))].should eq ["(x) : String"]
     got["s.g(v)"].should eq ["(x) : String", "(x : Int32) : Char"]
   end
+
+  it "autocasts number literals and values only where the compiler does" do
+    r = resolutions(<<-CR, "f")
+      class O
+        def f(x : Int64) : Int64
+        end
+        def f(x) : String
+        end
+      end
+      class P
+        def f(x : Int32) : Int32
+        end
+        def f(x : Float64) : Float64
+        end
+      end
+      class Q
+        def f(x : Int64) : Int64
+        end
+      end
+      class F
+        def f(x : Float32) : Float32
+        end
+      end
+      def m(o : O, p : P, q : Q, fl : F, i : Int32, i16 : Int16, u : UInt64, f64 : Float64)
+        o.f(1)
+        p.f(1)
+        p.f(1.5)
+        q.f(1)
+        q.f(1.5)
+        q.f(i)
+        q.f(u)
+        fl.f(1)
+        fl.f(i16)
+        fl.f(i)
+        fl.f(f64)
+      end
+      CR
+    got = r.to_h { |(t, _, c)| {t, c} }
+    got["o.f(1)"].should eq ["(x) : String"]           # exact beats a cast
+    got["p.f(1)"].should eq ["(x : Int32) : Int32"]
+    got["p.f(1.5)"].should eq ["(x : Float64) : Float64"] # floats never cast to ints
+    got["q.f(1)"].should eq ["(x : Int64) : Int64"]
+    got["q.f(1.5)"].should be_empty
+    got["q.f(i)"].should eq ["(x : Int64) : Int64"]     # wider integer
+    got["q.f(u)"].should be_empty                       # UInt64 does not fit Int64
+    got["fl.f(1)"].should eq ["(x : Float32) : Float32"]
+    got["fl.f(i16)"].should eq ["(x : Float32) : Float32"]
+    got["fl.f(i)"].should be_empty                      # Int32 loses precision in Float32
+    got["fl.f(f64)"].should be_empty
+  end
 end

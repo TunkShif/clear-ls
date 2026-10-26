@@ -134,7 +134,8 @@ module ClearLS::HIR
     # Type written in the construct: `[] of T`, `{} of K => V`,
     # `uninitialized T`, `x.as(T)`, `is_a?(T)`, block/proc param types.
     getter type_text : String?
-    # Second type for `{} of K => V`.
+    # Second type for `{} of K => V`; for a range with one bound, which
+    # bound it is ("begin" / "end").
     getter type_text2 : String?
 
     def initialize(@id, @kind, @range, @scope, *, @syntax = Syntax::Kind::Unknown, @name = nil, @name_range = nil,

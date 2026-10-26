@@ -432,6 +432,9 @@ Steps (one commit each, wrong results first):
 1. **Literals and autocasting** (A1–A3, B1–B4). Integer literal ranges;
    begin-less ranges; pseudo-constants; float literals no longer
    autocast to integers; exact matches rank above autocast ones.
+   *Done:* book 202/290 (+11) plus `autocast.cr` 19/19; regression diff
+   repo 0/0, stdlib 0 regressed, 5 improved (summaries keep type params
+   that the receiver carries, e.g. `Pointer(UC)#+`).
 2. **Enums** (C1–C4). Members typed as the enum; `value` as the base
    type; flags `|`/`&` and predicates.
 3. **Primitives** (D1–D9). Empty `@[Primitive]` bodies are unknown, not

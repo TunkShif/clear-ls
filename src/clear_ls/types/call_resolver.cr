@@ -99,8 +99,9 @@ module ClearLS::Types
     MAX_COMBOS     = 16
     MAX_CANDIDATES = 32
 
-    @number : Semantics::TypeId?
-    @number_done = false
+    # Autocasting allowed in `matches` (off for exact-match passes and
+    # specificity).
+    @cast = true
 
     def initialize(@table : TypeTable)
     end
@@ -219,10 +220,11 @@ module ClearLS::Types
       winners = [] of CallCandidate
       unique = true
       combos(site).each do |types|
-        comps = cands.compact_map do |c|
-          k = compat(c, site, types)
-          k.incompatible? ? nil : {c, k}
-        end
+        # A candidate the arguments fit without autocasting wins over those
+        # that need a cast (`f(x : Int64)` vs `f(x)` with `1` picks `f(x)`);
+        # several cast-only fits stay ambiguous, like the compiler's error.
+        comps = viable(cands, site, types, cast: false)
+        comps = viable(cands, site, types, cast: true) unless comps.any?(&.[1].compatible?)
         definite = comps.select(&.[1].compatible?).map(&.[0])
         kept = comps.reject do |(c, _)|
           definite.any? { |d| d != c && shadows?(d, c, cands, site) }
@@ -235,6 +237,25 @@ module ClearLS::Types
       end
       # Declaration order, not combination order.
       {winners.sort_by! { |c| cands.index!(c) }, unique}
+    end
+
+    private def viable(cands : Array(CallCandidate), site : CallSite, types : Array(TyId), cast : Bool) : Array({CallCandidate, Compatibility})
+      without_cast(!cast) do
+        cands.compact_map do |c|
+          k = compat(c, site, types)
+          k.incompatible? ? nil : {c, k}
+        end
+      end
+    end
+
+    private def without_cast(off : Bool = true, &)
+      saved = @cast
+      @cast = false if off
+      begin
+        yield
+      ensure
+        @cast = saved
+      end
     end
 
     # Does definite candidate *d* hide *c*: at least as specific, and
@@ -253,7 +274,7 @@ module ClearLS::Types
         next true if rb.nil?
         ra = pa.try { |i| restriction(a, i) }
         next false if ra.nil?
-        @table.members(ra).all? { |m| matches(m, rb, nil).compatible? }
+        without_cast { @table.members(ra).all? { |m| matches(m, rb, nil).compatible? } }
       end
     end
 
@@ -304,6 +325,12 @@ module ClearLS::Types
       end
     end
 
+    # `matches` without autocasting: the value already has the
+    # restriction's type (summaries bind such params to the argument type).
+    def matches_exactly(actual : TyId, restriction : TyId) : Compatibility
+      without_cast { matches(actual, restriction, nil) }
+    end
+
     # Does a value of type *actual* satisfy *restriction*?
     def matches(actual : TyId, restriction : TyId, literal : Syntax::Kind?) : Compatibility
       return Compatibility::Unknown if @table.unknown?(actual) || @table.unknown?(restriction)
@@ -319,11 +346,11 @@ module ClearLS::Types
         return Compatibility::Incompatible if ks.all?(&.incompatible?)
         return Compatibility::Unknown
       end
-      # Literal autocasting: `1` to any number type, `:sym` to an enum.
-      if literal && r.kind.named?
-        rid = r.def_id.not_nil!
-        return Compatibility::Compatible if (literal.integer? || literal.float_node?) && number?(rid)
-        return Compatibility::Compatible if literal.symbol_node? && map[rid].kind.enum?
+      # Autocasting (skipped in exact passes): numbers, and `:sym` literals
+      # to enums.
+      if @cast && r.kind.named? && a.kind.named?
+        return Compatibility::Compatible if autocast?(a, r, literal)
+        return Compatibility::Compatible if literal.try(&.symbol_node?) && map[r.def_id.not_nil!].kind.enum?
       end
       case r.kind
       when .named?
@@ -369,13 +396,38 @@ module ClearLS::Types
       end
     end
 
-    private def number?(id : Semantics::TypeId) : Bool
-      unless @number_done
-        @number = map.lookup_path("::Number")
-        @number_done = true
+    # Number autocasting (autocasting.md, checked against Crystal 1.22):
+    # an integer literal casts to any integer or float type, a float
+    # literal only to floats (the literal's value is not checked: an
+    # out-of-range literal is a compile error that the compiler reports).
+    # Other number expressions cast only where no precision is lost:
+    # integers to wider integers that hold every value and to floats with
+    # enough mantissa, Float32 to Float64.
+    def autocast?(a : Ty, r : Ty, literal : Syntax::Kind?) : Bool
+      return false if a.def_id == r.def_id
+      from = NUMBER_RANKS[map[a.def_id.not_nil!].full_name]? || return false
+      to = NUMBER_RANKS[map[r.def_id.not_nil!].full_name]? || return false
+      if literal
+        return true if literal.integer?
+        return to[0] == :float if literal.float_node?
       end
-      n = @number || return false
-      map.ancestors(id).includes?(n)
+      fk, fbits = from
+      tk, tbits = to
+      case {fk, tk}
+      when {:float, :float} then fbits < tbits
+      when {:float, _}      then false
+      when {_, :float}      then fbits < (tbits == 32 ? 24 : 53)
+      when {:uint, :int}    then fbits < tbits
+      when {:int, :uint}    then false
+      else                       fbits < tbits
+      end
     end
+
+    NUMBER_RANKS = {
+      "Int8" => {:int, 8}, "Int16" => {:int, 16}, "Int32" => {:int, 32}, "Int64" => {:int, 64}, "Int128" => {:int, 128},
+      "UInt8" => {:uint, 8}, "UInt16" => {:uint, 16}, "UInt32" => {:uint, 32}, "UInt64" => {:uint, 64}, "UInt128" => {:uint, 128},
+      "Float32" => {:float, 32}, "Float64" => {:float, 64},
+    }
+
   end
 end
