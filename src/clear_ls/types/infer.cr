@@ -161,12 +161,40 @@ module ClearLS::Types
     # `yield`): every candidate stores the block rather than yielding.
     private def capturing_call?(call : HIR::Expr) : Bool
       return false unless call.kind.call? && call.block
+      name = call.name || return false
+      # Cheap pre-check: some def with this name has a named `&block`
+      # param (most block calls go to methods that yield).
+      return false unless capturing_name?(name)
       cands = resolve_call(call).candidates
       !cands.empty? && cands.all? do |c|
         sig = c.match.site.item.signature || next false
         bp = sig.params.find(&.kind.block?) || next false
         !bp.name.nil? && !yields?(c.match.site)
       end
+    end
+
+    # Names of defs anywhere that take a named block param (`&block`),
+    # per DefMap (shared by every Infer of one Typing).
+    @@capturing_names = {} of UInt64 => Set(String)
+
+    private def capturing_name?(name : String) : Bool
+      names = @@capturing_names[map.object_id] ||= begin
+        @@capturing_names.clear
+        set = Set(String).new
+        map.types.each do |info|
+          info.members.each do |key, sites|
+            sites.each do |site|
+              sig = site.item.signature || next
+              if sig.params.any? { |p| p.kind.block? && !p.name.nil? }
+                set << key.lchop("self.")
+                break
+              end
+            end
+          end
+        end
+        set
+      end
+      names.includes?(name)
     end
 
     @yields_cache = {} of {Int32, UInt32} => Bool
