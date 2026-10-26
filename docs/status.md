@@ -10,7 +10,7 @@ stops mid-phase). History and per-phase details are in
   `tools/book_diff.py`). Steps are in the roadmap; design decisions are
   in book-gaps.md. After it: Phase 9, workspace identity.
 - **In progress:** Phase 8, steps 1–4 done (literals, autocasting, enums,
-  primitives, `break` values); next step 5 (procs, blocks, splats).
+  primitives, `break` values); next step 5 (procs and blocks), then 6 (splats).
 
 ## Resume
 
