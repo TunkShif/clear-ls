@@ -9,8 +9,8 @@ stops mid-phase). History and per-phase details are in
   Crystal book's examples exposed ([book-gaps.md](book-gaps.md), harness
   `tools/book_diff.py`). Steps are in the roadmap; design decisions are
   in book-gaps.md. After it: Phase 9, workspace identity.
-- **In progress:** Phase 8, step 1 done (literals and autocasting); next
-  step 2 (enums).
+- **In progress:** Phase 8, steps 1–2 done (literals, autocasting, enums);
+  next step 3 (primitives).
 
 ## Resume
 
@@ -30,7 +30,7 @@ Then read [architecture.md](architecture.md) for the code map and
 Known gaps relevant to the next phases (full lists under each phase in the
 roadmap and in [architecture.md](architecture.md#known-limitations)):
 
-- 21 wrong book-example types (book-gaps.md, Phase 8).
+- 19 wrong book-example types (book-gaps.md, Phase 8).
 - References/rename are local-only; incoming calls return `[]` (Phase 9).
 - Diagnostics describe saved files only (compiler limitation).
 - No persistent index cache, no request cancellation, single root

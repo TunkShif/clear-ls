@@ -11,6 +11,10 @@ PRELUDE = <<-CR
   end
   class Reference; end
   struct Value; end
+  struct Enum
+    def to_s : String
+    end
+  end
   struct Struct; end
   abstract struct Number; end
   abstract struct Int < Number; end

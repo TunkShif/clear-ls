@@ -781,10 +781,37 @@ module ClearLS::Types
       owners.each do |o|
         map.lookup_member(o, name).each do |site|
           next unless site.item.kind.constant?
+          # Enum members are values of the enum, whatever their value text.
+          if (eo = enum_owner(o, site))
+            return @table.named(eo)
+          end
           return const_value_type(site, o)
+        end
+        # `@[Flags]` enums get `None` and `All` from the compiler.
+        if name.in?("None", "All") && map[o].kind.enum? && flags_enum?(o)
+          return @table.named(o)
         end
       end
       @table.unknown
+    end
+
+    private def flags_enum?(id : Semantics::TypeId) : Bool
+      map[id].sites.any? { |s| s.item.annotations.any? { |a| a == "Flags" || a == "::Flags" } }
+    end
+
+    # The enum that declares *site* when *site* is one of its members
+    # (lookup may find it through an ancestor of *from*).
+    private def enum_owner(from : Semantics::TypeId, site : Semantics::Site) : Semantics::TypeId?
+      map.ancestors(from).find do |a|
+        map[a].kind.enum? && map[a].members[site.item.name]?.try(&.includes?(site))
+      end
+    end
+
+    # `value` of an enum: its base type (`enum E : UInt8`), Int32 by default.
+    private def enum_base(id : Semantics::TypeId) : TyId
+      info = map[id]
+      base = info.sites.compact_map(&.item.header.try(&.base_type)).first?
+      base ? TypeExprParser.parse(base, @table, info.namespace || Semantics::DefMap::PROGRAM) : @table.named!("Int32")
     end
 
     # `Array(Int32)` as an expression: metaclass of the instantiated type.
@@ -1191,6 +1218,7 @@ module ClearLS::Types
         return name == "pointerof" ? (args[0]?.try { |a| @table.named?("Pointer", [a]) } || @table.unknown) : (name == "typeof" ? @table.unknown : @table.named!("Int32"))
       end
 
+
       # `Enumerable.element_type(x)` / `Iterator.element_type(x)`: what x
       # yields from `each` (generic arg of Enumerable/Iterator ancestors).
       if name == "element_type" && args.size == 1 && recv_t && @table[recv_t].kind.metaclass?
@@ -1207,6 +1235,9 @@ module ClearLS::Types
 
       recv_t ||= implicit_receiver(e)
       receiver_type = recv_t || implicit_self(e)
+      if name == "value" && args.empty? && (rt = @table[receiver_type]).kind.named? && map[rt.def_id.not_nil!].kind.enum?
+        return enum_base(rt.def_id.not_nil!)
+      end
       res = resolve_call(e)
       if name == "new" && res.candidates.empty?
         # `Foo.new` without an explicit `self.new`: instance of Foo.

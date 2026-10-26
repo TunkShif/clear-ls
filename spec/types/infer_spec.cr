@@ -126,6 +126,32 @@ describe Types::Infer do
     end
   end
 
+  it "types enum members as the enum and value as its base type" do
+    r = infer(<<-CR)
+      enum Color
+        Red
+        Green = 5
+      end
+      @[Flags]
+      enum Perm : UInt8
+        Read
+      end
+      def m
+        a = Color::Red
+        b = Color::Green
+        c = a.value
+        d = Perm::Read.value
+        e = Perm::None
+        f = Perm::All
+        g = Color::None
+      end
+      CR
+    {"a" => "Color", "b" => "Color", "c" => "Int32", "d" => "UInt8",
+     "e" => "Perm", "f" => "Perm", "g" => "?"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+
   it "uses parameter restrictions and declared returns" do
     r = infer(<<-CR)
       def m(s : String, io : IO, n = 1)

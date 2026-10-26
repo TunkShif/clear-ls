@@ -437,6 +437,9 @@ Steps (one commit each, wrong results first):
    that the receiver carries, e.g. `Pointer(UC)#+`).
 2. **Enums** (C1–C4). Members typed as the enum; `value` as the base
    type; flags `|`/`&` and predicates.
+   *Done:* book 211/290 (+9), new `enums.cr` 27/28 (`==` is D3); regression
+   diff repo 0 regressed / 31 improved, stdlib 0 / 15 (enum-typed lib
+   calls and callbacks).
 3. **Primitives** (D1–D9). Empty `@[Primitive]` bodies are unknown, not
    `Nil`, with contracts for `class`, `malloc`, `==`, `/`, `unsafe_as`,
    `null`, `name`; lowering for `pointerof`/`sizeof`-family nodes and
