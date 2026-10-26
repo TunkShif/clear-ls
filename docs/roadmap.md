@@ -67,7 +67,7 @@ parse. Keeping every tree alive needs 282 MB GC heap with the binding's
 default Boehm allocator versus 17 MB heap with
 `-Dcrystal_tree_sitter_no_init` (libc malloc; RSS 297 MB vs 272 MB).
 Syntax trees for non-open files should be dropped after item lowering; the
-allocator choice is revisited in Phase 9.
+allocator choice is revisited in Phase 10.
 
 ### Phase 1 — declarations and project model (done)
 
@@ -106,7 +106,7 @@ Status: implemented. Scoping rules were checked against the compiler
 in the block, `if`/`while`/`case` share the enclosing scope). Top-level and
 type-body code get their own file body. Not yet: locals inside macro bodies
 (`{% %}` / `{{ }}`), the `SpanIndex`/`ProgramPoint` parts of the cursor-lookup
-design (deferred to Phase 4), references/rename for non-locals (Phase 8).
+design (deferred to Phase 4), references/rename for non-locals (Phase 9).
 
 Measurements (`--release`): the stdlib's 15k defs lower in 0.33 s
 (21 µs/def). On a 380-line file, full semantic tokens take ~3 ms warm;
@@ -217,7 +217,7 @@ Steps (one commit each):
 6. **Implementation and outgoing call hierarchy.** Overrides of a
    method in subtypes / implementers of an abstract def; subtypes of a
    type; resolved calls in a def body. Incoming calls need workspace
-   references (Phase 8).
+   references (Phase 9).
 7. **Verification and docs.**
 
 Exit criterion (design doc): the `IO#gets` examples narrow to the
@@ -242,7 +242,7 @@ in this repo (62.8%), 39.9% in the stdlib (35.5%). Inference over this
 repo takes 0.23 s for 603 defs (0.18 s for 540). In Neovim: signature help
 < 1 ms, implementation < 1 ms, outgoing calls 80 ms (cold body inference).
 
-Not yet: incoming calls (Phase 8), return inference for unannotated defs
+Not yet: incoming calls (Phase 9), return inference for unannotated defs
 such as `Enumerable#sum`, `Hash#[]?` (Phase 6). Signature help needs the
 call's line to parse: an unclosed `(` before `end` makes Tree-sitter
 swallow the enclosing def, so the call is only found after a `)` is
@@ -411,13 +411,62 @@ preview (the tool cannot locate it); compiler facts for generic types'
 ivars (`type_vars` non-empty) and the stdlib; facts are not used for
 completion ranking beyond normal member lookup.
 
-### Phase 8 — workspace identity
+### Phase 8 — language-semantics parity
+
+The Crystal 1.22 syntax and semantics book's examples, run through both
+the compiler and clear-ls, found wrong and missing types. The gaps are
+grouped in [book-gaps.md](book-gaps.md) (IDs A1–M5). clear-ls stays
+best-effort and DX-first, not a copy of the compiler. This phase fixes
+wrong results, fills in unknowns where a cheap local rule exists, and
+records any deliberate deviation.
+
+Harness: `make bin/probes/type_marks && tools/book_diff.py`. Baseline
+191/290 markers match, 1 accepted deviation, 25 wrong. Each step reports
+the new count and runs the `types_dump` regression diff (repo and
+stdlib).
+
+Steps (one commit each, wrong results first):
+
+0. **Harness.** `type_marks` probe, `book_diff.py`, book fixtures,
+   [book-gaps.md](book-gaps.md).
+1. **Literals and autocasting** (A1–A3, B1–B4). Integer literal ranges;
+   begin-less ranges; pseudo-constants; float literals no longer
+   autocast to integers; exact matches rank above autocast ones.
+2. **Enums** (C1–C4). Members typed as the enum; `value` as the base
+   type; flags `|`/`&` and predicates.
+3. **Primitives** (D1–D9). Empty `@[Primitive]` bodies are unknown, not
+   `Nil`, with contracts for `class`, `malloc`, `==`, `/`, `unsafe_as`,
+   `null`, `name`; lowering for `pointerof`/`sizeof`-family nodes and
+   `$~`/`$1`; `try` per union member.
+4. **`break` values** (E1–E3). `while`/`until` value = breaks + `Nil`
+   unless the condition is `true`; a block's `break` joins the call's
+   type.
+5. **Procs, blocks, splats** (F1–F5, G1–G6). Proc return annotations;
+   `&proc` values; method procs; `-> _` block returns; `with … yield`;
+   splat params, splatted arguments and splats in tuple, array and
+   multi-assign literals.
+6. **Closures and redefinitions** (H1, I1–I4). Captured locals take the
+   union of all their assignments; `previous_def` replaces instead of
+   overloading; `super`; generic args from `initialize`; `new` in class
+   methods.
+7. **Ivar rules and narrowing** (J1–J4, K1–K3), after decision 5 in
+   book-gaps.md.
+8. **Union shape** (M1–M5), after decisions 1–4 and 6.
+9. **C bindings** (L1–L2).
+10. **Verification and docs.** Book diff, coverage and regression diff,
+    `make nvim-check`, roadmap and README.
+
+Exit criterion: no *wrong* entries left in book-gaps.md; each remaining
+difference is either an accepted deviation (marked `# cls:` in the
+fixtures) or listed with a reason.
+
+### Phase 9 — workspace identity
 
 - `DefId`-keyed reference index, incrementally maintained.
 - Features: workspace references and rename (exact identity only), type
   hierarchy, incoming calls, code actions.
 
-### Phase 9 — hardening
+### Phase 10 — hardening
 
 - Persistent stdlib/shard index cache, parallel indexing, cancellation and
   budgets, GC vs libc allocator measurement, multi-root workspaces.

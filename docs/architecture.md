@@ -1,7 +1,8 @@
 # clear-ls architecture
 
 How the code is organised and why. Phase plans and status live in
-[roadmap.md](roadmap.md); pitfalls in [gotchas.md](gotchas.md). The design
+[roadmap.md](roadmap.md); pitfalls in [gotchas.md](gotchas.md); known
+differences from the language reference in [book-gaps.md](book-gaps.md). The design
 background is in [design/](design/) (written for the earlier "Opal"
 prototype; names differ, architecture applies).
 

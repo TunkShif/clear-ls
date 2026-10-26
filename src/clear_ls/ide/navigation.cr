@@ -14,7 +14,7 @@ module ClearLS::IDE
   # owner (overrides, implementations of an abstract def, module methods
   # implemented by includers). Implementations of a type are its
   # transitive subtypes and includers. Incoming calls need workspace
-  # references (Phase 8).
+  # references (Phase 9).
   class Navigation
     MAX_RESULTS = 200
 

@@ -5,10 +5,11 @@ stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
 - **Done:** Phases 0–7 (through compiler integration).
-- **Next:** Phase 8 — workspace identity (`DefId`-keyed reference index;
-  workspace references/rename, type hierarchy, incoming calls, code
-  actions). Start by measuring what it needs, then split it into steps in
-  the roadmap ([development.md](development.md#workflow)).
+- **Next:** Phase 8 — language-semantics parity: fix the gaps that the
+  Crystal book's examples exposed ([book-gaps.md](book-gaps.md), harness
+  `tools/book_diff.py`). Steps are in the roadmap. Steps 7–8 wait on
+  the open decisions in book-gaps.md. After it: Phase 9, workspace
+  identity.
 - **In progress:** nothing.
 
 ## Resume
@@ -29,7 +30,8 @@ Then read [architecture.md](architecture.md) for the code map and
 Known gaps relevant to the next phases (full lists under each phase in the
 roadmap and in [architecture.md](architecture.md#known-limitations)):
 
-- References/rename are local-only; incoming calls return `[]` (Phase 8).
+- 25 wrong book-example types (book-gaps.md, Phase 8).
+- References/rename are local-only; incoming calls return `[]` (Phase 9).
 - Diagnostics describe saved files only (compiler limitation).
 - No persistent index cache, no request cancellation, single root
-  (Phase 9).
+  (Phase 10).
