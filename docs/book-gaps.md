@@ -181,10 +181,10 @@ covers code that hasn't been checked or saved yet.
 | L1 | `C::S.new.a`, `C::U.new.f` (lib struct/union fields) | field type | `?` | unknown |
 | L2 | `C.strlen("a")` (`fun … : C::Size`), `C.errno` (`$errno : Int32`) | `UInt64`, `Int32` | `?` | unknown |
 
-### M. Union shape (needs a decision)
+### M. Union shape
 
 These are not wrong, just shaped differently from the compiler's types.
-Each one needs a decision; see [Open decisions](#open-decisions).
+How each is handled: [Decisions](#decisions).
 
 | ID | Example | Compiler | clear-ls |
 |---|---|---|---|
@@ -212,25 +212,28 @@ These came up in the comparison but are not about inference. They stay in
 |---|---|---|---|
 | `flow.cr:59` | `Int32 \| String` once | `Int32`, then `Int32 \| String` | The compiler prints once per loop fixed-point step; clear-ls shows the joined fixed point |
 
-## Open decisions
+## Decisions
 
-*To be decided before the steps that depend on them (roadmap Phase 8).*
+Agreed before step 1. Steps 7 and 8 implement them.
 
-1. **Virtual types (M1).** Keep exact unions (`Bar | Baz`): completion
-   shows methods common to both, and hover is more precise. Or collapse to
-   the common ancestor the way the compiler does (`Foo`). The compiler then
-   finds methods on `Foo` and every subclass, and an abstract `Animal`
-   resolves `talk` through the subclasses' implementations.
-2. **Tuple unions (M2).** Keep the union of tuples (more precise), or merge
-   element-wise like the compiler.
-3. **Declared locals (M3).** Show the assigned (flow) type like the
-   compiler, the declared type, or both in hover (`nn : Int32` and
-   `declared Int32 | Float64`).
-4. **Restricted returns (M4).** Use the declared return type (the contract)
-   or the narrower type the body actually returns.
-5. **Ivar rules (J).** Implement the book's syntactic rules 1–7 in clear-ls
-   (works before the first check and in unsaved buffers), or rely on
-   compiler facts only.
-6. **Types as values (M5).** Type `Int32 | String` and `Int32?` in
-   expression position as metaclasses (the grammar may parse them as calls
-   to `|`).
+1. **Virtual types (M1).** Keep exact unions (`Bar | Baz`) for hover and
+   narrowing. Method lookup and completion fall back to the nearest common
+   ancestor (not `Reference`/`Value`/`Int`/`Float`) when a method is not
+   on every member; an abstract parent then resolves through its
+   subclasses' implementations. `rescue ex : A | B` stays `A | B`.
+2. **Tuple unions (M2).** Keep the union of tuples. Indexing by a literal
+   and destructuring take the per-position union.
+3. **Declared locals (M3).** Hover shows the flow type (`Int32`) and the
+   declared type as a note. Later assignments are still allowed anywhere
+   within the declared type.
+4. **Restricted returns (M4).** Use the declared return type; it is the
+   method's contract, and narrowing it would make callers look wrong
+   whenever the body changes.
+5. **Ivar rules (J).** Implement the book's rules 1–5 in clear-ls
+   (literals, `T.new`, restricted or defaulted params, plus `Nil` when not
+   set in every `initialize`), so ivars are typed before the first check
+   and in unsaved buffers. Compiler facts win when present. Rules 6–7
+   (lib funs, `out`) come from facts only.
+6. **Types as values (M5).** Type `Int32 | String` / `Int32?` in
+   expression position as metaclasses only if the grammar gives them a
+   type node; if they parse as calls to `|`, leave them unknown.

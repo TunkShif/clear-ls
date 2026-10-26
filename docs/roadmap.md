@@ -452,9 +452,9 @@ Steps (one commit each, wrong results first):
    union of all their assignments; `previous_def` replaces instead of
    overloading; `super`; generic args from `initialize`; `new` in class
    methods.
-7. **Ivar rules and narrowing** (J1–J4, K1–K3), after decision 5 in
+7. **Ivar rules and narrowing** (J1–J4, K1–K3), per decision 5 in
    book-gaps.md.
-8. **Union shape** (M1–M5), after decisions 1–4 and 6.
+8. **Union shape** (M1–M5), per decisions 1–4 and 6.
 9. **C bindings** (L1–L2).
 10. **Verification and docs.** Book diff, coverage and regression diff,
     `make nvim-check`, roadmap and README.

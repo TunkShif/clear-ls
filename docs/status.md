@@ -7,9 +7,8 @@ stops mid-phase). History and per-phase details are in
 - **Done:** Phases 0–7 (through compiler integration).
 - **Next:** Phase 8 — language-semantics parity: fix the gaps that the
   Crystal book's examples exposed ([book-gaps.md](book-gaps.md), harness
-  `tools/book_diff.py`). Steps are in the roadmap. Steps 7–8 wait on
-  the open decisions in book-gaps.md. After it: Phase 9, workspace
-  identity.
+  `tools/book_diff.py`). Steps are in the roadmap; design decisions are
+  in book-gaps.md. After it: Phase 9, workspace identity.
 - **In progress:** Phase 8, step 1 done (literals and autocasting); next
   step 2 (enums).
 
