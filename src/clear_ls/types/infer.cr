@@ -840,6 +840,12 @@ module ClearLS::Types
 
     # The `with x yield` receiver for code at *offset*, if inside such a
     # block.
+    # Receiver type of a receiverless call: the block argument for
+    # `&.foo`, the case subject for `when .foo?`; nil for other calls.
+    def implicit_receiver_type(call_id : HIR::ExprId) : TyId?
+      implicit_receiver(@body.expr(call_id))
+    end
+
     def with_self_at(offset : UInt32) : TyId?
       @block_self.select { |id, _| @body.expr(id).range.contains?(offset) }
         .min_by? { |id, _| @body.expr(id).range.size }.try(&.[1])
@@ -2142,6 +2148,13 @@ module ClearLS::Types
         subj = kase.children[0]?
         return nil unless subj && !@body.expr(subj).kind.nop?
         return @types[subj]? || @table.unknown
+      end
+      # `&.a.b`: `a` is the receiver of `b`, both implicit_object_calls;
+      # the block is above the outermost call of the chain.
+      while parent.kind.call? && parent.syntax.implicit_object_call? && parent.receiver == call.id
+        call = parent
+        parent_id = @parent[call.id]? || return nil
+        parent = @body.expr(parent_id)
       end
       return nil unless parent.syntax.implicit_object_call?
       @implicit_args[parent_id]? || @table.unknown

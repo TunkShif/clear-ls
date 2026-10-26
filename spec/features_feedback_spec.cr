@@ -188,3 +188,43 @@ describe "inferred return types" do
     end
   end
 end
+
+IMPLICIT_HEAD = <<-CR
+  class Itm
+    getter name : String = "x"
+    getter rank : Int32 = 1
+  end
+
+  def run(items : Array(Itm), s : String)
+
+  CR
+
+# One half-typed line per file: the user edits one place at a time, and a
+# bare `when .` swallows the following `end`.
+private def complete_line(line : String, shift : Int32) : Array(String)
+  src = IMPLICIT_HEAD + "  #{line}\n  nil\nend\n"
+  labels = [] of String
+  with_client({"src/i.cr" => src}, PRELUDE_FILES) do |c|
+    u = c.open("src/i.cr")
+    r = c.request("textDocument/completion", {textDocument: {uri: u}, position: c.pos("src/i.cr", line, shift)})
+    labels = r["items"].as_a.map(&.["label"].as_s)
+  end
+  labels
+end
+
+describe "implicit-receiver completion" do
+  it "completes the block argument after &." do
+    got = complete_line("a = items.map(&.)", 16)
+    got.should contain("name")
+    got.should contain("rank")
+    got.should_not contain("each") # not Array's methods (the enclosing call)
+    complete_line("b = items.map(&.na)", 18).should eq ["name"]
+    got = complete_line("c = items.map(&.name.)", 21)
+    got.should contain("upcase")
+    got.should_not contain("rank")
+  end
+
+  it "completes the case subject after when ." do
+    complete_line("case s\n  when .\n    1\n  end", 15).should contain("upcase")
+  end
+end

@@ -23,4 +23,12 @@ vim.wait(400)
 local items, ms = req("textDocument/completion", { textDocument = td, position = { line = 46, character = 28 } })
 local ls = {} for i, it in ipairs(items.items) do if i <= 6 then table.insert(ls, it.label) end end
 print(("complete items.map(&.label).first. %.1fms: %s"):format(ms, table.concat(ls, " ")))
+-- `&.|`: the block argument (Item), typed one character at a time
+vim.api.nvim_buf_set_lines(0, 46, 47, false, { "  names = items.map(&)" })
+vim.wait(400)
+vim.api.nvim_buf_set_text(0, 46, 21, 46, 21, { "." })
+vim.wait(400)
+items, ms = req("textDocument/completion", { textDocument = td, position = { line = 46, character = 22 } })
+ls = {} for i, it in ipairs(items.items) do if i <= 6 then table.insert(ls, it.label) end end
+print(("complete items.map(&.| %.1fms: %s"):format(ms, table.concat(ls, " ")))
 H.finish()

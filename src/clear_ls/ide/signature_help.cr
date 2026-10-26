@@ -71,7 +71,7 @@ module ClearLS::IDE
       tree = Syntax::Parser.new.parse(patched)
       state = FileState.new(@state.id, @state.uri, @state.revision ^ 0x4000_0000_0000_0000_u64, @state.version, tree)
       bodies = Bodies.new(state)
-      body, inf = @typing.infer_at(state, bodies, ctx.open_paren) || return nil
+      body, inf = @typing.infer_at(state, bodies, ctx.open_paren, cache: false) || return nil
       call = body.exprs.find { |e| e.kind.call? && e.name_range.try(&.start) == ctx.name_start } || return nil
       {call, inf}
     end

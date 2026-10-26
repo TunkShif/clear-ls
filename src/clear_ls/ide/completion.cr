@@ -67,16 +67,29 @@ module ClearLS::IDE
     private def members(text : String, start : UInt32, offset : UInt32, prefix : String) : Array(CompletionItem)
       patched, at = patch(text, start, offset, PLACEHOLDER)
       call_node, state = patched_node(patched, at)
-      return [] of CompletionItem unless call_node
-      recv_node = call_node.field(Syntax::Field::Receiver) || return [] of CompletionItem
-      recv_t = receiver_type(state, recv_node) || return [] of CompletionItem
-      method_items(recv_t, prefix)
+      return [] of CompletionItem unless call_node && state
+      recv_t = if recv_node = call_node.field(Syntax::Field::Receiver)
+                 receiver_type(state, recv_node)
+               elsif call_node.kind.implicit_object_call?
+                 # `&.|` / `when .|`: the block argument or case subject.
+                 implicit_receiver_type(state, call_node)
+               end
+      recv_t ? method_items(recv_t, prefix) : [] of CompletionItem
+    end
+
+    private def implicit_receiver_type(state : FileState, call : Syntax::Node) : Types::TyId?
+      bodies = Bodies.new(state)
+      _, inf = @typing.infer_at(state, bodies, call.start_byte, cache: false) || return nil
+      body = bodies.at(call.start_byte) || return nil
+      expr = body.exprs.find { |e| e.range == call.range && e.kind.call? } || return nil
+      t = inf.implicit_receiver_type(expr.id) || return nil
+      @typing.table.unknown?(t) ? nil : t
     end
 
     # Type of the receiver expression in the patched copy.
     private def receiver_type(state : FileState, recv : Syntax::Node) : Types::TyId?
       bodies = Bodies.new(state)
-      _, inf = @typing.infer_at(state, bodies, recv.start_byte) || return nil
+      _, inf = @typing.infer_at(state, bodies, recv.start_byte, cache: false) || return nil
       body = bodies.at(recv.start_byte) || return nil
       expr = body.exprs.find { |e| e.range == recv.range && !e.kind.seq? } || return nil
       t = inf.type_of(expr.id)
@@ -301,7 +314,7 @@ module ClearLS::IDE
       if state
         bodies = Bodies.new(state)
         if body = bodies.at(at)
-          _, inf = @typing.infer_at(state, bodies, at) || {nil, nil}
+          _, inf = @typing.infer_at(state, bodies, at, cache: false) || {nil, nil}
           with_self = inf.try(&.with_self_at(at))
           body.visible_bindings(at).each do |b|
             next unless b.name.starts_with?(prefix) && b.name != PLACEHOLDER && seen.add?(b.name)
@@ -388,16 +401,30 @@ module ClearLS::IDE
       tree = Syntax::Parser.new.parse(patched)
       state = FileState.new(@state.id, @state.uri, @state.revision ^ 0x8000_0000_0000_0000_u64, @state.version, tree)
       leaf = tree.root.descendant(at, at + 1)
-      # The placeholder is the method name of the nearest call above it.
+      # The placeholder is the method name of the nearest call above it
+      # (`implicit_object_call` for `&.|` and `when .|`).
       call = leaf
       depth = 0
       while (c = call) && depth < 4
-        break if (c.kind.call? || c.kind.assign_call?) && c.field(Syntax::Field::Method).try(&.start_byte) == at
+        break if placeholder_call?(c, at)
         call = c.parent
         depth += 1
       end
-      call = nil if call && !(call.kind.call? || call.kind.assign_call?)
+      # No match: don't fall back to an unrelated enclosing call (for
+      # `xs.map(&.|)` that was `xs.map`, offering Array's methods).
+      call = nil if call && !placeholder_call?(call, at)
       {call, state}
+    end
+
+    # Is *n* a call whose method name is the placeholder at *at*? The
+    # method token of an `implicit_object_call` includes its dot.
+    private def placeholder_call?(n : Syntax::Node, at : UInt32) : Bool
+      start = n.field(Syntax::Field::Method).try(&.start_byte) || return false
+      if n.kind.implicit_object_call?
+        start == at - 1
+      else
+        (n.kind.call? || n.kind.assign_call?) && start == at
+      end
     end
   end
 end

@@ -29,8 +29,13 @@ module ClearLS::IDE
     end
 
     # Inference for the body containing *offset* in *state*.
-    def infer_at(state : FileState, bodies : Bodies, offset : UInt32) : {HIR::Body, Types::Infer}?
+    #
+    # *cache*: false for throwaway patched copies (completion, signature
+    # help). They share the real file's id and a derived revision, so two
+    # different patches of one revision would hit each other's results.
+    def infer_at(state : FileState, bodies : Bodies, offset : UInt32, cache = true) : {HIR::Body, Types::Infer}?
       body = bodies.at(offset) || return nil
+      return {body, run(state, body)} unless cache
       key = {state.id, state.revision, body.range.start}
       inf = @results[key] ||= run(state, body)
       {body, inf}
