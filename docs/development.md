@@ -50,6 +50,11 @@ See [tools/README.md](../tools/README.md): analysis probes (`make probes`),
 headless Neovim checks (`make nvim-check`), an LSP timing script, and a
 type-regression diff.
 
+**Language parity:** `make bin/probes/type_marks && tools/book_diff.py`
+compares clear-ls with the compiler on the book fixtures; it prints
+nothing but per-file counts when there is no mismatch. Run it next to the
+regression diff below when changing inference.
+
 **Inference regression workflow** (it caught most bugs). Build
 `types_dump` at the old commit in a separate `git worktree`, never with
 `git checkout REV -- src`. Dump the repo and the stdlib before and after
@@ -77,8 +82,9 @@ paths. Per-phase numbers are in the roadmap.
 |---|---|
 | Startup index | 0.6–0.75 s (≈460 files: prelude closure + shards + workspace) |
 | Stdlib | 1646 files parse in 2.3 s single-thread; items 0.35 s; 15k defs to HIR 0.33 s |
-| Inference coverage (`coverage`) | ~90% this repo, ~60% stdlib; repo defs 0.5 s cold; worst stdlib def 43 ms cold |
+| Inference coverage (`coverage`) | ~94% this repo, ~72% stdlib; repo defs 0.75 s cold, stdlib sample 3.4 s; worst stdlib def ~70 ms cold |
 | Completion / hover | 1–3 ms / 0.1–0.3 ms warm; semantic tokens ~4 ms on a 520-line file |
 | Compiler check | ~1.9 s this repo, ~0.7 s small project; hover during a check: median 0.2 ms |
 | DefMap rebuild | ~4 ms; with compiler facts 5–7 ms |
 | Grammar (`make grammar-check`) | 1635/1646 stdlib files parse cleanly |
+| Book parity (`tools/book_diff.py`) | 552 markers: 527 match, 25 accepted, 0 mismatches |

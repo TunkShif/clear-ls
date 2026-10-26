@@ -40,6 +40,16 @@ changing it. Grammar quirks are in
 
 ## Inference
 
+- `lib` and `out` are reserved words in Crystal code too (not just as
+  params): `lib = ...`, `out = [] of X` fail to parse in clear-ls's own
+  source.
+- Summary shapes: over the per-def cap, return summaries must keep the
+  caller's block value (else `yield` is Pending and `if v; yield v; end`
+  becomes Nil) and yield summaries the argument types (Phase 8, O4).
+- The book fixtures reuse class names across files; `book_diff.py`
+  indexes each one alone. Ad-hoc probes that put several in one project
+  merge their members.
+
 - Closure blocks re-enter `Enter` each iteration and reset block locals;
   `own_scope?` distinguishes `&.foo` blocks (no scope) from real ones.
 - The compiler narrows only locals (`if @a` leaves `@a` nilable); clear-ls

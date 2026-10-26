@@ -511,6 +511,33 @@ Exit criterion: no *wrong* entries left in book-gaps.md; each remaining
 difference is either an accepted deviation (marked `# cls:` in the
 fixtures) or listed with a reason.
 
+Status: done (exit criterion met). Every marker in the 22 book fixtures
+matches the compiler or is an accepted deviation: 527 match + 25
+accepted of 552 (the original 290 book markers: 275 + 15; 262 markers in
+the 11 fixtures added during the phase: 252 + 10). The 25 deviations
+are the design decisions in book-gaps.md (exact unions, tuple unions,
+declared returns), defs analysed without a call (`*args`, generic
+ivars), compiler-only rules (lib-fun ivars, `out` ivars), and grammar or
+macro limits (`*{…}` literal splats, `spawn`, iterator generics). Six
+older inference bugs found on the way are listed as O1–O7.
+
+Measurements (`--release`, vs Phase 7 end): typed locals and block args
+93.6% in this repo (89.7%), 71.6% in the stdlib (59.5%); regression diff
+repo 0 regressed / 106 improved, stdlib 4 / 627 (the 4 were wrong
+`NoReturn`/`Nil` answers, now unknown). Inference time over the stdlib
+sample 3.36 s (2.65 s, +27%), this repo 0.74 s (0.60 s): more summary
+shapes (exact splat and block-value shapes, abstract dispatch,
+captured-local re-solves), and more code is now analysed instead of
+skipped. Warm hover and completion unchanged in Neovim (0.1–0.3 ms /
+2–7 ms); semantic tokens 4.8 ms on a 635-line file. `make spec`: 208
+examples.
+
+Not yet: hover for `x : T` locals reads the flow type after
+`y : Bar? = nil` as `Nil` by design (decision 3); editing an `@x = v`
+line in a def body rebuilds the DefMap (`Origin::Assigned` items are
+declarations); captured-local detection resolves block calls a second
+time (bounded by a name pre-check).
+
 ### Phase 9 — workspace identity
 
 - `DefId`-keyed reference index, incrementally maintained.
