@@ -552,6 +552,29 @@ describe "Types::Infer control flow" do
     type_at(r, "x", "x # out").should eq "Int32 | String | Nil"
   end
 
+  it "types loops and block calls from their break values" do
+    r = infer(<<-CR)
+      def m(c : Bool, xs : Array(Int32))
+        a = while c
+              break "s" if c
+              break 1
+            end
+        b = while true
+              break 1
+            end
+        d = while c
+              break 1, "s"
+            end
+        e = xs.each { |x| break "s" if c }
+        f = xs.map { |x| break "s" if c; x }
+      end
+      CR
+    {"a" => "Int32 | String | Nil", "b" => "Int32", "d" => "{Int32, String}?",
+     "e" => "String?", "f" => "Array(Int32) | String"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+
   it "flows outer reassignments through call blocks" do
     r = infer(<<-CR)
       def m(xs : Array(String))

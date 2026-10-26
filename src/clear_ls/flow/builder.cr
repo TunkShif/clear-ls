@@ -13,10 +13,12 @@ module ClearLS::Flow
   #   unreachable, `case/when` without `else` yields Nil. `select` is a
   #   case without subject whose actions don't narrow.
   # - `while`/`until`: loop head with the condition; `break` → after,
-  #   `next` → head.
+  #   `next` → head. The loop's value joins its `break` values and Nil
+  #   (unless the condition is literally `true`).
   # - call blocks and proc literals: closure bodies that run 0..n times,
   #   `Enter` binds their parameters at each iteration; `next` contributes
-  #   to the block's value, `break` leaves the call, `return` leaves the def
+  #   to the block's value, `break` leaves the call (its value joins the
+  #   call's), `return` leaves the def
   #   (or the proc literal).
   # - `begin`/`rescue`/`else`/`ensure`: blocks inside the body have the
   #   rescue dispatch block as `handler`; `ensure` is analysed on normal
@@ -29,7 +31,10 @@ module ClearLS::Flow
     end
 
     # Targets for jumps inside a loop or closure body.
-    private record LoopCtx, break_to : BlockId, next_to : BlockId, value_owner : HIR::ExprId?, proc : Bool
+    # *value_owner* collects `next` values (a block's value); *break_owner*
+    # collects `break` values (the `while`, or the call a block belongs to).
+    private record LoopCtx, break_to : BlockId, next_to : BlockId, value_owner : HIR::ExprId?, proc : Bool,
+      break_owner : HIR::ExprId? = nil
 
     @blocks = [] of Block
     @merges = {} of HIR::ExprId => Array(Source)
@@ -274,18 +279,33 @@ module ClearLS::Flow
       @cur = head
       body_b = new_block
       after = new_block
-      if cond
+      # `while true` only exits through `break`: no Nil value, and without
+      # a break the code after it is unreachable.
+      endless = cond && endless_cond?(e, cond)
+      @merges[e.id] ||= [] of Source
+      if endless
+        goto(body_b)
+        block(after).fallback = head
+      elsif cond
         e.kind.until? ? lower_cond(cond, after, body_b) : lower_cond(cond, body_b, after)
+        add_source(e.id, Source.new(@cur, nil))
       else
         goto(body_b, after)
+        add_source(e.id, Source.new(@cur, nil))
       end
-      @loops << LoopCtx.new(after, head, nil, false)
+      @loops << LoopCtx.new(after, head, nil, false, e.id)
       @cur = body_b
       body.try { |b| lower(b) }
       goto(head)
       @loops.pop
       @cur = after
       eval(e.id)
+    end
+
+    # Only `while true` (the compiler does not special-case `until false`).
+    private def endless_cond?(loop : HIR::Expr, cond : HIR::ExprId) : Bool
+      c = @body.expr(cond)
+      loop.kind.while? && c.kind.literal? && c.syntax.true_node?
     end
 
     # `a && b` / `a || b` as a value: the value is the falsy (truthy) part
@@ -331,6 +351,8 @@ module ClearLS::Flow
           finish(Terminator::Return, [CFG::EXIT])
         end
       when .break?
+        # The value joins the loop's (or the block's call's) value.
+        ctx.try(&.break_owner).try { |o| add_source(o, Source.new(@cur, value)) }
         goto(ctx ? ctx.break_to : CFG::EXIT)
       else # next
         if ctx
@@ -356,7 +378,7 @@ module ClearLS::Flow
       goto(head, after)
       @cur = head
       emit(OpKind::Enter, blk_id)
-      @loops << LoopCtx.new(after, done, blk_id, owner.kind.proc_literal?)
+      @loops << LoopCtx.new(after, done, blk_id, owner.kind.proc_literal?, owner.kind.proc_literal? ? nil : owner.id)
       blk.children.each { |c| lower(c) }
       add_source(blk_id, Source.new(@cur, blk.children.last?))
       goto(done)

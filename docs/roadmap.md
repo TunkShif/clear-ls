@@ -454,6 +454,9 @@ Steps (one commit each, wrong results first):
 4. **`break` values** (E1–E3). `while`/`until` value = breaks + `Nil`
    unless the condition is `true`; a block's `break` joins the call's
    type.
+   *Done:* book 238/290 (+5), new `loops.cr` 17/17 (2 accepted); regression
+   diff repo 0/0, stdlib 0 regressed, 2 changed (`while true` loops that
+   only `return`, now not nilable); coverage unchanged.
 5. **Procs, blocks, splats** (F1–F5, G1–G6). Proc return annotations;
    `&proc` values; method procs; `-> _` block returns; `with … yield`;
    splat params, splatted arguments and splats in tuple, array and

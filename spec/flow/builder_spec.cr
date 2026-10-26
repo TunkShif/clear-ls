@@ -74,12 +74,20 @@ describe Flow::Builder do
   end
 
   it "loops back from while bodies and call blocks" do
-    cfg, body, src = cfg_of("def m(xs)\n  while true\n    x = 1\n  end\n  xs.each { |y| y }\nend")
+    cfg, body, src = cfg_of("def m(xs, c)\n  while c\n    x = 1\n  end\n  xs.each { |y| y }\nend")
     back = ->(b : Flow::Block) { b.preds.any? { |p| p.value > b.id.value } }
-    while_head = cfg.blocks.find! { |b| b.test.try { |t| text(body, src, t.cond) == "true" } }
+    while_head = cfg.blocks.find! { |b| b.test.try { |t| text(body, src, t.cond) == "c" } }
     back.call(while_head).should be_true
     enter = cfg.blocks.find! { |b| b.ops.any?(&.kind.enter?) }
     back.call(enter).should be_true
+  end
+
+  it "exits `while true` only through break" do
+    cfg, body, src = cfg_of("def m\n  while true\n    break\n  end\n  live\nend")
+    reachable_evals(cfg, body, src).should contain "live"
+    cfg.blocks.compact_map(&.test).should be_empty
+    cfg, body, src = cfg_of("def m\n  while true\n    x = 1\n  end\n  dead\nend")
+    reachable_evals(cfg, body, src).should_not contain "dead"
   end
 
   it "routes exceptions to rescue clauses and runs ensure after the join" do

@@ -38,7 +38,8 @@ accepted deviation. Of the 98 mismatches, 25 are wrong results and the
 rest are unknown or wider than the compiler's type.
 
 Progress (book fixtures; the second number counts the fixtures added
-during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`):
+during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
+`loops.cr`; their accepted deviations are counted as matches):
 
 | After | Match | Wrong left |
 |---|---|---|
@@ -46,6 +47,7 @@ during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`):
 | step 1 (A, B) | 202/290 + 19/19 | 21 |
 | step 2 (C) | 211/290 + 46/47 | 19 |
 | step 3 (D) | 233/290 + 103/104 | 10 |
+| step 4 (E) | 238/290 + 118/121 | 7 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
@@ -130,9 +132,9 @@ hit them:
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| E1 | `x = while …; break "four"; break 3; end` | `Int32 \| String \| Nil` | `Nil` | wrong: `break` values are dropped |
-| E2 | `while true; break 1; end` | `Int32` | `Nil` | wrong: `while true` has no `Nil` exit; without `break` it is `NoReturn` |
-| E3 | `loop { break 1 }`, `[1].each { break "s" }` | `Int32`, `String?` | `Nil` | wrong: a block's `break` value joins the call's type |
+| E1 | `x = while …; break "four"; break 3; end` | `Int32 \| String \| Nil` | `Nil` | **fixed (step 4)**; was wrong: `break` values were dropped |
+| E2 | `while true; break 1; end` | `Int32` | `Nil` | **fixed (step 4)**: only `while true` (the compiler does not special-case `until false`) |
+| E3 | `loop { break 1 }`, `[1].each { break "s" }` | `Int32`, `String?` | `Nil` | **fixed (step 4)**; a block's `break` value joins the call's type |
 
 ### F. Procs and blocks
 
@@ -227,6 +229,7 @@ These came up in the comparison but are not about inference. They stay in
 | Where | clear-ls | Compiler | Why |
 |---|---|---|---|
 | `flow.cr:59` | `Int32 \| String` once | `Int32`, then `Int32 \| String` | The compiler prints once per loop fixed-point step; clear-ls shows the joined fixed point |
+| `loops.cr` `forever` | `NoReturn` | not typed | A def whose body is `while true` without `break`: the compiler doesn't instantiate code after it; clear-ls reports `NoReturn` |
 | `primitives.cr:85` | `spawn { }` unknown | `Fiber` | `def spawn` is inside `{% begin %}` with a macro in its parameter list; macro bodies are not modelled (N) |
 
 ## Decisions

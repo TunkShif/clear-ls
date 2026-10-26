@@ -590,7 +590,7 @@ module ClearLS::Types
            when .call?         then visit_call(e)
            when .if?, .unless?, .case?, .begin?, .and?, .or?
              merge_type(id)
-           when .while?, .until? then nil_t
+           when .while?, .until? then merge_type(id)
            when .seq?          then e.children.last?.try { |c| operand(c) } || nil_t
            when .not?          then @table.named!("Bool")
            when .collection?   then collection(e)
@@ -1252,6 +1252,16 @@ module ClearLS::Types
     # -- calls --------------------------------------------------------------------
 
     private def visit_call(e : HIR::Expr) : TyId
+      t = visit_call_value(e)
+      # `break v` in the call's block: v is also a possible value.
+      if cfg.merges.has_key?(e.id)
+        b = merge_type(e.id)
+        return join(t, b) unless b == @table.no_return
+      end
+      t
+    end
+
+    private def visit_call_value(e : HIR::Expr) : TyId
       recv_t = e.receiver.try { |r| operand(r) }
       args = e.children.map { |c| operand(c) }
       block_ret = e.block.try { |b| @types[b]? }
