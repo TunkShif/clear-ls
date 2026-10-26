@@ -67,6 +67,24 @@ describe "compiler diagnostics" do
     end
   end
 
+  it "republishes known problems when a checked file is reopened" do
+    with_client({
+      "shard.yml" => "name: x\ntargets:\n  x:\n    main: src/x.cr\n",
+      "src/x.cr"  => "1.nope\n",
+    }, compiler: COMPILER) do |c|
+      c.wait_compiler
+      count = ->{ c.notifications("textDocument/publishDiagnostics").count { |n| n["uri"] == c.uri("src/x.cr") } }
+      count.call.should eq 1
+      # Neovim's `:e`: the client drops the diagnostics on didClose.
+      u = c.open("src/x.cr")
+      c.notify("textDocument/didClose", {textDocument: {uri: u}})
+      c.open("src/x.cr")
+      c.wait_compiler
+      count.call.should eq 3
+      c.diagnostics("src/x.cr").not_nil!.size.should eq 1
+    end
+  end
+
   it "stays quiet when disabled" do
     with_client({"a.cr" => "1.nope\n"}) do |c|
       c.open("a.cr")
@@ -204,6 +222,23 @@ describe "compiler facts" do
       # Generated method: definition goes to the generating code.
       defn = c.request("textDocument/definition", {textDocument: {uri: u}, position: c.pos("src/x.cr", "b.width", 2)})
       defn[0]["range"]["start"].should eq JSON.parse(%({"line":8,"character":2})) # the {% for %}
+    end
+  end
+
+  it "asks the client to refresh inlay hints and tokens when facts change" do
+    caps = {inlayHint: {refreshSupport: true}, semanticTokens: {refreshSupport: true}}
+    with_client(files, PRELUDE_FILES, compiler: COMPILER, workspace_caps: caps) do |c|
+      c.open("src/x.cr")
+      c.wait_compiler
+      c.server_messages("workspace/inlayHint/refresh").size.should eq 1
+      c.server_messages("workspace/semanticTokens/refresh").size.should eq 1
+      c.server_messages("workspace/inlayHint/refresh")[0]["id"]?.should_not be_nil
+    end
+    # Not advertised: nothing sent.
+    with_client(files, PRELUDE_FILES, compiler: COMPILER) do |c|
+      c.open("src/x.cr")
+      c.wait_compiler
+      c.server_messages("workspace/inlayHint/refresh").should be_empty
     end
   end
 end

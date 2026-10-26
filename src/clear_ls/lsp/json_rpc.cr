@@ -90,6 +90,12 @@ module ClearLS::LSP
       end
     end
 
+    # A server-to-client request without params; the server ignores
+    # responses.
+    def self.request(id : String, method : String) : String
+      {jsonrpc: "2.0", id: id, method: method}.to_json
+    end
+
     def self.notification(method : String, params) : String
       JSON.build do |json|
         json.object do

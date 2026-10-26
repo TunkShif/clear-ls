@@ -14,7 +14,7 @@ class FeatureClient
   # requires them all.
   # *compiler*: `initializationOptions.compiler`; the real compiler is off
   # unless a spec asks for it.
-  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false})
+  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String)
     @root = File.tempname("clear-ls-feat")
     files.each do |path, text|
       full = File.join(@root, path)
@@ -32,7 +32,7 @@ class FeatureClient
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
     @server.project_factory = ->(root : String) { Workspace::Project.new(root, paths, std_dir, nil, "x86_64-unknown-linux-gnu") }
     @server.index_workers = 1
-    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}}, initializationOptions: {compiler: compiler}})
+    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler}})
     notify("initialized", {} of String => String)
   end
 
@@ -82,11 +82,16 @@ class FeatureClient
 
   # Server-initiated notifications with *method*, oldest first.
   def notifications(method : String) : Array(JSON::Any)
+    server_messages(method).map(&.["params"])
+  end
+
+  # Server-initiated messages (notifications and requests) with *method*.
+  def server_messages(method : String) : Array(JSON::Any)
     t = Transport.new(IO::Memory.new(@out.to_s), IO::Memory.new)
     found = [] of JSON::Any
     while body = t.read
       msg = JSON.parse(body)
-      found << msg["params"] if msg["method"]? == method
+      found << msg if msg["method"]? == method
     end
     found
   end
@@ -118,8 +123,8 @@ class FeatureClient
   end
 end
 
-def with_client(files, stdlib = nil, compiler = {enabled: false}, &)
-  c = FeatureClient.new(files, stdlib, compiler)
+def with_client(files, stdlib = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, &)
+  c = FeatureClient.new(files, stdlib, compiler, workspace_caps)
   yield c
 ensure
   c.try(&.cleanup)

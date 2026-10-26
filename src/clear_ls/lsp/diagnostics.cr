@@ -92,14 +92,37 @@ module ClearLS::LSP
         @entry_facts.values.flat_map(&.methods).uniq,
         @entry_facts.values.flat_map(&.ivars).uniq, digests)
       idx = @index || return
+      changed = idx.facts != merged
       idx.facts = merged
       Log.info { "compiler facts: #{merged.methods.size} methods, #{merged.ivars.size} ivars" }
+      # Hints and tokens computed before the facts may have been unknown.
+      refresh_views if changed
     end
 
-    # didOpen: check the programs containing *uri* once.
+    @refresh_id = 0
+
+    # Asks the client to re-request inlay hints and semantic tokens
+    # (when it advertised support); their answers depend on the index.
+    private def refresh_views : Nil
+      {"inlayHint" => "workspace/inlayHint/refresh", "semanticTokens" => "workspace/semanticTokens/refresh"}.each do |cap, method|
+        next unless @client_capabilities.dig?("workspace", cap, "refreshSupport").try(&.as_bool?)
+        @refresh_id += 1
+        @transport.write(JsonRpc.request("clear-ls-refresh-#{@refresh_id}", method))
+      end
+    end
+
+    # didOpen: check the programs containing *uri* once. Programs checked
+    # already are not rerun, but their last problems for the file are
+    # published again: clients drop a document's diagnostics on close
+    # (Neovim's `:e` is didClose + didOpen).
     private def compiler_opened(uri : String) : Nil
       entries = entries_for(uri) || return
-      check_entries(entries.reject { |e| @checked.includes?(e) })
+      fresh = entries.reject { |e| @checked.includes?(e) }
+      check_entries(fresh)
+      if fresh.size < entries.size && (checker = @checker) && (path = VFS.path_for(uri))
+        problems = checker.problems(path)
+        publish_problems(path, problems) unless problems.empty?
+      end
     end
 
     # didSave / disk change of *uri*: everything checked before is stale.

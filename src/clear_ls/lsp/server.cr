@@ -151,6 +151,7 @@ module ClearLS::LSP
       # Byte offsets are native for us; prefer them, then utf-32, else utf-16.
       @encoding = [PositionEncoding::UTF8, PositionEncoding::UTF32].find { |e| encodings.includes?(e) } || PositionEncoding::UTF16
       @root = workspace_root(params)
+      @client_capabilities = params["capabilities"]? || @client_capabilities
       read_compiler_options(params)
       @state = State::Initialized
 
@@ -168,6 +169,7 @@ module ClearLS::LSP
     end
 
     @root : String = Dir.current
+    @client_capabilities = JSON::Any.new({} of String => JSON::Any)
 
     private def workspace_root(params : JSON::Any) : String
       if folders = params["workspaceFolders"]?.try(&.as_a?)

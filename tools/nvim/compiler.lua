@@ -11,9 +11,18 @@ local su0 = vim.uri_from_fname(H.work .. "/src/shapes.cr")
 local sh0 = req("textDocument/hover", { textDocument = { uri = su0 }, position = { line = 18, character = 5 } })
 print("hover @label before check: " .. (sh0 and sh0.contents.value or "nil"):gsub("\n", " | "))
 -- 2. diagnostics arrive asynchronously
+vim.lsp.inlay_hint.enable(true, { bufnr = 0 })
 vim.wait(15000, function() return #vim.diagnostic.get(0) > 0 end)
 for _, d in ipairs(vim.diagnostic.get(0)) do print(("[%.0fms] diagnostic %d:%d sev=%d %s"):format(ms(), d.lnum + 1, d.col + 1, d.severity, d.message)) end
 vim.wait(500)
+-- 2b. facts made `w`/`p` typed: the server asked Neovim to refresh hints
+local shown = {}
+for _, ih in ipairs(vim.lsp.inlay_hint.get({ bufnr = 0 })) do shown[#shown + 1] = (ih.inlay_hint.position.line + 1) .. ih.inlay_hint.label end
+print("inlay hints after check (refreshed): " .. table.concat(shown, " "))
+-- 2c. `:e` (didClose + didOpen) keeps the diagnostic
+vim.cmd("edit")
+vim.wait(1000)
+print("diagnostics after :e: " .. #vim.diagnostic.get(0))
 -- 3. compiler facts: generated methods and ivar types
 print("hover w after check: " .. hover(11, 0))
 print("hover p after check: " .. hover(12, 0))
