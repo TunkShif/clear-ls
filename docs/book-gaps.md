@@ -40,7 +40,8 @@ rest are unknown or wider than the compiler's type.
 Progress (book fixtures; the second number counts the fixtures added
 during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
 `loops.cr`, `procs.cr`, `splats.cr`, `closures.cr`, `ivars.cr`, `narrowing.cr`,
-`union_shape.cr`; their accepted deviations are counted as matches):
+`union_shape.cr`, `c_bindings.cr`; their accepted deviations are counted as
+matches):
 
 | After | Match | Wrong left |
 |---|---|---|
@@ -54,6 +55,7 @@ during this phase: `autocast.cr`, `enums.cr`, `primitives.cr`,
 | step 7 (H, I) | 256/290 + 195/195 | 0 |
 | step 8 (J, K) | 267/290 + 228/228 | 0 |
 | step 9 (M) | 271/290 + 9 accepted; 242/242 | 0 |
+| step 10 (L) | 275/290 + 15 accepted; 262/262 (10 accepted) | 0 |
 
 Entries marked **fixed (step N)** stay in the tables as a record.
 
@@ -205,8 +207,8 @@ assigned only in one branch of `initialize` (it doesn't make it nilable).
 
 | ID | Example | Compiler | clear-ls | Kind |
 |---|---|---|---|---|
-| L1 | `C::S.new.a`, `C::U.new.f` (lib struct/union fields) | field type | `?` | unknown |
-| L2 | `C.strlen("a")` (`fun … : C::Size`), `C.errno` (`$errno : Int32`) | `UInt64`, `Int32` | `?` | unknown |
+| L1 | `C::S.new.a`, `C::U.new.f` (lib struct/union fields) | field type | `?` | **fixed (step 10)**; also setters and `pointerof(s).value.x` |
+| L2 | `C.strlen("a")` (`fun … : C::Size`), `C.errno` (`$errno : Int32`) | `UInt64`, `Int32` | `?` | **fixed (step 10)**: by name and arity (C calls convert arguments); `Void` → Nil; variadic funs; `out x` declares x as the pointee |
 
 ### M. Union shape
 

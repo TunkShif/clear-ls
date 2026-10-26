@@ -152,6 +152,11 @@ module ClearLS::Flow
       end
     end
 
+    private def out_arg?(c : HIR::ExprId) : Bool
+      x = @body.expr(c)
+      x.kind.other? && x.syntax.out?
+    end
+
     # A local assignment target, also as `*rest`.
     private def target_local?(t : HIR::ExprId) : Bool
       x = @body.expr(t)
@@ -160,7 +165,8 @@ module ClearLS::Flow
 
     private def lower_generic(e : HIR::Expr) : Nil
       e.receiver.try { |r| lower(r) }
-      e.children.each { |c| lower(c) }
+      # `out x` arguments write x (no read before the call).
+      e.children.each { |c| lower(c) unless out_arg?(c) }
       e.named_args.each { |(_, v)| lower(v) }
       e.block.try do |b|
         if @body.expr(b).syntax.block_argument?

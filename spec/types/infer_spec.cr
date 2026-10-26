@@ -609,6 +609,36 @@ describe "Types::Infer union shape" do
   end
 end
 
+describe "Types::Infer C bindings" do
+  it "types lib funs, variables, struct fields, and out arguments" do
+    r = infer(<<-CR)
+      lib L
+        alias Size = UInt64
+        struct Pt
+          x : Int32
+          nxt : Pt*
+        end
+        $err : Int32
+        fun len(s : UInt8*) : Size
+        fun fill(p : Pt*) : Void
+        fun pf(fmt : UInt8*, ...) : Int32
+      end
+      def m
+        a = L.len("s")
+        b = L.err
+        c = L.fill(out pt)
+        d = pt.x
+        e = pt.nxt
+        f = L.pf("%d", 1, 2)
+      end
+      CR
+    {"a" => "UInt64", "b" => "Int32", "c" => "Nil", "pt" => "L::Pt", "d" => "Int32",
+     "e" => "Pointer(L::Pt)", "f" => "Int32"}.each do |name, ty|
+      type_of_local(r, name).should eq ty
+    end
+  end
+end
+
 describe "Types::Infer nil handling" do
   it "handles `|| return`, `|| default`, `try`, `not_nil!`" do
     r = infer(<<-CR)

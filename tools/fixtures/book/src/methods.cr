@@ -1,11 +1,11 @@
 require "./h"
 def sum(*elements)
-  __t(elements)
+  __t(elements) # cls: Tuple  inside the def: one compiler type per call (see splats.cr)
   elements
 end
 sum 1, 2, 3
 def opts(x, **other)
-  __t(other)
+  __t(other) # cls: NamedTuple  inside the def: one compiler type per call
   other
 end
 opts 1, y: 2, z: "s"
@@ -109,7 +109,7 @@ pr = ->(x : Int32) { x * 2 }
 __t([1].map(&pr))
 __t([{1, "a"}].map { |(a, b)| b })
 __t([{1, "a"}].map { |a, b| b })
-__t([1].each_with_index.map { |x, i| i })
+__t([1].each_with_index.map { |x, i| i }) # cls: Iterator::MapIterator(?, Int32, ?)  iterator chain generics (book-gaps N)
 def with_y(&)
   with "str" yield
 end

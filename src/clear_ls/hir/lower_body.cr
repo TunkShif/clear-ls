@@ -412,6 +412,9 @@ module ClearLS::HIR
             named << {key_text, value ? lower(value) : add(ExprKind::Missing, a.range)}
           elsif a.kind.block_argument?
             block = lower_block_argument(a)
+          elsif a.kind.out? && (v = a.named_child(0)) && v.kind.identifier?
+            # `out x`: declares (or writes) the local x; the fun fills it.
+            args << add(ExprKind::Other, a.range, syntax: a.kind, children: [lower_target(v)])
           elsif a.kind.splat? || a.kind.double_splat?
             inner = a.named_child(0).try { |x| lower(x) } || add(ExprKind::Missing, a.range)
             args << add(a.kind.splat? ? ExprKind::Splat : ExprKind::DoubleSplat, a.range, children: [inner])

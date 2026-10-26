@@ -1727,6 +1727,10 @@ module ClearLS::Types
         return r
       end
 
+      if (lt = lib_member_call(receiver_type_of(e), name, e))
+        return lt
+      end
+
       # `obj.@x`: the receiver's ivar.
       if name.starts_with?('@') && recv_t
         ivar_owner = @table[recv_t].def_id
@@ -1795,6 +1799,63 @@ module ClearLS::Types
       args = tparams.map { |p| bindings[p]? }
       return inst if args.any?(&.nil?)
       @table.named(def_id, args.compact)
+    end
+
+    private def receiver_type_of(e : HIR::Expr) : TyId?
+      e.receiver.try { |r| operand(r) }
+    end
+
+    # Calls into C bindings (c_bindings/*.md): `Lib.fun(...)` returns the
+    # fun's declared type (`Void` → Nil), `Lib.var` / `Lib.var = v` a
+    # `$var`, and `struct.field` / `struct.field = v` on lib structs and
+    # unions the field type. Arguments are not checked: C calls convert
+    # them implicitly (`to_unsafe`, numbers), and only the name and the
+    # arity matter (variadic funs take any extra).
+    private def lib_member_call(recv : TyId?, name : String, e : HIR::Expr) : TyId?
+      r = @table[recv || return nil]
+      if r.kind.metaclass? && (lt = @table[r.args[0]]).kind.named?
+        lib_id = lt.def_id.not_nil!
+        return nil unless map[lib_id].kind.lib?
+        base = name.rchop('=')
+        map[lib_id].members[base]?.try &.each do |site|
+          item = site.item
+          case item.kind
+          when .fun?
+            sig = item.signature || next
+            n = e.children.size
+            next unless n == sig.params.size || (sig.variadic && n >= sig.params.size)
+            # `out x` arguments: x is the pointee of the param's type.
+            e.children.each_with_index do |c, i|
+              ce = @body.expr(c)
+              next unless ce.kind.other? && ce.syntax.out? && (tgt = ce.children[0]?)
+              pt = sig.params[i]?.try(&.restriction).try { |r| @table[c_type(r, lib_id)] }
+              elem = pt && pt.kind.named? && map[pt.def_id.not_nil!].full_name == "Pointer" ? pt.args[0]? : nil
+              write_target(tgt, elem || @table.unknown)
+            end
+            ret = sig.return_type || return nil_t
+            return ret == "Void" ? nil_t : c_type(ret, lib_id)
+          when .c_var?
+            return c_type(item.detail || next, lib_id)
+          end
+        end
+        return nil
+      end
+      if r.kind.named?
+        owner = r.def_id.not_nil!
+        info = map[owner]
+        return nil unless info.kind.c_struct? || info.kind.c_union?
+        base = name.rchop('=')
+        info.members[base]?.try &.each do |site|
+          next unless site.item.kind.c_field?
+          return c_type(site.item.detail || next, info.namespace || owner)
+        end
+      end
+      nil
+    end
+
+    # A type written inside a lib (`Point*`, `Size`, `Int32 -> Int32`).
+    private def c_type(text : String, scope : Semantics::TypeId) : TyId
+      TypeExprParser.parse(text, @table, scope)
     end
 
     # The def this body belongs to (for `previous_def` and `super`).

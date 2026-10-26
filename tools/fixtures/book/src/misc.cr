@@ -106,7 +106,7 @@ when vv = Channel(Int32).new.receive?
   vv
 end
 __t(sel)
-__t(spawn { })
+__t(spawn { }) # cls: ?  def spawn is inside {% begin %} with a macro in its params (book-gaps N)
 __t(loop { break 1 })
 __t(1.tap { })
 __t(1.try { |v| v.to_s })

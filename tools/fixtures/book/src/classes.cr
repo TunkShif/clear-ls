@@ -20,8 +20,8 @@ class Person
     __t(@lucky_number)
     __t(@@count)
     __t(@from_cm)
-    __t(@from_lib)
-    __t(@out_v)
+    __t(@from_lib) # cls: ?  ivar rule 6 (lib fun result) is left to compiler facts (decision 5)
+    __t(@out_v) # cls: ?  ivar rule 7 (out) is left to compiler facts (decision 5)
     __t(self)
   end
   def init2(obj : Int64)

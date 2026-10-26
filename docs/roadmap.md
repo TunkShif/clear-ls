@@ -499,6 +499,11 @@ Steps (one commit each, wrong results first):
    types as values; `(A | B).class` display. Regression diff 0 regressed,
    repo +5, stdlib +26; coverage stdlib 71.0% (70.5%), +3% time.
 10. **C bindings** (L1–L2).
+    *Done:* new `c_bindings.cr` 20/20; book 275/290 + 15 accepted, so every
+    book example now matches or is an accepted deviation (all fixtures:
+    527 match + 25 accepted of 552). Regression diff 0 regressed, repo +5,
+    stdlib +31 (and 30 locals newly visible: `out` declares them);
+    coverage stdlib 71.6% (71.0%).
 11. **Verification and docs.** Book diff, coverage and regression diff,
     `make nvim-check`, roadmap and README.
 
