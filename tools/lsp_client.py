@@ -8,7 +8,9 @@ BIN = os.environ.get("CLEAR_LS_BIN", os.path.join(REPO, "bin", "clear-ls"))
 
 class Client:
     def __init__(self, root, compiler=False, init_options=None):
-        self.p = subprocess.Popen([BIN, "lsp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        # CLEAR_LS_ARGS: extra server flags, e.g. "--no-cache".
+        args = [BIN, "lsp"] + os.environ.get("CLEAR_LS_ARGS", "").split()
+        self.p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, cwd=root)
         self.root = root
         self.nid = 0

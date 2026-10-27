@@ -69,7 +69,7 @@ parse. Keeping every tree alive needs 282 MB GC heap with the binding's
 default Boehm allocator versus 17 MB heap with
 `-Dcrystal_tree_sitter_no_init` (libc malloc; RSS 297 MB vs 272 MB).
 Syntax trees for non-open files should be dropped after item lowering; the
-allocator choice is revisited in Phase 11.
+allocator choice is revisited in Phase 11 (kept: libc, step 8).
 
 ### Phase 1 — declarations and project model (done)
 
@@ -1049,6 +1049,25 @@ Steps (one commit each):
    39 ms; sweep 0 errors, 0 over 300 ms. `soak.py`/`sweep.py` turn the
    warm-up off (Phase 10 numbers are of a cold server). 0.10.5.
 8. **Allocator measurement.**
+   *Done:* keep `-Dcrystal_tree_sitter_no_init` (libc malloc). Same
+   commit built both ways (`make release CRYSTAL_FLAGS=` for Boehm),
+   Marten:
+
+   | | libc (kept) | Boehm |
+   |---|---|---|
+   | cold index (soak, `--no-cache`) | 0.82–0.84 s, 127–129 MB | 2.06 s, 110–112 MB |
+   | after 100 specs | 217–218 MB | 168–169 MB |
+   | after 100 specs + 10 searches | 237–244 MB | 258–263 MB |
+   | hover p99 during a cold search | 70–80 ms | 76–86 ms |
+   | cold start writing the cache (`warm.py`) | 857 ms | 2225 ms |
+   | warm start | 237–254 ms | 239 ms |
+   | RSS after background warm-up | 300 MB | 380 MB |
+
+   Boehm is lower only while specs are parsed and kept open, and loses
+   that once searches or the warm-up run; it is 2.5× slower to parse
+   (parallel workers contend on the GC lock). With the cache, cold
+   parsing happens once per change, but the first start and every
+   Crystal or clear-ls upgrade still pay it.
 9. **Verification and docs.** Soak, sweep, `make nvim-check`, README.
 
 Exit criteria: Marten warm start < 300 ms; the first references search
