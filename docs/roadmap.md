@@ -67,7 +67,7 @@ parse. Keeping every tree alive needs 282 MB GC heap with the binding's
 default Boehm allocator versus 17 MB heap with
 `-Dcrystal_tree_sitter_no_init` (libc malloc; RSS 297 MB vs 272 MB).
 Syntax trees for non-open files should be dropped after item lowering; the
-allocator choice is revisited in Phase 10.
+allocator choice is revisited in Phase 11.
 
 ### Phase 1 — declarations and project model (done)
 
@@ -610,7 +610,7 @@ Decisions:
   current on edits) narrows candidates; candidate bodies are inferred
   and their resolved targets compared with the DefId. Inference results
   are cached per file revision already. An eager index can come in
-  Phase 10 with the persistent cache.
+  Phase 11 with the persistent cache.
 - **Certainty is explicit.** Each reference is exact (resolution
   Unique/MultipleRuntimeTargets containing the def) or possible
   (Ambiguous, NameOnly, or unknown receiver with the same name).
@@ -741,16 +741,124 @@ diff vs Phase 8: repo 0 regressed / 22 improved, stdlib 0 / 16 (the
 `def f(@x)` ivar items); book diff 527 + 25 accepted, 0 mismatches.
 `make spec`: 231 examples.
 
-Not yet: references search one root (Phase 10 multi-root); reference
+Not yet: references search one root (Phase 12 multi-root); reference
 search is on demand (no persistent index; first search over a large
 program infers its candidate bodies); method references inside macro
 bodies and `{{...}}` are not found; rename of a method reached through a
 `responds_to?`/duck-typed call is refused rather than guessed.
 
-### Phase 10 — hardening
+### Phase 10 — responsiveness
 
-- Persistent stdlib/shard index cache, parallel indexing, cancellation and
-  budgets, GC vs libc allocator measurement, multi-root workspaces.
+The original "hardening" phase is split into three: responsiveness
+(here), startup and warm caches (Phase 11), multi-root (Phase 12).
+
+Measured before planning (release build; this repo and Marten, a large
+web framework: 1366 own files, 1955 indexed with shards and stdlib):
+
+- **Long requests block everything.** Messages are handled one at a
+  time; `$/cancelRequest` is ignored. In Marten a hover sent behind
+  references of `Request#method` waited 3.4 s, and the cancelled
+  references request was still computed to the end.
+- **Memory grows with open spec files.** 250 MB RSS after indexing,
+  640 MB after opening 60 spec files, 790 MB–1 GB after one references
+  search. Every spec is outside the program's require closure, so each
+  gets its own view: a DefMap plus a Typing with an empty summary cache,
+  although all 457 Marten specs require the same `spec_helper` (the
+  whole framework). A references search creates a view per candidate
+  spec (84 for `method`).
+- **References over specs stay slow when warm** (1.0 s warm, 3.4 s
+  cold for `Request#method`): each spec view infers its bodies again.
+- **`prepareRename` runs the whole reference search** (2.5–5.5 s in a
+  40,856-request sweep of random positions over 345 Marten files; the
+  sweep had 0 internal errors, and 96 answers over 300 ms were almost
+  all prepareRename).
+- Startup (1.0 s on Marten) and edits that rebuild a DefMap (first
+  hover 65 ms, then 30–36 ms) are acceptable for now (Phase 11).
+
+Decisions:
+
+- **Specs are one program, like `crystal spec`.** Spec files
+  (`spec/**/*_spec.cr`) that require the same helper form one view;
+  specs written to compile together (Marten: 120 files define namespaced
+  helper types, two reopen `TestUser`/`Post` from the test project) get
+  the same answers the compiler would give. Bounded memory, one shared
+  summary cache. Scripts and loose files keep per-file views. Rejected:
+  per-file overlay views over a shared base (more precise per file, but
+  needs layered DefMaps and summary caches, memory still per spec, and
+  diverges from what `crystal spec` compiles).
+- **Budgets fail clearly; no partial results.** A request over its
+  budget answers with an error naming what was searched (`references for
+  'method' stopped after 5 s: 61 of 84 candidate files searched`).
+- **Cooperative scheduling on one thread.** Server state is not
+  thread-safe; long requests run as jobs on fibers and yield between
+  candidate files/bodies, so interactive requests are answered in
+  between.
+
+Steps (one commit each):
+
+1. **Marten sweep and soak probe.** Track the random-position sweep and
+   a latency/RSS probe as `tools/probes/` scripts against a pinned
+   external project (cloned on demand into an ignored directory, not
+   committed): internal errors, answers over budget, p50/p99 per method,
+   hover latency during a long request, RSS after opening N specs. This
+   is the phase's baseline and regression shield.
+2. **Spec program views.** `Index::View` for each spec helper group:
+   roots are all `*_spec.cr` files under `spec/` that require that
+   helper (detected from the first `require` of each spec), indexed
+   lazily on the first spec opened. Specs: two spec files see each
+   other's helper types; a script outside `spec/` keeps its own view;
+   memory and references measured with the step 1 probe.
+3. **Cheap `prepareRename`.** Only the static refusals (operator,
+   generated, library, invalid position); the reference search moves to
+   `rename`, which still refuses on possible references.
+4. **Cancellable jobs.** References, rename, incoming calls (and later
+   warm-up) run as jobs with a checkpoint per candidate file and per
+   body; `$/cancelRequest` answers `RequestCancelled`; an edit of a file
+   a job has read cancels it with `ContentModified`. Interactive
+   requests run between checkpoints. Specs with a fake slow finder;
+   Neovim check: hover during references.
+5. **Budgets.** Per-request time budgets (references/rename/incoming
+   calls 5 s, configurable via `initializationOptions.budgets`) and a
+   candidate-file cap; failures say what was covered.
+6. **Verification and docs.** Probe numbers before/after, `make
+   nvim-check`, README.
+
+Exit criteria (Marten, measured by the step 1 probe): hover answers in
+< 100 ms p99 while a references search runs; RSS stays under ~400 MB
+after opening 100 specs and running 10 searches; no request exceeds its
+budget without a clear error; the sweep has 0 internal errors.
+
+### Phase 11 — startup and warm caches
+
+- **Parallel work-queue indexing.** Workers pick up newly discovered
+  requires instead of waiting for each round. Measured ceiling on
+  Marten: 1044 ms (8 workers, rounds) → 505 ms (one flat batch).
+- **Persistent cache** under the project: `.clear-ls/cache/` with its
+  own `.gitignore` (`*`), so it never shows in `git status`. Item
+  trees, requires and word sets per file, keyed by path, mtime, size and
+  content hash, plus the clear-ls version, grammar ABI and `crystal env`.
+  `--no-cache` and a `clearLs/clearCache` command. The stdlib part is
+  duplicated per project (size to be measured, est. 5–10 MB).
+- **Background warm-up** (idle, lowest priority, cancellable via the
+  Phase 10 jobs): infer workspace bodies once so the first references
+  search is warm.
+- **Allocator measurement** (open since Phase 0): Boehm heap vs RSS vs
+  libc for Tree-sitter under the Marten soak; keep or change
+  `-Dcrystal_tree_sitter_no_init`.
+
+Exit criteria: Marten warm start < 300 ms; the first references search
+after warm-up matches warm time; cache invalidation specs (file edit,
+Crystal upgrade, clear-ls upgrade, deleted file).
+
+### Phase 12 — multi-root (deferred)
+
+- One index per workspace folder sharing stdlib/shard entries (cheap
+  with the Phase 11 cache); `workspace/didChangeWorkspaceFolders`.
+- Diagnostics and compiler facts per project, in its own directory
+  (nested projects use the root's toolchain today).
+
+Exit criterion: two folders open in one client, each with correct
+definitions and diagnostics.
 
 ## Testing approach
 

@@ -10,9 +10,10 @@ stops mid-phase). History and per-phase details are in
   example matches the compiler or is a recorded deviation,
   [book-gaps.md](book-gaps.md)), plus the post-Phase-8 usage-feedback
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
-- **Next:** Phase 10 — hardening (persistent index cache, cancellation
-  and budgets, multi-root). Measure first, then split into steps
-  ([development.md](development.md#workflow)).
+- **Next:** Phase 10 — responsiveness (spec program views, cancellable
+  jobs, budgets), split into six steps in
+  [roadmap.md](roadmap.md#phase-10--responsiveness); then Phase 11
+  (startup and warm caches) and Phase 12 (multi-root, deferred).
 - **In progress:** nothing.
 
 ## Resume
@@ -36,5 +37,7 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
 - Language parity: `tools/book_diff.py` must stay free of mismatches;
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - Diagnostics describe saved files only (compiler limitation).
-- No persistent index cache, no request cancellation, single root
+- Long requests block others and ignore `$/cancelRequest`; each spec
+  file is its own program view, so memory grows with open specs
   (Phase 10).
+- No persistent index cache (Phase 11); single root (Phase 12).

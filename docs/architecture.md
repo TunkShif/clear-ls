@@ -174,8 +174,10 @@ the roadmap):
 - Module instance methods: `self` inside a module def is the module type,
   not "any includer".
 - Inlay hints don't cover parameters.
-- No persistent stdlib index cache; every start re-indexes (~0.6 s).
-- Requests are handled one at a time on one fiber; no cancellation.
+- No persistent stdlib index cache; every start re-indexes (~0.6 s,
+  ~1.0 s on Marten) (Phase 11).
+- Requests are handled one at a time on one fiber; no cancellation
+  (Phase 10).
 - Single workspace root (first `workspaceFolders` entry / `rootUri`, or
   the project above it); nested projects get their own views, but
   diagnostics still run in the root's toolchain.
