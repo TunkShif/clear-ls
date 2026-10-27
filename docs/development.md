@@ -61,6 +61,11 @@ regression diff below when changing inference.
 the change, then run `tools/types_diff.py`. A local that goes from known
 to unknown is a regression.
 
+**Large-project checks** (Phase 10): `tools/external.sh` once, then
+`python3 tools/soak.py` (prints `EXIT ok/FAIL` per criterion) and
+`python3 tools/sweep.py` (exit 1 on internal errors or timeouts). Run them
+after changes to views, jobs, the reference search, or caches.
+
 ## Ad-hoc scripts
 
 Throwaway scripts in the repo root named `*_tmp.cr` are gitignored:
@@ -88,3 +93,5 @@ paths. Per-phase numbers are in the roadmap.
 | DefMap rebuild | ~4 ms; with compiler facts 5–7 ms |
 | Grammar (`make grammar-check`) | 1635/1646 stdlib files parse cleanly |
 | Book parity (`tools/book_diff.py`) | 552 markers: 527 match, 25 accepted, 0 mismatches |
+| Marten soak (`tools/soak.py`) | index 1.1 s / ~100 MB RSS; 100 specs + 10 searches 278 MB; hover p99 during a search 37–51 ms |
+| Marten sweep (`tools/sweep.py`, 120 s) | 64,696 requests, 0 errors, 1 answer over 300 ms |

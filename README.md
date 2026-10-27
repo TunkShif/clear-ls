@@ -1,7 +1,13 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 9 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 10 —
+
+- responsiveness on large projects: references, rename and incoming
+  calls run as cancellable jobs (other requests answered in between,
+  `$/cancelRequest`, time budgets that fail with a clear message); specs
+  compile as one program like `crystal spec`; on Marten (1955 files)
+  memory stays under 300 MB with 100 open specs;
 
 - workspace identity: references, rename, incoming calls by resolved
   identity across the program (overloads, unrelated same-name methods

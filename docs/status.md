@@ -4,22 +4,25 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–9 (through workspace identity: references, rename,
-  incoming calls, type hierarchy and quick fixes by resolved identity,
-  one program view per project/script; earlier: every Crystal book
+- **Done:** Phases 0–10 (through responsiveness: long requests are
+  cancellable jobs with budgets, specs share one program view, freed
+  parser memory is returned; before that, workspace identity:
+  references, rename, incoming calls, type hierarchy and quick fixes by
+  resolved identity; earlier: every Crystal book
   example matches the compiler or is a recorded deviation,
   [book-gaps.md](book-gaps.md)), plus the post-Phase-8 usage-feedback
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
-- **Next:** Phase 10 — responsiveness (spec program views, cancellable
-  jobs, budgets), split into six steps in
-  [roadmap.md](roadmap.md#phase-10--responsiveness); then Phase 11
-  (startup and warm caches) and Phase 12 (multi-root, deferred).
-- **In progress:** Phase 10, step 6 (steps 1–5 done).
+- **Next:** Phase 11 — startup and warm caches (work-queue indexing,
+  persistent cache under `.clear-ls/cache/`, background warm-up,
+  allocator measurement). Measure first, then split into steps
+  ([roadmap.md](roadmap.md#phase-11--startup-and-warm-caches)).
+- **In progress:** nothing.
 
 ## Resume
 
 ```sh
 git log --oneline | head -3
+tools/external.sh             # Marten for soak.py / sweep.py
 crystal --version             # 1.22.x
 make && make spec             # all green
 make verify-static

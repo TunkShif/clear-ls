@@ -870,6 +870,35 @@ Exit criteria (Marten, measured by the step 1 probe): hover answers in
 after opening 100 specs and running 10 searches; no request exceeds its
 budget without a clear error; the sweep has 0 internal errors.
 
+Status: done; every exit criterion met.
+
+| Marten (`tools/soak.py`, `tools/sweep.py`) | before | after |
+|---|---|---|
+| RSS after indexing | 208 MB | 91–121 MB |
+| RSS after 100 specs | 858 MB | 190–214 MB |
+| RSS after 100 specs + 10 searches | 1823 MB | 277–278 MB |
+| references `Request#method` cold / warm | 3.5 s / 0.8–1.0 s | 0.94 s / 39–51 ms |
+| hover p99 during a cold search | 3.8 s | 37–51 ms |
+| `$/cancelRequest` | ignored (full result) | RequestCancelled in 2–16 ms |
+| sweep answers over 300 ms (120 s) | 78 (77 prepareRename) | 1 |
+| prepareRename p99 / max | 788 ms / 3.2 s | 0.2 ms / 15 ms |
+| sweep internal errors / timeouts | 0 / 0 | 0 / 0 |
+
+This repo: references warm 2–13 ms, cold 37–930 ms; rename of `DefMap`
+54 edits in 15 files 118 ms. `make spec` 235 examples; book diff 527 +
+25 accepted, 0 mismatches; `make nvim-check` unchanged plus hover during
+references (answered first) and a cancelled job in the `workspace`
+check.
+
+Not yet: the remaining slow first answer is cold inference (a hover
+1.1 s on the first body of a fresh view in the sweep; first
+`Request#method` search 0.94 s), which Phase 11's warm-up addresses.
+`include Mod` at the top level is not followed for constant lookup
+(found while checking references: `Thing.new` inside a def after
+`include Outer` stays untyped, top-level code works), so references
+from spec files that `include ClearLS` miss calls whose receiver comes
+from such a constant.
+
 ### Phase 11 — startup and warm caches
 
 - **Parallel work-queue indexing.** Workers pick up newly discovered
