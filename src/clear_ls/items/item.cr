@@ -1,4 +1,5 @@
 require "../base/text_range"
+require "../base/stable_hash"
 require "./cond"
 
 module ClearLS::Items
@@ -237,14 +238,14 @@ module ClearLS::Items
     end
 
     # Changes only when declarations change, not when def bodies or
-    # whitespace do.
+    # whitespace do. Stable across processes (persisted in the cache).
     def fingerprint : UInt64
       digest = String.build do |io|
         @items.each(&.fingerprint(io))
         @requires.each { |r| io << "require " << r.path << r.conditions.join(',') << '\n' }
         @mixins.each { |m| io << (m.extend ? "extend " : "include ") << m.path << m.conditions.join(',') << '\n' }
       end
-      digest.hash
+      StableHash.hash(digest)
     end
   end
 end

@@ -175,9 +175,9 @@ describe "ClearLS::Workspace::CompilerFacts digests" do
     file = ClearLS::FileId.new(0)
     map.add_file(file, ClearLS::Items::Lower.lower(ClearLS::Syntax::Parser.new.parse(text)))
     m = [Exporter::MethodFact.new("Foo", false, "public", "/w/a.cr", 2, 3, "b()")]
-    stale = ClearLS::Workspace::CompilerFacts.new(m, [] of Exporter::IvarFact, {"/w/a.cr" => "old".hash})
+    stale = ClearLS::Workspace::CompilerFacts.new(m, [] of Exporter::IvarFact, {"/w/a.cr" => ClearLS::StableHash.hash("old")})
     stale.apply(map, ->(_p : String) { file }, ->(_p : String) { text.as(String?) }).should eq 0
-    fresh = ClearLS::Workspace::CompilerFacts.new(m, [] of Exporter::IvarFact, {"/w/a.cr" => text.hash})
+    fresh = ClearLS::Workspace::CompilerFacts.new(m, [] of Exporter::IvarFact, {"/w/a.cr" => ClearLS::StableHash.hash(text)})
     fresh.apply(map, ->(_p : String) { file }, ->(_p : String) { text.as(String?) }).should eq 1
   end
 end

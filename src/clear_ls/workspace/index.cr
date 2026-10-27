@@ -32,7 +32,7 @@ module ClearLS::Workspace
     # Identifier-like words of each workspace file (not the stdlib or
     # shards), for narrowing reference searches: a file can only refer to
     # `foo` if it contains the word. Hashes keep it small; a collision
-    # only adds a candidate file.
+    # only adds a candidate file. `StableHash`, so the sets can be cached.
     @words = {} of FileId => Set(UInt64)
 
     # A program view: root files and the DefMap over their closure.
@@ -378,13 +378,13 @@ module ClearLS::Workspace
 
     def self.words(text : String) : Set(UInt64)
       set = Set(UInt64).new
-      text.scrub.scan(WORD) { |m| set << m[0].hash }
+      text.scrub.scan(WORD) { |m| set << StableHash.hash(m[0]) }
       set
     end
 
     # Workspace files whose text contains *word* (open buffers as edited).
     def files_with_word(word : String) : Array(FileId)
-      h = word.hash
+      h = StableHash.hash(word)
       found = [] of FileId
       @words.each { |id, set| found << id if set.includes?(h) }
       found

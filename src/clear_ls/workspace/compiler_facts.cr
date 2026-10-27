@@ -1,4 +1,5 @@
 require "../items"
+require "../base/stable_hash"
 require "../semantics/def_map"
 require "../compiler/exporter"
 
@@ -12,7 +13,7 @@ module ClearLS::Workspace
   class CompilerFacts
     getter methods : Array(ClearLS::Compiler::Exporter::MethodFact)
     getter ivars : Array(ClearLS::Compiler::Exporter::IvarFact)
-    # Digest of each method fact file's text when the facts were taken. A
+    # Digest (`StableHash`) of each method fact file's text when the facts were taken. A
     # file saved since then has moved lines, so its facts are skipped until
     # the next check.
     getter digests : Hash(String, UInt64)
@@ -26,7 +27,7 @@ module ClearLS::Workspace
       digests = {} of String => UInt64
       methods.each do |m|
         next if digests.has_key?(m.file)
-        digests[m.file] = File.read(m.file).hash if File.file?(m.file)
+        digests[m.file] = StableHash.hash(File.read(m.file)) if File.file?(m.file)
       end
       new(methods, ivars, digests)
     end
@@ -80,7 +81,7 @@ module ClearLS::Workspace
       mtime = File.info?(path).try(&.modification_time)
       cached = @lines[path]?
       return cached[1] if cached && cached[0] == mtime
-      index = text.call(path).try { |t| LineIndex.new(t) if @digests[path]?.nil? || @digests[path] == t.hash }
+      index = text.call(path).try { |t| LineIndex.new(t) if @digests[path]?.nil? || @digests[path] == StableHash.hash(t) }
       # An open buffer that differs from disk is not cached (it may be saved
       # back to the same text).
       @lines[path] = {mtime, index} if index

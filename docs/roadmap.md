@@ -977,6 +977,9 @@ Steps (one commit each):
    64-bit hash (FNV-1a or xxHash64, written in clear-ls, no new library)
    for `ItemTree#fingerprint`, `Index.words` and `CompilerFacts`
    digests. Spec: same value in two processes.
+   *Done:* `ClearLS::StableHash` (XXH64, seed 0; vectors from
+   `xxhsum -H64`, plus a spec that runs it in a second process).
+   Word sets on Marten 137–144 ms (was 127–154). 0.10.2.
 3. **Work-queue indexing.** One worker pool with a shared queue; newly
    resolved requires are queued as soon as they are found.
 4. **Codec.** `Cache::Pack` reader/writer (header, string table,

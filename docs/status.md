@@ -45,7 +45,3 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - Diagnostics describe saved files only (compiler limitation).
 - No persistent index cache (Phase 11); single root (Phase 12).
-- `String#hash` is seeded per process: fingerprints, word sets and fact
-  digests can't be persisted until Phase 11 step 2.
-- `ClearLS::VERSION` is still 0.1.0; the version workflow starts with
-  Phase 11 step 1 ([development.md](development.md#versions)).

@@ -120,7 +120,7 @@ changing it. Grammar quirks are in
   VFS states has the same effect, since re-reading bumps the revision.
 - `String#hash` / `Object#hash` are seeded per process: never persist
   them or compare them across processes (Phase 11 cache, compiler fact
-  digests). Use the stable hash.
+  digests). Use `ClearLS::StableHash`.
 - `VFS#id_for` costs ~9 µs (URI normalisation): cache it in loops.
 - The real compiler rejects some fixtures that the fake spec prelude
   accepts (a class named `Box` collides with stdlib `Box(T)`).
