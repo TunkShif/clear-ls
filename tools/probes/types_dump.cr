@@ -1,5 +1,6 @@
 # Every local / block arg as `file:line name type` (`?` = unknown), for
-# regression diffs across commits (see tools/types_diff.py).
+# regression diffs across commits (see tools/types_diff.py). Def bodies
+# and, with FILE_BODIES=1, file-level code (scripts, specs).
 #
 #   bin/probes/types_dump ROOT PREFIX > out.txt
 #
@@ -22,10 +23,13 @@ files.sort.each do |path|
   state = vfs.load(ClearLS::VFS.uri_for(path)).not_nil!
   typing = typing_for.call(state.id)
   bodies = ClearLS::IDE::Bodies.new(state)
-  nodes = [] of ClearLS::Syntax::Node
-  state.tree.root.walk { |n| nodes << n if n.kind.method_def?; true }
-  nodes.each do |n|
-    body, inf = typing.infer_at(state, bodies, n.start_byte + 1).not_nil!
+  starts = [] of UInt32
+  state.tree.root.walk { |n| starts << n.start_byte + 1 if n.kind.method_def?; true }
+  starts.unshift(0_u32) if ENV["FILE_BODIES"]?
+  seen = Set(UInt32).new
+  starts.each do |s|
+    body, inf = typing.infer_at(state, bodies, s).not_nil!
+    next unless seen.add?(body.range.start)
     body.bindings.each do |b|
       next unless b.kind.local? || b.kind.block_arg?
       line = state.text.byte_slice(0, b.name_range.start).count('\n') + 1

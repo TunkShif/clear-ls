@@ -716,6 +716,7 @@ module ClearLS::Types
     # earlier operations.
     private def eval_expr(id : HIR::ExprId) : TyId
       e = @body.expr(id)
+      @eval_at = e.range.start
       ty = case e.kind
            when .literal?      then literal(e)
            when .nop?          then @table.named!("Nil")
@@ -818,6 +819,16 @@ module ClearLS::Types
     # Namespace lookup for code outside defs (`class Foo; self.x; end`),
     # set by the caller; nil inside defs.
     property type_body_self : Proc(UInt32, TyId?)? = nil
+    # Namespace at an offset of a file body (`class Foo; X; end` looks up
+    # `X` in Foo); nil inside defs, whose namespace is `@ctx.ns`.
+    property type_body_ns : Proc(UInt32, Semantics::TypeId)? = nil
+    # Offset of the expression being evaluated (for `type_body_ns`).
+    @eval_at = 0_u32
+
+    # Namespace for constant and type lookups at the current expression.
+    private def lookup_ns : Semantics::TypeId
+      @type_body_ns.try(&.call(@eval_at)) || @ctx.ns
+    end
 
     private def self_at(e : HIR::Expr) : TyId
       @type_body_self.try(&.call(e.range.start)) || @ctx.self_type
@@ -997,7 +1008,7 @@ module ClearLS::Types
       when .array_like?, .hash_like?
         # `Set{1, 2}` → Set(Int32)
         name = e.type_text || return @table.unknown
-        id = map.lookup_path(name, @ctx.ns) || return @table.unknown
+        id = map.lookup_path(name, lookup_ns) || return @table.unknown
         nparams = map[id].type_params.size
         args = nparams == 1 && !elems.empty? ? [union_or_unknown(elems)] : [] of TyId
         @table.named(id, args)
@@ -1043,7 +1054,7 @@ module ClearLS::Types
         t = parse_type(text)
         return @table.metaclass(t) unless @table.unknown?(t)
       end
-      if id = map.lookup_path(text, @ctx.ns)
+      if id = map.lookup_path(text, lookup_ns)
         info = map[id]
         if info.kind.alias?
           # Alias to a non-path type (`alias Cb = Int32 -> Nil`).
@@ -1055,7 +1066,7 @@ module ClearLS::Types
       end
       # Constant value: `FOO = 1`.
       owner_path, _, name = text.rpartition("::")
-      owners = owner_path.empty? ? scope_chain : [map.lookup_path(owner_path, @ctx.ns)].compact
+      owners = owner_path.empty? ? scope_chain : [map.lookup_path(owner_path, lookup_ns)].compact
       owners.each do |o|
         map.lookup_member(o, name).each do |site|
           next unless site.item.kind.constant?
@@ -1080,7 +1091,7 @@ module ClearLS::Types
     # The type item *text* names, without following aliases.
     private def alias_at(text : String) : Semantics::TypeId?
       names = text.lchop("::").split("::")
-      cur = text.starts_with?("::") ? Semantics::DefMap::PROGRAM : @ctx.ns
+      cur = text.starts_with?("::") ? Semantics::DefMap::PROGRAM : lookup_ns
       names.each_with_index do |n, i|
         cur = map.lookup_path_item(n, cur, lookup_self: i == 0, lookup_in_namespace: i == 0) || return nil
       end
@@ -1106,7 +1117,7 @@ module ClearLS::Types
     private def generic_self(id : Semantics::TypeId, e : HIR::Expr) : TyId
       text = e.name.not_nil!
       return @table.named(id) unless text.includes?('(')
-      TypeExprParser.parse(text, @table, @ctx.ns, @ctx.type_params)
+      TypeExprParser.parse(text, @table, lookup_ns, @ctx.type_params)
     end
 
     @const_cache = {} of {Int32, String} => TyId
@@ -1226,7 +1237,7 @@ module ClearLS::Types
 
     private def scope_chain : Array(Semantics::TypeId)
       chain = [] of Semantics::TypeId
-      cur = @ctx.ns.as(Semantics::TypeId?)
+      cur = lookup_ns.as(Semantics::TypeId?)
       while c = cur
         chain << c
         cur = map[c].namespace
@@ -2706,7 +2717,7 @@ module ClearLS::Types
     end
 
     private def parse_type(text : String) : TyId
-      TypeExprParser.parse(text, @table, @ctx.ns, @ctx.type_params, @ctx.self_type)
+      TypeExprParser.parse(text, @table, lookup_ns, @ctx.type_params, @ctx.self_type)
     end
   end
 end

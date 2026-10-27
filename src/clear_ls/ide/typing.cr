@@ -42,7 +42,12 @@ module ClearLS::IDE
     end
 
     private def run(state : FileState, body : HIR::Body) : Types::Infer
-      ns = @def_map.namespace_at(state.id, body.range.start)
+      # A file body spans every namespace of the file; its own namespace
+      # is the program (code inside `class Foo ... end` gets Foo through
+      # `type_body_ns`). `namespace_at(0)` would pick a type declared at
+      # the start of the file.
+      is_def = body_is_def?(state, body)
+      ns = is_def ? @def_map.namespace_at(state.id, body.range.start) : Semantics::DefMap::PROGRAM
       info = @def_map[ns]
       self_t = self_type(ns)
       # A def's own `forall` vars are type params inside it.
@@ -65,13 +70,14 @@ module ClearLS::IDE
       inf.source_loader = ->(site : Semantics::Site) { def_node(site) }
       inf.summaries = @summaries
       inf.current_def = def_site(state, ns, body.range)
-      unless body_is_def?(state, body)
+      unless is_def
         # File-level body: inside `class Foo ... end` self is `Foo.class`.
         file = state.id
         inf.type_body_self = ->(offset : UInt32) do
           tns = @def_map.namespace_at(file, offset)
           tns == Semantics::DefMap::PROGRAM ? nil.as(Types::TyId?) : @table.metaclass(self_type(tns)).as(Types::TyId?)
         end
+        inf.type_body_ns = ->(offset : UInt32) { @def_map.namespace_at(file, offset) }
       end
       inf.with_source(state.text).run
     end
