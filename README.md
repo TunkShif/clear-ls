@@ -1,7 +1,14 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 10 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 11 —
+
+- fast starts: a persistent index cache (stdlib and shard declarations
+  shared across projects, the rest in the project's `.clear-ls/`)
+  brings a warm start on Marten (1955 files) to ~240 ms; macro-generated
+  methods from the last compiler check are available before the first
+  new one; while idle, a background warm-up infers the workspace so the
+  first references search is fast (88 ms vs 1.3 s cold);
 
 - responsiveness on large projects: references, rename and incoming
   calls run as cancellable jobs (other requests answered in between,
@@ -76,7 +83,8 @@ After a grammar bump, run `make syntax-gen` to regenerate
 ## Usage
 
 ```sh
-bin/clear-ls lsp [--log-level debug] [--log-file PATH]   # stdio server
+bin/clear-ls lsp [--log-level debug] [--log-file PATH] [--no-cache]   # stdio server
+bin/clear-ls cache info|clear [ROOT]                     # persistent cache locations / delete
 bin/clear-ls dump-cst [--ranges] FILE                    # print the CST
 bin/clear-ls dump-items FILE                             # print declarations
 bin/clear-ls dump-hir FILE LINE                          # print a def's body HIR
@@ -101,6 +109,32 @@ vim.lsp.enable("clear_ls")
 
 Debug request: `clearLs/syntaxTree {textDocument: {uri}}` returns the CST as
 an S-expression.
+
+### Cache and warm-up
+
+Declarations are cached between sessions (design:
+[docs/design/persistent-cache.md](docs/design/persistent-cache.md)):
+
+- stdlib and shard packs in `$XDG_CACHE_HOME/clear-ls` (`~/.cache/clear-ls`;
+  macOS `~/Library/Caches/clear-ls`; override with `CLEAR_LS_CACHE_DIR`),
+  shared by every project, checked by file content;
+- everything else, plus the last compiler facts, in `<root>/.clear-ls/cache/`
+  (ignored by git through its own `.gitignore`), checked by size and mtime.
+
+A new clear-ls version, Crystal version or target invalidates entries; a
+damaged file is ignored and rewritten. After indexing, the server infers
+workspace bodies while idle (no messages for 300 ms) so references
+searches start warm. Settings:
+
+```lua
+init_options = {
+  cache = { enabled = true, dir = "/path/to/global/cache" },
+  warmup = { enabled = true },
+},
+```
+
+`clearLs/clearCache` (no params) deletes the project's cache and the global
+packs it uses, then re-indexes.
 
 ### Compiler integration
 

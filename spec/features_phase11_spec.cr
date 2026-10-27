@@ -5,8 +5,8 @@ require "./support/prelude"
 # Persistent cache through the server: a second session over the same
 # project reads item trees, word sets and compiler facts from the cache.
 
-private def session(root, files, cache_dir, compiler = {enabled: false}, enabled = true, &)
-  c = FeatureClient.new(files, PRELUDE_FILES, compiler, cache: {enabled: enabled, dir: cache_dir}, root: root)
+private def session(root, files, cache_dir, compiler = {enabled: false}, enabled = true, version : String? = nil, &)
+  c = FeatureClient.new(files, PRELUDE_FILES, compiler, cache: {enabled: enabled, dir: cache_dir}, root: root, crystal_version: version)
   yield c
 ensure
   c.try(&.cleanup(keep: true))
@@ -89,6 +89,19 @@ describe "persistent cache" do
       File.write(pack, tampered)
       session(root, FILES, cache) do |c|
         c.server.index.local.not_nil!.hits.should eq 0
+      end
+    end
+  end
+
+  it "re-indexes after a Crystal upgrade" do
+    with_dirs do |root, cache|
+      session(root, FILES, cache, version: "1.22.0") { }
+      session(root, FILES, cache, version: "1.23.0") do |c|
+        c.server.index.local.not_nil!.hits.should eq 0
+        c.server.index.store.not_nil!.hits.should eq 0
+      end
+      session(root, FILES, cache, version: "1.23.0") do |c|
+        c.server.index.local.not_nil!.hits.should eq 2
       end
     end
   end

@@ -84,7 +84,9 @@ to unknown is a regression.
 **Large-project checks** (Phase 10): `tools/external.sh` once, then
 `python3 tools/soak.py` (prints `EXIT ok/FAIL` per criterion) and
 `python3 tools/sweep.py` (exit 1 on internal errors or timeouts). Run them
-after changes to views, jobs, the reference search, or caches.
+after changes to views, jobs, the reference search, or caches, and
+`python3 tools/warm.py` (Phase 11 criteria) after changes to the cache,
+indexing, or warm-up.
 
 ## Ad-hoc scripts
 
@@ -105,7 +107,7 @@ paths. Per-phase numbers are in the roadmap.
 
 | What | Value |
 |---|---|
-| Startup index | 0.6–0.75 s (≈460 files: prelude closure + shards + workspace) |
+| Startup index | cold 0.4–0.63 s (≈490 files: prelude closure + shards + workspace); warm from the cache: Marten ~0.24 s to the first answer (`tools/warm.py`) |
 | Stdlib | 1646 files parse in 2.3 s single-thread; items 0.35 s; 15k defs to HIR 0.33 s |
 | Inference coverage (`coverage`) | ~94% this repo, ~72% stdlib; repo defs 0.75 s cold, stdlib sample 3.4 s; worst stdlib def ~70 ms cold |
 | Completion / hover | 1–3 ms / 0.1–0.3 ms warm; semantic tokens ~4 ms on a 520-line file |
@@ -113,5 +115,6 @@ paths. Per-phase numbers are in the roadmap.
 | DefMap rebuild | ~4 ms; with compiler facts 5–7 ms |
 | Grammar (`make grammar-check`) | 1635/1646 stdlib files parse cleanly |
 | Book parity (`tools/book_diff.py`) | 552 markers: 527 match, 25 accepted, 0 mismatches |
-| Marten soak (`tools/soak.py`) | index 1.1 s / ~100 MB RSS; 100 specs + 10 searches 278 MB; hover p99 during a search 37–51 ms |
+| Marten soak (`tools/soak.py`) | index 0.82–0.84 s cold (`CLEAR_LS_ARGS=--no-cache`) / ~130 MB RSS; 100 specs + 10 searches 234–244 MB; hover p99 during a search 38–80 ms |
+| Marten warm-up (`tools/warm.py`) | ~7.5 s idle, RSS 300 MB; first references after it 88 ms (cold 1.3 s, warm 36–44 ms) |
 | Marten sweep (`tools/sweep.py`, 120 s) | 64,696 requests, 0 errors, 1 answer over 300 ms |

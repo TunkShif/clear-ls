@@ -4,7 +4,10 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–10 (through responsiveness: long requests are
+- **Done:** Phases 0–11 (through startup and warm caches: a two-layer
+  persistent index cache, warm start on Marten ~240 ms, compiler facts
+  from the last session, a background warm-up that makes the first
+  references search warm; before that, responsiveness: long requests are
   cancellable jobs with budgets, specs share one program view, freed
   parser memory is returned; before that, workspace identity:
   references, rename, incoming calls, type hierarchy and quick fixes by
@@ -14,12 +17,9 @@ stops mid-phase). History and per-phase details are in
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
 - **Also done:** fix round after Phase 10 — top-level `include` and the
   file-body namespace ([roadmap.md](roadmap.md#fix-round-after-phase-10-top-level-include-done)).
-- **Next:** Phase 11 — startup and warm caches: work-queue indexing,
-  a two-layer persistent cache (global stdlib/shard packs, project-local
-  `.clear-ls/cache/`), background warm-up, allocator measurement.
-  Measured and split into steps
-  ([roadmap.md](roadmap.md#phase-11--startup-and-warm-caches), design in
-  [persistent-cache.md](design/persistent-cache.md)); start at step 1.
+- **Next:** Phase 12 — multi-root
+  ([roadmap.md](roadmap.md#phase-12--multi-root-deferred)), deferred
+  until asked for; otherwise usage feedback.
 - **In progress:** nothing.
 
 ## Resume
@@ -31,6 +31,7 @@ crystal --version             # 1.22.x
 make && make spec             # all green
 make verify-static
 make release && make nvim-check
+python3 tools/warm.py         # Phase 11 criteria on Marten
 ```
 
 Then read [architecture.md](architecture.md) for the code map and
@@ -44,4 +45,6 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
 - Language parity: `tools/book_diff.py` must stay free of mismatches;
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - Diagnostics describe saved files only (compiler limitation).
-- No persistent index cache (Phase 11); single root (Phase 12).
+- Single root (Phase 12). Requires are resolved on every start; cached
+  compiler facts may be stale until the first check (see
+  [architecture.md](architecture.md#known-limitations)).

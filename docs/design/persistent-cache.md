@@ -2,8 +2,24 @@
 
 Design for the cache that lets clear-ls skip parsing and lowering on
 start. Measured before writing it (October 2026, release build, Crystal
-1.22.0); the plan is in the
+1.22.0); the plan and its outcome are in the
 [roadmap](../roadmap.md#phase-11--startup-and-warm-caches).
+
+**As built** (differences from the design below):
+
+- Local entries are validated by size + mtime (ns) only, so a hit
+  doesn't read the file; global entries by size + content hash.
+- Resolved requires are not stored: they are resolved on every load
+  (~7 ms on Marten across workers), which keeps glob requires and new
+  files correct without invalidating dependents.
+- The build key is `VERSION` + `BUILD_ID` (`tools/build_id.sh`: commit,
+  digest of uncommitted `src/` changes, grammar commit) + `SCHEMA` in the
+  header; the grammar ABI is implied by the grammar commit.
+- Local packs are keyed by Crystal version, target and `CRYSTAL_PATH`.
+- Commands: `clear-ls cache info|clear [ROOT]`; no `--no-cache` for the
+  other CLI commands (they don't use the cache).
+- Packs aren't decoded lazily per file in practice: every indexed file is
+  decoded at start (23–27 ms for Marten's 5.9 MB).
 
 ## Measurements
 

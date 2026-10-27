@@ -121,6 +121,18 @@ changing it. Grammar quirks are in
 - `String#hash` / `Object#hash` are seeded per process: never persist
   them or compare them across processes (Phase 11 cache, compiler fact
   digests). Use `ClearLS::StableHash`.
+- **Persistent cache.** Changing `Items::Item` (or any record in
+  `items/item.cr`/`cond.cr`) needs the codec in `cache/pack.cr` updated;
+  `spec/cache/pack_spec.cr` compares every ivar and fails if not. Bump
+  `Cache::SCHEMA` for layout changes, and the patch version.
+- Specs that reuse a project directory must not rewrite unchanged files:
+  the local cache validates by mtime (`FeatureClient` writes only
+  changed files).
+- `soak.py`/`sweep.py` measure a cold server: `lsp_client.py` turns the
+  warm-up off unless the script asks (`warm.py`); pass `--no-cache` with
+  `CLEAR_LS_ARGS` to measure parsing.
+- Don't keep `Infer` objects for many bodies (~100 KB each): keep
+  `Typing#call_facts` or summaries (the warm-up's 772 MB lesson).
 - `VFS#id_for` costs ~9 µs (URI normalisation): cache it in loops.
 - The real compiler rejects some fixtures that the fake spec prelude
   accepts (a class named `Box` collides with stdlib `Box(T)`).

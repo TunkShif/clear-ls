@@ -13,10 +13,11 @@ above it in this table):
 
 | Layer | Files | Role |
 |---|---|---|
-| base | `base/text_range.cr`, `line_index.cr` | `TextRange`, `FileId`; byte ↔ point ↔ LSP position (utf-8/16/32), invalid UTF-8 safe |
+| base | `base/text_range.cr`, `line_index.cr`, `stable_hash.cr`, `memory.cr` | `TextRange`, `FileId`; byte ↔ point ↔ LSP position (utf-8/16/32), invalid UTF-8 safe; XXH64 for persisted hashes; `malloc_trim` |
 | syntax | `syntax/grammar.cr`, `kinds.cr` (generated), `node.cr`, `tree.cr` | static grammar FFI, `Kind`/`Field` enums by symbol id, `Node` wrapper, incremental `reparse`, `parse_ranges` (included ranges) |
 | vfs | `vfs.cr` | `FileId` interning, overlays over disk, immutable `Snapshot`, `FileState` (revision, tree) |
 | items | `items/item.cr`, `cond.cr`, `lower.cr`, `dump.cr` | CST → per-file `ItemTree` (declarations only); `{% if flag? %}` via reparsed ranges + `Cond`; ERROR recovery; accessor/record macros; `fingerprint` |
+| cache | `cache/pack.cr`, `store.cr`, `local.cr` | binary packs of item trees (string table, checksum, atomic write); global stdlib/shard packs; project-local packs with word sets and compiler facts |
 | semantics | `semantics/def_map.cr` | merged types (reopenings), compiler-style `lookup_path`, ancestors (includes before superclass), members, `namespace_at`, `add_synthetic` |
 | workspace | `workspace/project.cr`, `require_resolver.cr`, `index.cr`, `compiler_facts.cr` | `crystal env` detection, `CrystalPath`-compatible requires, parallel indexing of prelude closure + workspace, one DefMap per program view (`Index::View`), rebuilt only on fingerprint/facts change |
 | hir | `hir/expr.cr`, `body.cr`, `lower_body.cr`, `dump.cr` | def/file body → arena HIR with scopes, bindings, read/write refs |
@@ -24,14 +25,16 @@ above it in this table):
 | types | `types/ty.cr`, `type_expr.cr`, `infer.cr`, `call_resolver.cr`, `summaries.cr` | interned `Ty`, restriction parser, `Subst`, dataflow `Infer`, overload resolution, per-call-shape return summaries |
 | compiler | `compiler/job.cr`, `output.cr`, `toolchain.cr`, `checker.cr`, `exporter.cr` | `crystal` subprocesses and their output (no LSP types) |
 | ide | `ide/*.cr` | protocol-free features: analysis, locals, typing, completion, type info, tokens, signature help, navigation, references/rename |
-| lsp | `lsp/transport.cr`, `json_rpc.cr`, `server.cr`, `features.cr`, `diagnostics.cr`, `formatting.cr`, `expand.cr`, `context.cr`, `code_actions.cr` | stdio server; `features.cr` and the others reopen `Server` |
+| lsp | `lsp/transport.cr`, `json_rpc.cr`, `server.cr`, `features.cr`, `diagnostics.cr`, `formatting.cr`, `expand.cr`, `context.cr`, `code_actions.cr`, `job.cr`, `warmup.cr` | stdio server; `features.cr` and the others reopen `Server` |
 
 `compiler/` sits beside `types/`: it does not depend on analysis, and
 `workspace/compiler_facts.cr` turns its output into DefMap members.
 
-CLI (`src/main.cr`): `lsp`, `dump-cst [--ranges] FILE`, `dump-items FILE`,
-`dump-hir FILE LINE`, `dump-cfg FILE LINE`, `version`. Debug requests:
-`clearLs/syntaxTree`, `clearLs/expandMacro` (see README).
+CLI (`src/main.cr`): `lsp [--no-cache]`, `dump-cst [--ranges] FILE`,
+`dump-items FILE`, `dump-hir FILE LINE`, `dump-cfg FILE LINE`,
+`cache info|clear [ROOT]`, `version`. Requests beyond LSP:
+`clearLs/syntaxTree`, `clearLs/expandMacro`, `clearLs/clearCache` (see
+README).
 
 ## Pipeline
 
@@ -62,8 +65,13 @@ crystal build/tool (background fibers) → diagnostics, facts, expansions, conte
   server keys Typing by map and keeps it while the map is live.
 - **Tree-sitter allocator is libc malloc** (`-Dcrystal_tree_sitter_no_init`
   in `CRYSTAL_FLAGS`): 17 MB vs 282 MB GC heap and 4.7× faster parallel
-  parsing. Native strings from Tree-sitter are freed with
-  `Syntax.free_native`.
+  parsing; re-measured in Phase 11 (Boehm 2.5× slower to index Marten,
+  higher RSS after searches). Native strings from Tree-sitter are freed
+  with `Syntax.free_native`.
+- **Caches are an optimisation, never a source of truth.** A pack that
+  fails to read, has another build key, or doesn't match a file's
+  size/hash is ignored; the file is parsed. Persisted hashes use
+  `StableHash`, never `#hash` (seeded per process).
 - **Unknown stays unknown.** No name-based guessing; unions over 8 members
   widen to unknown; unknown arguments never eliminate an overload.
 - **Completion analyses a patched copy** of the buffer with `__cl__` at the
@@ -151,6 +159,28 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
   body (cancel, budget, `Fiber.yield`). Cancelled by `$/cancelRequest`,
   by edits of files the job read, and by any declaration edit.
 
+### Startup and caches (Phase 11)
+
+- `Index#load` → `index_files`: a work queue over a parallel execution
+  context; workers read, look up the cache (`Store#lookup` by size +
+  content hash for stdlib/shard files, `Local#lookup` by size + mtime
+  for the rest), else parse and lower, then resolve requires and collect
+  word sets. The indexing fiber adds entries, queues new requires and
+  hands misses to their layer; `flush_cache` writes packs after `load`
+  and at shutdown.
+- `Cache::Pack` layout and `Cache::BUILD_ID` (commit, dirty digest,
+  grammar commit via `tools/build_id.sh`): see
+  [persistent-cache.md](design/persistent-cache.md).
+- Compiler facts per entry point go to `.clear-ls/cache/facts.pack` after
+  every check and are applied on `initialized` (`restore_facts`) before
+  the first one; the per-file digests still drop facts of changed files.
+- `lsp/warmup.cr`: after indexing, a fiber infers every workspace body
+  while the server is idle (300 ms without messages, no job), restarting
+  on declaration changes. It fills summaries and `Typing#call_facts`
+  (name range, resolution kind, target keys per call), which
+  `References#method_refs` reads instead of keeping each body's `Infer`
+  (460 MB on Marten).
+
 ### Compiler integration (Phase 7)
 
 - `Compiler::Job`: subprocess with timeout and cancel. `wait` yields, so
@@ -180,9 +210,12 @@ the roadmap):
 - Module instance methods: `self` inside a module def is the module type,
   not "any includer".
 - Inlay hints don't cover parameters.
-- No persistent index cache; every start re-indexes (~0.6 s, ~1.1 s
-  on Marten). Design: [persistent-cache.md](design/persistent-cache.md)
-  (Phase 11).
+- The first start of a project, and starts after a clear-ls or Crystal
+  upgrade, parse everything (~0.6 s, ~0.85 s on Marten); requires are
+  resolved on every start.
+- Compiler facts from the cache can be stale when the file that caused
+  them changed while the server was off (e.g. a subclass that a
+  `macro finished` in another file iterates); the first check fixes them.
 - One thread: long requests (references, rename, incoming calls) are
   `LSP::Job`s that yield at checkpoints; other requests still run one
   at a time.

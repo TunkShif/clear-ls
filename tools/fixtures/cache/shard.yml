@@ -1,0 +1,4 @@
+name: cache_demo
+targets:
+  demo:
+    main: src/demo.cr

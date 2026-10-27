@@ -48,7 +48,8 @@ release` first; `CLEAR_LS_BIN` overrides).
 
 ## Headless Neovim checks (`tools/nvim/`, `tools/fixtures/`)
 
-`make nvim-check` builds the release binary and runs each check in turn.
+`make nvim-check` builds the release binary and runs each check in turn
+(each with its own temp global cache, `CLEAR_LS_CACHE_DIR`).
 Run a single one with `tools/nvim/run.sh NAME` or `make nvim-check
 NVIM_CHECKS=NAME`. `run.sh` copies `tools/fixtures/NAME/` to a temp dir, so
 checks may edit and save files there, then runs `tools/nvim/NAME.lua` with
@@ -61,6 +62,7 @@ assert; read the output against the expectations below.
 | `calls` | `calls/src/demo.cr` | `IO#gets` overload narrowing (1 vs 4), signature help, named-arg completion, implementation, outgoing calls |
 | `chains` | `chains/src/c.cr` | every collection-chain local typed (no `nil`); inferred return in def hover; `&.\|` completes `Item`'s methods (`discounted label name price` first) |
 | `workspace` | `workspace/` (project + script + spec + nested project) | references of `sq.area` = `scripts/try.cr:3 spec/shapes_spec.cr:6 src/app.cr:8 src/shapes.cr:13`; `Square` definition in `src/shapes.cr` only (not `other/`); incoming `area_of`; subtypes `Circle Square`; `@side` rename; `area` rename edits app×3, shapes×3, try×1, shapes_spec×1; `puts` refused; hover during references answered first; cancelled job in the log; spec DSL hover (`Spec::Methods#describe`, `#it`, `Spec::Expectations#eq`) and `be_` completion; definition of alias `Shapes` at its use = `src/shapes.cr:24`; `Add require "../src/widget"` |
+| `cache` | `cache/` (shard with a `{% for %}` method), run twice on one copy | pass 1 `cache: global 0/N, local 0/2`, then `compiler facts: 3 methods`; pass 2 `global N/N, local 2/2` and index under ~100 ms, facts restored before any check, hover `w : Int32` |
 | `compiler` | `compiler/` (shard with target) | hover before the check, `@label : String` before the check (assignment rule), async diagnostic at 15:8, inlay hints `12: Int32 13: String` refreshed after the check, 1 diagnostic after `:e`, generated methods/ivars typed after it, cleared after fix+save, `compiler:` types for `twice`, `getter` expansion, formatting edit |
 
 Shared helpers (`start`, `req`, `hover`, `set_line`, `finish`) are in

@@ -1069,12 +1069,42 @@ Steps (one commit each):
    parsing happens once per change, but the first start and every
    Crystal or clear-ls upgrade still pay it.
 9. **Verification and docs.** Soak, sweep, `make nvim-check`, README.
+   *Done:* `tools/warm.py` (criteria below), `cache` Neovim check (two
+   sessions on one copy), README/architecture/gotchas/tools docs; 0.11.0.
 
 Exit criteria: Marten warm start < 300 ms; the first references search
 after warm-up matches warm time; cache invalidation specs (file edit,
 patched shard file, Crystal upgrade, clear-ls version bump, deleted file,
 corrupt pack); facts from the previous session are applied before the
 first check.
+
+Status: done; every exit criterion met.
+
+| Marten | before | after |
+|---|---|---|
+| start to first answer, warm cache (`warm.py`) | 1.1–1.2 s (no cache) | 237–254 ms |
+| cold index (soak, `--no-cache`) | 1.13–1.17 s | 0.82–0.84 s |
+| first references `Request#method` after warm-up | 1.34 s (cold) | 88 ms (warm 36–44 ms) |
+| RSS after warm-up | — | 300 MB |
+| RSS after 100 specs + 10 searches (soak) | 277–278 MB | 234–244 MB |
+| hover p99 during a cold search | 37–55 ms | 38–80 ms |
+| sweep (60 s) internal errors / over 300 ms | 0 / 1 | 0 / 0 |
+
+Invalidation specs: `spec/cache/` (round trip of every field, corrupt/
+truncated/foreign packs, shared stdlib/shard packs, patched shard file,
+new stdlib files, other Crystal version, eviction) and
+`spec/features_phase11_spec.cr` (second session from the cache, edited/
+new/deleted files, corrupt pack and other build, Crystal upgrade,
+disabled cache, `clearLs/clearCache`, facts before the first check,
+warm-up idle/restart). `make spec` 261 examples; book diff unchanged (0
+mismatches); references on 150 sampled Marten defs identical to the
+pre-warm-up build; `make nvim-check` unchanged plus `cache`.
+
+Not yet: requires are resolved on every start; cached facts can be
+stale until the first check when the file that caused them changed
+while the server was off; the warm-up covers the project view's
+workspace files, not shard sources (references into shards are rare and
+refused by rename).
 
 ### Phase 12 — multi-root (deferred)
 
