@@ -627,6 +627,11 @@ Steps (one commit each):
    when the fingerprint is unchanged (same items, new ranges), without
    invalidating Typing. Spec: definition, hover, implementation after a
    body edit that shifts later defs.
+   *Done:* `Index#update` moves the old items to the new positions
+   (`Item#move_to`, recursive, params included) instead of replacing the
+   entry; the DefMap shares those items and only drops its
+   namespace-range cache. No rebuild, Typing kept; summaries are keyed
+   by range start and revision, so moved defs get new keys.
 2. **Workspace scope (C6).** Root = nearest `shard.yml` above the
    opened file (client root only as fallback); nested projects are
    skipped by the source walk. One DefMap per program view: a project

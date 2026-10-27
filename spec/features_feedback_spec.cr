@@ -228,3 +228,24 @@ describe "implicit-receiver completion" do
     complete_line("case s\n  when .\n    1\n  end", 15).should contain("upcase")
   end
 end
+
+describe "positions after body edits" do
+  it "keeps definition, hover and implementation on moved declarations" do
+    src = "class A\n  def bar\n    1\n  end\n\n  def foo : Int32\n    1\n  end\nend\n\nclass B < A\n  def foo : Int32\n    2\n  end\nend\nA.new.foo\n"
+    with_client({"src/a.cr" => src}, PRELUDE_FILES) do |c|
+      u = c.open("src/a.cr")
+      c.request("textDocument/definition", {textDocument: {uri: u}, position: {line: 15, character: 7}})
+      rebuilds = c.server.index.rebuilds
+      # Body-only edit in `bar`: two lines more, declarations unchanged.
+      c.notify("textDocument/didChange", {textDocument: {uri: u, version: 2},
+        contentChanges: [{range: {start: {line: 2, character: 0}, end: {line: 2, character: 0}}, text: "    x = 1\n    y = 2\n"}]})
+      d = c.request("textDocument/definition", {textDocument: {uri: u}, position: {line: 17, character: 7}})
+      d[0]["range"]["start"].should eq JSON.parse(%({"line":7,"character":6}))
+      h = c.request("textDocument/hover", {textDocument: {uri: u}, position: {line: 7, character: 7}})
+      h["contents"]["value"].as_s.should contain("def A#foo() : Int32")
+      impl = c.request("textDocument/implementation", {textDocument: {uri: u}, position: {line: 7, character: 7}})
+      impl.as_a.map(&.["range"]["start"]["line"].as_i).should eq [13]
+      c.server.index.rebuilds.should eq rebuilds
+    end
+  end
+end

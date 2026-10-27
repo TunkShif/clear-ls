@@ -108,6 +108,12 @@ module ClearLS::Semantics
       tree.items.each { |item| add_item(file, item, PROGRAM) }
     end
 
+    # Item positions moved in place (`Item#move_to`); drops what caches
+    # them. Declarations are unchanged, so lookups stay valid.
+    def positions_changed : Nil
+      @namespace_sites = nil
+    end
+
     private def add_item(file : FileId, item : Items::Item, ns : TypeId) : Nil
       return if Items::Cond.all(item.conditions, @flags) == false
       site = Site.new(file, item)

@@ -99,11 +99,18 @@ module ClearLS::Workspace
       items = Items::Lower.lower(state.tree)
       entry = make_entry(path, items)
       old = @entries[state.id]?
-      @entries[state.id] = entry
       changed = old.nil? || old.fingerprint != entry.fingerprint
       if changed
+        @entries[state.id] = entry
         @def_map = nil
         load_missing(entry.requires)
+      else
+        # Same declarations, possibly moved by a body edit: the DefMap's
+        # sites share the old items, so move those (no rebuild).
+        old = old.not_nil!
+        old.items.move_to(items)
+        @entries[state.id] = Entry.new(path, old.items, old.fingerprint, entry.requires)
+        @def_map.try(&.positions_changed)
       end
       changed
     end

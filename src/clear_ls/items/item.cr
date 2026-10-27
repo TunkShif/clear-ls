@@ -161,6 +161,19 @@ module ClearLS::Items
       end
     end
 
+    # Takes the positions of *other*, a re-lowering of this item after an
+    # edit with an equal fingerprint (same declarations, moved). Items are
+    # shared with the DefMap, so updating them in place keeps its sites
+    # current without a rebuild.
+    def move_to(other : Item) : Nil
+      @range = other.range
+      @name_range = other.name_range
+      if (s = @signature) && (o = other.signature)
+        @signature = s.copy_with(params: s.params.map_with_index { |p, i| o.params[i]?.try { |op| p.copy_with(range: op.range) } || p })
+      end
+      @children.each_with_index { |c, i| other.children[i]?.try { |oc| c.move_to(oc) } }
+    end
+
     # Stable digest of everything except source positions, used to detect
     # whether an edit changed declarations.
     def fingerprint(io : IO) : Nil
@@ -200,6 +213,13 @@ module ClearLS::Items
         yield item
         item.children.reverse_each { |c| stack << c }
       end
+    end
+
+    # Takes the positions of *other* (equal fingerprint): see
+    # `Item#move_to`.
+    def move_to(other : ItemTree) : Nil
+      @items.each_with_index { |item, i| other.items[i]?.try { |o| item.move_to(o) } }
+      @requires = other.requires
     end
 
     # Changes only when declarations change, not when def bodies or
