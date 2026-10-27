@@ -8,12 +8,10 @@ stops mid-phase). History and per-phase details are in
   book example matches the compiler or is a recorded deviation,
   [book-gaps.md](book-gaps.md)), plus the post-Phase-8 usage-feedback
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
-- **Next:** Phase 9 — workspace identity. Start with workspace scope (C6)
-  and ivar definitions (C5), both planned in the roadmap, then the
-  `DefId`-keyed reference index (workspace references/rename, type
-  hierarchy, incoming calls, code actions). Measure first, then split
-  into steps ([development.md](development.md#workflow)).
-- **In progress:** nothing.
+- **Next:** Phase 9 — workspace identity, split into nine steps in
+  [roadmap.md](roadmap.md#phase-9--workspace-identity) (measurements and
+  decisions there). Step 1 fixes stale DefMap positions after body edits.
+- **In progress:** Phase 9, step 1.
 
 ## Resume
 
