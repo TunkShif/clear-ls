@@ -1,9 +1,12 @@
 require "../items/item"
 require "../items/cond"
 require "../base/stable_hash"
+require "log"
 require "../version"
 
 module ClearLS::Cache
+  Log = ::Log.for("clear-ls.cache")
+
   # Bumped when the pack layout or any payload encoding changes (also bump
   # the patch version, docs/development.md#versions).
   SCHEMA = 1_u32

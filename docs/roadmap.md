@@ -1006,6 +1006,15 @@ Steps (one commit each):
    an entry only on size + hash match; merge-and-rename when a project
    needs new files; eviction. Spec: two projects share the stdlib pack;
    a patched file in `lib/` is re-parsed.
+   *Done:* `Cache::Store` (`src/clear_ls/cache/store.cr`), used by
+   `Index#store` (not yet by the server: step 6). Workers look trees up
+   by size + `StableHash` of the text; misses are recorded and flushed
+   after `#load` (old entries + new, atomic rename); packs are touched
+   on use and evicted after 30 days. Shards come from
+   `lib/.shards.info`, skipping `path:` and symlinked ones. Marten:
+   stdlib pack 3.5 MB, shards 68 KB–512 KB; startup probe with
+   `CACHE=` cold 913 ms (writes packs), warm 551–726 ms, 609 hits — the
+   1346 project files are still parsed.
 6. **Local layer and controls.** Project pack with resolved requires,
    word sets, path dependencies and the pack list; `.clear-ls/.gitignore`;
    `--no-cache`, `initializationOptions.cache`, `clearLs/clearCache`,

@@ -4,6 +4,7 @@ require "../vfs"
 require "../semantics/def_map"
 require "../semantics/def_id"
 require "./compiler_facts"
+require "../cache/store"
 
 module ClearLS::Workspace
   # Item trees for every indexed file, and `DefMap`s over program views.
@@ -47,6 +48,8 @@ module ClearLS::Workspace
 
     getter project : Project
     getter rebuilds = 0
+    # Persistent item trees of the stdlib and shards (nil: no cache).
+    property store : Cache::Store? = nil
     @entries = {} of FileId => Entry
     @project_view = View.new([] of FileId)
     # Views of workspace files outside the project's closure, by file.
@@ -305,8 +308,10 @@ module ClearLS::Workspace
     getter load_stats = LoadStats.new
 
     # What a worker produces for one file. `words` is nil for library files
-    # (not searched for references).
-    record Loaded, path : String, entry : Entry?, words : Set(UInt64)?
+    # (not searched for references). `fresh` is set when the tree was
+    # lowered here and belongs in the global cache.
+    record Loaded, path : String, entry : Entry?, words : Set(UInt64)?,
+      fresh : {Cache::FileMeta, Items::ItemTree}? = nil
 
     # Indexes the prelude closure and workspace files from disk, then their
     # require closure, on *workers* threads. A shared work queue: each
@@ -323,6 +328,7 @@ module ClearLS::Workspace
       index = t.elapsed
       invalidate_maps
       trim = Time.measure { ClearLS::Memory.trim } # parse workers' freed trees (see Memory)
+      @store.try(&.flush)
       @load_stats = LoadStats.new(count, walk, index, trim, start.elapsed)
       Log.info { "indexed #{@entries.size} files" }
     end
@@ -336,6 +342,7 @@ module ClearLS::Workspace
       roots.each { |p| todo << p if seen.add?(p) }
       add = ->(l : Loaded) do
         entry = l.entry || return
+        l.fresh.try { |(meta, tree)| @store.try(&.record(l.path, meta, tree)) }
         id = @vfs.id_for(VFS.uri_for(l.path))
         # An open buffer is authoritative; keep its entry.
         return if keep_open && @entries[id]? && @vfs.open?(VFS.uri_for(l.path))
@@ -394,8 +401,18 @@ module ClearLS::Workspace
     # project state (resolver, flags, CRYSTAL_PATH).
     private def load_file(parser : Syntax::Parser, path : String) : Loaded
       text = File.read(path)
+      words = library_path?(path) ? nil : Index.words(text)
+      if (store = @store) && store.global?(path)
+        hash = StableHash.hash(text)
+        if tree = store.lookup(path, text.bytesize.to_i64, hash)
+          return Loaded.new(path, make_entry(path, tree), words)
+        end
+        tree = Items::Lower.lower(parser.parse(text))
+        mtime = File.info?(path).try(&.modification_time.to_unix) || 0_i64
+        return Loaded.new(path, make_entry(path, tree), words, {Cache::FileMeta.new(path, text.bytesize.to_i64, mtime, hash), tree})
+      end
       entry = make_entry(path, Items::Lower.lower(parser.parse(text)))
-      Loaded.new(path, entry, library_path?(path) ? nil : Index.words(text))
+      Loaded.new(path, entry, words)
     rescue ex : IO::Error | File::Error
       Log.warn { "cannot read #{path}: #{ex.message}" }
       Loaded.new(path, nil, nil)
