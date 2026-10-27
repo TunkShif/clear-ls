@@ -12,6 +12,8 @@ stops mid-phase). History and per-phase details are in
   example matches the compiler or is a recorded deviation,
   [book-gaps.md](book-gaps.md)), plus the post-Phase-8 usage-feedback
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
+- **Also done:** fix round after Phase 10 — top-level `include` and the
+  file-body namespace ([roadmap.md](roadmap.md#fix-round-after-phase-10-top-level-include-done)).
 - **Next:** Phase 11 — startup and warm caches (work-queue indexing,
   persistent cache under `.clear-ls/cache/`, background warm-up,
   allocator measurement). Measure first, then split into steps

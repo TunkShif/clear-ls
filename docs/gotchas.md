@@ -65,6 +65,12 @@ changing it. Grammar quirks are in
 - The compiler narrows only locals (`if @a` leaves `@a` nilable); clear-ls
   does the same on purpose.
 - Rebuild probe binaries after source changes before comparing numbers.
+- A file body spans every namespace of its file: use the program as its
+  namespace and look constants up at the expression (`type_body_ns`);
+  `namespace_at(file, 0)` is inside a type declared on the first line.
+- The program has ancestors (top-level `include`): resolve the include
+  paths with `program_path`, not `lookup_path` from the program, which
+  would consult the very list being built.
 - Probes need a Typing per program view (`Index#def_map_for(file)`): a
   stdlib file outside the project's closure is seen through the library
   view (all indexed files), a script through its own.

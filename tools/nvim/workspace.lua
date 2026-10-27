@@ -50,6 +50,17 @@ H.client:cancel_request(rid)
 vim.wait(500)
 local log = table.concat(vim.fn.readfile(H.log), "\n")
 print("cancel references: server log " .. (log:find("job textDocument/references " .. rid .. ": [%d.]+ms %(cancelled%)") and "shows cancelled job" or "has no cancelled job"))
+-- spec DSL (`include Spec::Methods` / `Spec::Expectations` in the stdlib)
+vim.cmd("edit " .. H.work .. "/spec/shapes_spec.cr")
+local function hv(l, ch) local r = req("textDocument/hover", { textDocument = td(), position = { line = l, character = ch } }); return r and r.contents.value:match("```crystal\n([^\n]+)") or "nil" end
+print("spec hover describe: " .. hv(2, 1) .. " | it: " .. hv(3, 3) .. " | eq: " .. hv(5, 19) .. " | sq: " .. hv(4, 5))
+local dd = req("textDocument/definition", { textDocument = td(), position = { line = 5, character = 19 } })
+print("spec definition eq -> " .. (dd and dd[1] and (vim.uri_to_fname(dd[1].uri):match("[^/]+/[^/]+$") .. ":" .. (dd[1].range.start.line + 1)) or "nil"))
+vim.api.nvim_buf_set_lines(0, 6, 6, false, { "    sq.area.should be_" })
+vim.wait(400)
+local ci = req("textDocument/completion", { textDocument = td(), position = { line = 6, character = 22 } })
+local cl = {} for i, it in ipairs(ci and ci.items or {}) do if i <= 5 then cl[#cl + 1] = it.label end end
+print("spec complete be_: " .. table.concat(cl, " "))
 -- code action: missing require in the script
 vim.cmd("edit " .. H.work .. "/scripts/try.cr")
 local diag = { range = { start = { line = 3, character = 4 }, ["end"] = { line = 3, character = 10 } }, severity = 1, source = "crystal", message = "undefined constant Widget" }

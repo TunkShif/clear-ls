@@ -893,11 +893,43 @@ check.
 Not yet: the remaining slow first answer is cold inference (a hover
 1.1 s on the first body of a fresh view in the sweep; first
 `Request#method` search 0.94 s), which Phase 11's warm-up addresses.
-`include Mod` at the top level is not followed for constant lookup
-(found while checking references: `Thing.new` inside a def after
-`include Outer` stays untyped, top-level code works), so references
-from spec files that `include ClearLS` miss calls whose receiver comes
-from such a constant.
+`include Mod` at the top level was not followed (fixed in the round
+below).
+
+### Fix round after Phase 10: top-level `include` (done)
+
+Found while verifying Phase 10 references (and noticed in use before).
+Two lookup bugs, both against the compiler's `path_lookup.cr`:
+
+- **File-level code was analysed inside the first type of the file.**
+  The file body's namespace was `namespace_at(0)`, which a type declared
+  on the first line covers: in a file starting with `module App`,
+  top-level `Item.new` typed `App::Item` where the compiler reports an
+  undefined constant. File bodies now use the program, and constants
+  and types are looked up at each expression's own namespace
+  (`Infer#type_body_ns`), which also typed class-level ivar declarations
+  like `@ops = [] of Op` (looked up at the top level before).
+- **Top-level `include`/`extend` were dropped.** The compiler makes the
+  module an ancestor of the program (`@top_level.ancestors == [Outer]`):
+  its types, constants and instance methods are visible everywhere
+  (top-level code, defs, other classes' methods), its class methods are
+  not; the program's own declarations win, then the last include.
+  The stdlib's spec DSL relies on it (`include Spec::Methods`,
+  `include Spec::Expectations`), so `describe`/`it`/`eq`/`be_nil` were
+  unresolved in every spec file. Now `ItemTree#mixins` (part of the
+  fingerprint) → program include/extend refs → `ancestors(PROGRAM)`;
+  `top_level_sites` and bare-identifier completion walk them.
+
+Measurements: book fixture `toplevel_include.cr` 13/13 match (book
+total 540 + 25 accepted of 565, 0 mismatches). Receiverless calls in
+spec files unresolved: this repo 1227/1799 → 50/1807 (locals typed 58%
+→ 92%), Marten 23,756/25,102 → 1,589/25,102. Regression diff (file
+bodies included): repo, specs, probes, stdlib, Marten 0 regressed (spec
++320, probes +73, Marten +52). Marten soak still meets the Phase 10
+exit criteria (hover p99 during a search 55 ms, RSS 278 MB; the first
+`Request#method` search 0.94 → 1.13 s since spec bodies now resolve);
+sweep 0 errors. Neovim `workspace`: spec-file hover/definition/
+completion of the DSL.
 
 ### Phase 11 — startup and warm caches
 
