@@ -994,6 +994,14 @@ Steps (one commit each):
    directory, payloads, checksum) for `ItemTree`. Round-trip spec over
    the stdlib and a fixture project: equal fingerprints and
    `dump-items`. Corrupt/truncated packs read as missing.
+   *Done:* `Cache::Writer` / `Cache::Pack` / `Cache::Reader`
+   (`src/clear_ls/cache/pack.cr`), `Cache::BUILD_ID` from
+   `tools/build_id.sh` (commit, digest of uncommitted `src/` changes,
+   grammar commit). The round-trip spec compares every instance variable
+   by macro, so a field missing from the codec fails it (checked by
+   dropping `extends`). Marten, all 1955 trees in one pack: 5.9 MB
+   (string table 2.8 MB, two thirds of it docs; payloads 2.9 MB),
+   encode 89 ms, read + decode 23–27 ms. 0.10.3.
 5. **Global layer.** Stdlib and shard packs; lookup by pack key, use of
    an entry only on size + hash match; merge-and-rename when a project
    needs new files; eviction. Spec: two projects share the stdlib pack;

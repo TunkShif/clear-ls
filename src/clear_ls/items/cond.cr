@@ -40,6 +40,9 @@ module ClearLS::Items
     end
 
     class And < Cond
+      getter left : Cond
+      getter right : Cond
+
       def initialize(@left : Cond, @right : Cond)
       end
 
@@ -56,6 +59,9 @@ module ClearLS::Items
     end
 
     class Or < Cond
+      getter left : Cond
+      getter right : Cond
+
       def initialize(@left : Cond, @right : Cond)
       end
 
