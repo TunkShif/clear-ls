@@ -209,6 +209,12 @@ module ClearLS::Semantics
     end
 
     private def lookup_path_uncached(text : String, from : TypeId) : TypeId?
+      lookup_path_raw(text, from).try { |id| resolve_alias(id) }
+    end
+
+    # Like `lookup_path`, but an alias stays the alias (navigation: the
+    # user wrote `Env`, not `Hash(String, String)`).
+    def lookup_path_raw(text : String, from : TypeId = PROGRAM) : TypeId?
       path = DefMap.strip_generics(text)
       global = path.starts_with?("::")
       names = path.lchop("::").split("::")
@@ -218,7 +224,7 @@ module ClearLS::Semantics
         first = i == 0
         cur = lookup_path_item(name, cur, lookup_self: first, lookup_in_namespace: first) || return nil
       end
-      resolve_alias(cur)
+      cur
     end
 
     def lookup_path_item(name : String, from : TypeId, *, lookup_self : Bool, lookup_in_namespace : Bool) : TypeId?

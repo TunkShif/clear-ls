@@ -931,6 +931,14 @@ exit criteria (hover p99 during a search 55 ms, RSS 278 MB; the first
 sweep 0 errors. Neovim `workspace`: spec-file hover/definition/
 completion of the DSL.
 
+Also in this round, from usage: **go to definition on an alias use
+site jumped to the alias target** (`def foo : Env?` with `alias Env =
+Hash(...)` opened `Hash`). Navigation now resolves paths with
+`DefMap#lookup_path_raw` (aliases not followed); definition, hover,
+references and rename of `Env` work on the alias, and its own
+definition leads on to the target. Inference keeps `lookup_path`
+(through aliases): regression diff 0 changed types.
+
 ### Phase 11 — startup and warm caches
 
 - **Parallel work-queue indexing.** Workers pick up newly discovered

@@ -255,7 +255,10 @@ module ClearLS::IDE
         ns = map[ns].namespace || Semantics::DefMap::PROGRAM
       end
 
-      if id = map.lookup_path(prefix, ns)
+      # Aliases are not followed: definition and hover of `Env` go to
+      # `alias Env = ...`, and its references are the alias's (the target
+      # is one more definition away).
+      if id = map.lookup_path_raw(prefix, ns)
         info = map[id]
         sites = info.sites.empty? ? map[map.resolve_alias(id)].sites : info.sites
         return [{full_name: info.full_name, sites: sites, range: range}]

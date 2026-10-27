@@ -20,3 +20,9 @@ class Circle < Shape
     3
   end
 end
+
+alias Shapes = Array(Shape)
+
+def all_shapes : Shapes
+  [Square.new(1), Circle.new] of Shape
+end

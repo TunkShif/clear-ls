@@ -68,6 +68,8 @@ changing it. Grammar quirks are in
 - A file body spans every namespace of its file: use the program as its
   namespace and look constants up at the expression (`type_body_ns`);
   `namespace_at(file, 0)` is inside a type declared on the first line.
+- `DefMap#lookup_path` follows aliases (what inference wants);
+  navigation uses `lookup_path_raw` so `Env` stays `alias Env = ...`.
 - The program has ancestors (top-level `include`): resolve the include
   paths with `program_path`, not `lookup_path` from the program, which
   would consult the very list being built.

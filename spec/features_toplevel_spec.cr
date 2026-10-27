@@ -120,3 +120,38 @@ describe "top-level include" do
     end
   end
 end
+
+ALIAS_APP = {
+  "src/a.cr" => <<-CR,
+    module Cfg
+      alias Env = Hash(String, String)
+    end
+    alias Env2 = Cfg::Env
+
+    def foo : Cfg::Env?
+      e = Cfg::Env.new
+      f = Env2.new
+      nil
+    end
+    CR
+}
+
+describe "aliases at use sites" do
+  it "go to the alias, not its target" do
+    with_client(ALIAS_APP, PRELUDE_FILES) do |c|
+      u = c.open("src/a.cr")
+      defn = ->(needle : String, shift : Int32) do
+        d = c.request("textDocument/definition", {textDocument: {uri: u}, position: c.pos("src/a.cr", needle, shift)})
+        d.as_a.map { |x| x["range"]["start"]["line"].as_i + 1 }
+      end
+      defn.call("Cfg::Env?", 6).should eq [2]
+      defn.call("Env2.new", 0).should eq [4]
+      defn.call("Cfg::Env\n", 6).should eq [2] # an alias's own target
+      hover_text(c, "src/a.cr", "Cfg::Env?", 6).should contain("alias Cfg::Env = Hash(String, String)")
+      # Inference still sees through: `Cfg::Env.new` is a Hash.
+      hover_text(c, "src/a.cr", "e = ").should contain("e : Hash(String, String)")
+      refs = c.request("textDocument/references", {textDocument: {uri: u}, position: c.pos("src/a.cr", "alias Env =", 6), context: {includeDeclaration: true}})
+      refs.as_a.map { |x| x["range"]["start"]["line"].as_i + 1 }.should eq [2, 4, 6, 7]
+    end
+  end
+end

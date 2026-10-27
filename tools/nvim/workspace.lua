@@ -50,6 +50,10 @@ H.client:cancel_request(rid)
 vim.wait(500)
 local log = table.concat(vim.fn.readfile(H.log), "\n")
 print("cancel references: server log " .. (log:find("job textDocument/references " .. rid .. ": [%d.]+ms %(cancelled%)") and "shows cancelled job" or "has no cancelled job"))
+-- alias use site: definition goes to the alias, not Array
+vim.cmd("buffer " .. H.work .. "/src/shapes.cr")
+local ad = req("textDocument/definition", { textDocument = td(), position = { line = 25, character = 20 } })
+print("definition alias Shapes -> " .. locs(ad))
 -- spec DSL (`include Spec::Methods` / `Spec::Expectations` in the stdlib)
 vim.cmd("edit " .. H.work .. "/spec/shapes_spec.cr")
 local function hv(l, ch) local r = req("textDocument/hover", { textDocument = td(), position = { line = l, character = ch } }); return r and r.contents.value:match("```crystal\n([^\n]+)") or "nil" end
