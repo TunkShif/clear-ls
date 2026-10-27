@@ -219,6 +219,22 @@ module ClearLS::Items
     # nested defs and type bodies don't.
     private def assigned_ivars(def_node : Syntax::Node, sig : Signature, def_name : String) : Array(Item)
       found = [] of Item
+      # `def initialize(@x : T, @y = v)`: params that assign ivars (any def).
+      def_node.field(Syntax::Field::Params).try &.named_children.each do |p|
+        next unless p.kind.param?
+        iv = p.field(Syntax::Field::Name) || next
+        next unless iv.kind.instance_var? || iv.kind.class_var?
+        detail = if r = p.field_text(Syntax::Field::Type)
+                   ": #{r}"
+                 elsif d = p.field_text(Syntax::Field::Default)
+                   "= #{d}"
+                 else
+                   "?"
+                 end
+        k = iv.kind.instance_var? ? ItemKind::InstanceVar : ItemKind::ClassVar
+        found << Item.new(k, iv.text, p.range, iv.range, origin: Origin::Param, doc: def_name,
+          conditions: @conds.dup, detail: detail)
+      end
       body = def_node.field(Syntax::Field::Body) || return found
       params = sig.params.to_h { |p| {p.name || "", p} }
       body.walk do |n|

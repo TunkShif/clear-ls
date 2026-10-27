@@ -64,7 +64,7 @@ module ClearLS::Workspace
         owner = owner_type(map, f.owner) || next
         # Declared ivars win; ivars typed only from `@x = v` assignments in
         # defs (`Origin::Assigned`) take the compiler's type instead.
-        next if map.ancestors(owner).any? { |a| map[a].members[f.name]?.try &.any? { |s| s.item.kind.instance_var? && !s.item.origin.assigned? } }
+        next if map.ancestors(owner).any? { |a| map[a].members[f.name]?.try &.any? { |s| s.item.kind.instance_var? && !s.item.origin.assigned_or_param? } }
         info = map[owner]
         site = info.sites.first? || next
         next if visible && !visible.includes?(site.file)

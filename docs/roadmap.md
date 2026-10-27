@@ -676,6 +676,14 @@ Steps (one commit each):
    (declaration, accessor macro, `initialize(@x)`, else every
    assignment); references are `@x` uses in the owner's and its
    subtypes' bodies.
+   *Done:* `def f(@x : T = v)` params are ivar items with
+   `Origin::Param` (typed like assignments; hidden from document
+   symbols); `@|` completion now lists them from any file (the header
+   scan is gone). Definition picks source > macro > param > assigned >
+   compiler sites of the nearest ancestor that has any. References:
+   `@x` tokens of the program's files whose owner (nearest ancestor with
+   the ivar) is the target's. Regression diff repo 0/0, stdlib 0
+   regressed / 16 improved; book diff unchanged.
 6. **Workspace rename.** Methods, types, constants, ivars: exact
    references only; refuse as described above; `prepareRename` explains
    why it refuses. Rename of a type renames every reopening and use.

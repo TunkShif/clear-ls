@@ -48,6 +48,14 @@ module ClearLS::Items
     # default (`= v`) text; `signature` is nil. `doc` holds the enclosing
     # def's name.
     Assigned
+    # `def f(@x : T = v)`: a param that assigns the ivar; otherwise like
+    # Assigned (`detail` is `: T`, `= v`, or `?`).
+    Param
+
+    # Assigned in a def (by statement or param), typed by the rules.
+    def assigned_or_param? : Bool
+      assigned? || param?
+    end
   end
 
   # How a parameter binds arguments.

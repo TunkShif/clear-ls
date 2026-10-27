@@ -47,6 +47,8 @@ module ClearLS::IDE
 
     private def symbol(item : Items::Item) : SymbolInfo?
       return nil if item.kind.instance_var? && item.origin.macro?
+      # `initialize(@x)`: shown as the def's param.
+      return nil if item.origin.param?
       children = item.children.compact_map { |c| symbol(c).as(SymbolInfo?) }
       SymbolInfo.new(display_name(item), detail(item), item.kind, item.range, item.name_range, children)
     end

@@ -42,6 +42,17 @@ module ClearLS::IDE
     end
   end
 
+  # An instance or class variable of one type (the nearest ancestor that
+  # declares or assigns it, like the compiler's lookup).
+  class IvarTarget < RefTarget
+    getter owner_name : String
+    getter? class_var : Bool
+
+    def initialize(name, @owner_name, @class_var)
+      super(name)
+    end
+  end
+
   # Workspace references by identity (Phase 9).
   #
   # The target comes from the cursor: a def header or a call (methods), a
@@ -63,23 +74,29 @@ module ClearLS::IDE
     end
 
     def target_at(ctx : Context, offset : UInt32) : RefTarget?
-      method_target(ctx, offset) || path_target(ctx, offset)
+      ivar_target(ctx, offset) || method_target(ctx, offset) || path_target(ctx, offset)
     end
 
     # References of *target* in every candidate file.
     def find(target : RefTarget, from : FileId) : Array(Reference)
       found = [] of Reference
-      word = target.is_a?(PathTarget) ? target.name.split("::").last : target.name
-      visible_from = @index.visible_files(from)
+      word = case target
+             when PathTarget then target.name.split("::").last
+             when IvarTarget then target.name.lchop('@').lchop('@')
+             else                 target.name
+             end
       candidates = @index.files_with_word(word)
+      # Ivars: files of the requesting file's program.
+      candidates.select! { |f| @index.visible_files(from).includes?(f) } if target.is_a?(IvarTarget)
       target_files = target_sites(target).map(&.file).to_set
       candidates.each do |file|
         # The file must see the target's declaration (one of them).
-        next unless @index.visible_files(file).any? { |f| target_files.includes?(f) }
+        next unless target.is_a?(IvarTarget) || @index.visible_files(file).any? { |f| target_files.includes?(f) }
         ctx = @context_for.call(file) || next
         case target
         when MethodTarget then method_refs(ctx, target, found)
         when PathTarget   then path_refs(ctx, target, found)
+        when IvarTarget   then ivar_refs(ctx, target, found)
         end
         break if found.size >= MAX_RESULTS
       end
@@ -123,6 +140,44 @@ module ClearLS::IDE
       return nil if sites.empty?
       type = sites.any? { |s| s.item.kind.namespace? || s.item.kind.alias? || s.item.kind.type_def? }
       PathTarget.new(hit[:full_name].split("::").last, hit[:full_name], sites, type)
+    end
+
+    private def ivar_target(ctx : Context, offset : UInt32) : IvarTarget?
+      node = ctx.state.tree.root.descendant(offset, offset, named: true) || return nil
+      return nil unless node.kind.instance_var? || node.kind.class_var?
+      owner = ivar_owner(ctx, node.text, node.kind.class_var?, offset) || return nil
+      IvarTarget.new(node.text, ctx.typing.def_map[owner].full_name, node.kind.class_var?)
+    end
+
+    # The type whose `@x` this is: the nearest ancestor of the enclosing
+    # namespace with an item for it (else the namespace itself).
+    private def ivar_owner(ctx : Context, name : String, cvar : Bool, offset : UInt32) : Semantics::TypeId?
+      map = ctx.typing.def_map
+      ns = map.namespace_at(ctx.state.id, offset)
+      return nil if ns == Semantics::DefMap::PROGRAM
+      kind = cvar ? Items::ItemKind::ClassVar : Items::ItemKind::InstanceVar
+      map.ancestors(ns).find { |a| map[a].members[name]?.try &.any?(&.item.kind.==(kind)) } || ns
+    end
+
+    # `@x` tokens in the file whose owner is the target's type. Ivars of
+    # the type's own declarations are in its files; subtypes may use
+    # inherited ivars anywhere.
+    private def ivar_refs(ctx : Context, target : IvarTarget, found : Array(Reference)) : Nil
+      ctx.state.tree.root.walk do |node|
+        next !node.kind.comment? unless node.kind.instance_var? || node.kind.class_var?
+        next false unless node.text == target.name && node.kind.class_var? == target.class_var?
+        owner = ivar_owner(ctx, target.name, target.class_var?, node.start_byte) || next false
+        if ctx.typing.def_map[owner].full_name == target.owner_name
+          found << Reference.new(ctx.state.id, node.range, true, ivar_declaration?(node))
+        end
+        false
+      end
+    end
+
+    # `@x : T`, `@x = v` at type level, `getter`-free: a declaration site.
+    private def ivar_declaration?(node : Syntax::Node) : Bool
+      parent = node.parent || return false
+      parent.kind.type_declaration? || parent.kind.param?
     end
 
     # -- method uses --------------------------------------------------------------------

@@ -152,14 +152,12 @@ Not tied to a phase (phase-specific gaps are listed under each phase in
 the roadmap):
 
 - Items: `delegate`/`def_equals*` not synthesised from source; file-private
-  types not scoped. `@x = v` in def bodies become `Origin::Assigned` ivar
-  items (typed by `Infer.assigned_ivar_type`), so editing such a line
-  rebuilds the DefMap.
+  types not scoped. `@x = v` in def bodies and `def f(@x)` params become
+  `Origin::Assigned` / `Origin::Param` ivar items (typed by
+  `Infer.assigned_ivar_type`), so editing such a line rebuilds the DefMap.
 - Locals inside macro bodies are not modelled (lowered as `Missing`).
 - Module instance methods: `self` inside a module def is the module type,
   not "any includer".
-- `@ivar` completion reads `initialize(@x)` params only from the current
-  file.
 - Inlay hints don't cover parameters.
 - No persistent stdlib index cache; every start re-indexes (~0.6 s).
 - Requests are handled one at a time on one fiber; no cancellation.

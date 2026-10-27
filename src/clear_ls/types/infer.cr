@@ -1258,7 +1258,7 @@ module ClearLS::Types
         if sites = info.members[name]?
           sites.each do |site|
             next unless site.item.kind == kind
-            if site.item.origin.assigned?
+            if site.item.origin.assigned_or_param?
               assigned << site
               next
             end

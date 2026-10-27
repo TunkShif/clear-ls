@@ -154,6 +154,10 @@ module ClearLS::LSP
       if r = locals(state).definition(off)
         return [{uri: state.uri, range: range_json(state, r)}]
       end
+      ivars = type_info(state).ivar_definitions(off)
+      unless ivars.empty?
+        return ivars.compact_map { |s| location_json(IDE::Location.new(s.file, s.item.name_range)) }
+      end
       sites = type_info(state).method_definitions(off)
       unless sites.empty?
         return sites.compact_map { |s| location_json(IDE::Location.new(s.file, s.item.name_range)) }

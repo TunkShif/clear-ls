@@ -266,7 +266,8 @@ module ClearLS::IDE
     # -- `@|` -----------------------------------------------------------------------
 
     # Instance / class variables of the enclosing type and its ancestors:
-    # declared (`@x : T`), from accessor macros, and `initialize(@x)` params.
+    # declared (`@x : T`), from accessor macros, `initialize(@x)` params
+    # and `@x = v` assignments (all ivar items).
     private def ivars(start : UInt32, prefix : String) : Array(CompletionItem)
       map = @typing.def_map
       ns = map.namespace_at(@state.id, start)
@@ -274,30 +275,12 @@ module ClearLS::IDE
       kind = class_var ? Items::ItemKind::ClassVar : Items::ItemKind::InstanceVar
       found = {} of String => String?
       map.ancestors(ns).each do |anc|
-        info = map[anc]
-        info.members.each do |name, sites|
+        map[anc].members.each do |name, sites|
           next unless name.starts_with?(prefix) && sites.any? { |s| s.item.kind == kind }
-          found[name] ||= sites.compact_map(&.item.detail).first?
-        end
-        next if class_var
-        info.members["initialize"]?.try &.each do |site|
-          src = site_text(site) || next
-          src.scan(/@(\w+)(?:\s*:\s*([^,)=]+))?/) do |m|
-            name = "@#{m[1]}"
-            found[name] ||= m[2]?.try(&.strip) if name.starts_with?(prefix)
-          end
+          found[name] ||= sites.compact_map { |s| s.item.detail.try { |d| d.lchop(": ") } }.first?
         end
       end
       found.map { |name, detail| CompletionItem.new(name, CompletionKind::Field, detail: detail) }
-    end
-
-    # Header text of a def (its parameter list), when it is in an open file
-    # or the current file.
-    private def site_text(site : Semantics::Site) : String?
-      return nil unless site.file == @state.id
-      r = site.item.range
-      header_end = @state.text.byte_index('\n', r.start.to_i32).try(&.to_u32) || r.end
-      @state.text.byte_slice(r.start, Math.min(header_end, r.end) - r.start)
     end
 
     # -- bare identifiers -------------------------------------------------------------

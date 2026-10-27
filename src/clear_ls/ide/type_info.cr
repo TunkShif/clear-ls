@@ -104,8 +104,45 @@ module ClearLS::IDE
     end
 
     private def compiler_ivar?(map : Semantics::DefMap, owner : Semantics::TypeId, name : String) : Bool
-      return false if map.ancestors(owner).any? { |a| map[a].members[name]?.try &.any? { |s| !s.item.origin.compiler? && !s.item.origin.assigned? } }
+      return false if map.ancestors(owner).any? { |a| map[a].members[name]?.try &.any? { |s| !s.item.origin.compiler? && !s.item.origin.assigned_or_param? } }
       map.ancestors(owner).any? { |a| map[a].members[name]?.try &.any?(&.item.origin.compiler?) }
+    end
+
+    # Definition of `@x` / `@@x` at *offset*: the sites of the nearest
+    # ancestor that has any, strongest category first: a declaration
+    # (`@x : T`, `@x = v` in the type body), an accessor macro (its name),
+    # `def ...(@x)` params, else every `@x = v` assignment in defs.
+    # Compiler-only ivars point at the type (no better location).
+    def ivar_definitions(offset : UInt32) : Array(Semantics::Site)
+      node = @state.tree.root.descendant(offset, offset, named: true) || return [] of Semantics::Site
+      return [] of Semantics::Site unless node.kind.instance_var? || node.kind.class_var?
+      ivar_sites(node.text, node.kind.class_var?, @typing.def_map.namespace_at(@state.id, offset))
+    end
+
+    def ivar_sites(name : String, cvar : Bool, ns : Semantics::TypeId) : Array(Semantics::Site)
+      map = @typing.def_map
+      return [] of Semantics::Site if ns == Semantics::DefMap::PROGRAM
+      kind = cvar ? Items::ItemKind::ClassVar : Items::ItemKind::InstanceVar
+      map.ancestors(ns).each do |anc|
+        sites = (map[anc].members[name]? || [] of Semantics::Site).select(&.item.kind.==(kind))
+        next if sites.empty?
+        {% for cat in [:source, :macro, :param, :assigned] %}
+          picked = sites.select { |s| ivar_category(s) == {{cat}} }
+          return picked unless picked.empty?
+        {% end %}
+        return sites # compiler facts
+      end
+      [] of Semantics::Site
+    end
+
+    private def ivar_category(s : Semantics::Site) : Symbol
+      case s.item.origin
+      in .source?   then :source
+      in .macro?    then :macro
+      in .param?    then :param
+      in .assigned? then :assigned
+      in .compiler? then :compiler
+      end
     end
 
     # Restriction text of a declaration when it does not parse to a type.
