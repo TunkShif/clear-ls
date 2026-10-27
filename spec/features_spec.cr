@@ -169,3 +169,56 @@ describe "LSP features" do
     end
   end
 end
+
+describe "workspace scope" do
+  files = {
+    "shard.yml"            => "name: app\ntargets:\n  app:\n    main: src/app.cr\n",
+    "src/app.cr"           => "require \"./item\"\nItem.new\n",
+    "src/item.cr"          => "class Item\nend\n",
+    "scripts/tool.cr"      => "require \"../src/item\"\nclass Helper\nend\nItem.new\n",
+    "examples/other/shard.yml" => "name: other\n",
+    "examples/other/src/o.cr"  => "class Item\nend\nclass Other\nend\nItem.new\n",
+  }
+
+  it "gives each program its own declarations" do
+    with_client(files) do |c|
+      u = c.open("src/app.cr")
+      d = c.request("textDocument/definition", {textDocument: {uri: u}, position: c.pos("src/app.cr", "Item.new")})
+      d.as_a.map(&.["uri"].as_s).should eq [c.uri("src/item.cr")]
+      # The nested project and the script are not part of the program.
+      c.server.index.def_map.lookup_path("Other").should be_nil
+      c.server.index.def_map.lookup_path("Helper").should be_nil
+      # The script sees what it requires.
+      su = c.open("scripts/tool.cr")
+      d = c.request("textDocument/definition", {textDocument: {uri: su}, position: c.pos("scripts/tool.cr", "Item.new")})
+      d.as_a.map(&.["uri"].as_s).should eq [c.uri("src/item.cr")]
+      # The nested project sees its own `Item` only.
+      ou = c.open("examples/other/src/o.cr")
+      d = c.request("textDocument/definition", {textDocument: {uri: ou}, position: c.pos("examples/other/src/o.cr", "Item.new")})
+      d.as_a.map(&.["uri"].as_s).should eq [c.uri("examples/other/src/o.cr")]
+    end
+  end
+
+  it "keeps loose files apart when there is no project" do
+    with_client({"a.cr" => "class Item\nend\nItem.new\n", "b.cr" => "class Item\nend\n"}) do |c|
+      u = c.open("a.cr")
+      d = c.request("textDocument/definition", {textDocument: {uri: u}, position: c.pos("a.cr", "Item.new")})
+      d.as_a.map(&.["uri"].as_s).should eq [c.uri("a.cr")]
+    end
+  end
+
+  it "finds the project above a client root inside it" do
+    with_project_root = File.tempname("clear-ls-scope")
+    Dir.mkdir_p(File.join(with_project_root, "src/sub"))
+    File.write(File.join(with_project_root, "shard.yml"), "name: x\n")
+    begin
+      server = Server.new(Transport.new(IO::Memory.new, IO::Memory.new))
+      server.project_factory = ->(root : String) { Workspace::Project.new(root, ["lib"], nil, nil, "x86_64-unknown-linux-gnu") }
+      server.dispatch({jsonrpc: "2.0", id: 1, method: "initialize", params: {rootUri: VFS.uri_for(File.join(with_project_root, "src/sub")), capabilities: {} of String => String}}.to_json)
+      server.dispatch({jsonrpc: "2.0", method: "initialized", params: {} of String => String}.to_json)
+      server.index.project.root.should eq with_project_root
+    ensure
+      FileUtils.rm_rf(with_project_root)
+    end
+  end
+end

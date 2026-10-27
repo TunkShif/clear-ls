@@ -640,6 +640,14 @@ Steps (one commit each):
    server picks the view per file. Specs: unrelated `class Item` in a
    sibling project and in a loose file are not definitions of each
    other; a script sees the project's types.
+   *Done:* `Index` keeps one set of item trees; `Index::View`s (project,
+   nested project, own-file) each build a DefMap over the prelude plus
+   their roots' require closure, and the server keeps one Typing per
+   map. Root = client root, or the nearest `shard.yml` above it; without
+   a `shard.yml` every file is its own program. Stdlib/shard files use
+   the project view. Compiler facts apply to the views that contain
+   them. `Index#load_missing` now follows requires transitively (a new
+   `require` of a file that requires others indexed one level only).
 3. **DefIds and the candidate word index.** `Semantics::DefId`, lookup
    site ↔ DefId, and a per-file set of identifier words (from the CST,
    updated per edit). Unit specs.

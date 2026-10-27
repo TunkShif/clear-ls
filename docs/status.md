@@ -11,7 +11,7 @@ stops mid-phase). History and per-phase details are in
 - **Next:** Phase 9 — workspace identity, split into nine steps in
   [roadmap.md](roadmap.md#phase-9--workspace-identity) (measurements and
   decisions there). Step 1 fixes stale DefMap positions after body edits.
-- **In progress:** Phase 9, step 2 (step 1 done).
+- **In progress:** Phase 9, step 3 (steps 1–2 done).
 
 ## Resume
 
@@ -35,8 +35,6 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - References/rename are local-only; incoming calls return `[]` (Phase 9).
 - Definition on `@ivar` returns nothing (C5, Phase 9).
-- Every `.cr` under the root shares one DefMap, even unrelated projects
-  and loose files (C6, Phase 9).
 - Diagnostics describe saved files only (compiler limitation).
 - No persistent index cache, no request cancellation, single root
   (Phase 10).

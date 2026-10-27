@@ -245,7 +245,7 @@ module ClearLS::LSP
       end
       stdlib = index.project.stdlib_dir
       is_std = ->(f : FileId) { !!stdlib && (VFS.path_for(@vfs.uri(f)) || "").starts_with?(stdlib.not_nil!) }
-      tokens = IDE::SemanticTokens.new(state, bodies(state), index.def_map, is_std).tokens(byte_range)
+      tokens = IDE::SemanticTokens.new(state, bodies(state), index.def_map_for(state.id), is_std).tokens(byte_range)
       {data: IDE::SemanticTokens.encode(tokens, state.line_index, @encoding)}
     end
 
@@ -260,7 +260,7 @@ module ClearLS::LSP
     private def completion(params : JSON::Any)
       state = document(params)
       off = offset(state, params["position"])
-      items = IDE::Completion.new(state, index, typing).complete(off)
+      items = IDE::Completion.new(state, index, typing(state)).complete(off)
       {
         isIncomplete: items.size >= IDE::Completion::MAX_ITEMS,
         items:        items.map do |i|
@@ -272,7 +272,7 @@ module ClearLS::LSP
     end
 
     private def navigation(state : FileState) : IDE::Navigation
-      IDE::Navigation.new(state, bodies(state), typing, analysis(state))
+      IDE::Navigation.new(state, bodies(state), typing(state), analysis(state))
     end
 
     private def implementation(params : JSON::Any)
@@ -289,9 +289,10 @@ module ClearLS::LSP
       if item.nil? && (hit = type_info(state).call_at(off))
         # On a call: its resolved targets.
         _, matches, _ = hit
-        return matches.first(10).compact_map { |m| call_item_json(IDE::CallItem.new(m.site, m.owner)) }
+        map = index.def_map_for(state.id)
+        return matches.first(10).compact_map { |m| call_item_json(IDE::CallItem.new(m.site, m.owner), map) }
       end
-      item ? [call_item_json(item)].compact : nil
+      item ? [call_item_json(item, index.def_map_for(state.id))].compact : nil
     end
 
     private def outgoing_calls(params : JSON::Any)
@@ -302,16 +303,17 @@ module ClearLS::LSP
       nav = navigation(state)
       item = nav.call_item_at(start + 1) || return [] of Nil
       nav.outgoing_calls(item).compact_map do |c|
-        to = call_item_json(c.target) || next
+        to = call_item_json(c.target, index.def_map_for(state.id)) || next
         {to: to, fromRanges: c.ranges.map { |r| range_json(state, r) }}
       end
     end
 
-    private def call_item_json(item : IDE::CallItem)
+    # *map*: the DefMap the item's owner TypeId comes from.
+    private def call_item_json(item : IDE::CallItem, map : Semantics::DefMap)
       uri = @vfs.uri(item.site.file)
       state = @vfs.file?(uri) || @vfs.load(uri) || return nil
       it = item.site.item
-      owner = typing.def_map[item.owner].full_name
+      owner = map[item.owner].full_name
       {
         name:           it.name,
         kind:           6, # Method
@@ -326,7 +328,7 @@ module ClearLS::LSP
     private def signature_help(params : JSON::Any)
       state = document(params)
       off = offset(state, params["position"])
-      res = IDE::SignatureHelp.new(state, typing).help(off) || return nil
+      res = IDE::SignatureHelp.new(state, typing(state)).help(off) || return nil
       {
         signatures: res.signatures.map do |s|
           {
@@ -353,22 +355,28 @@ module ClearLS::LSP
 
     # -- helpers --------------------------------------------------------------
 
-    @typing : IDE::Typing? = nil
-    @typing_map : Semantics::DefMap? = nil
+    # Typing state per DefMap (one per program view): a new map
+    # (declarations changed) means a fresh type table and caches.
+    @typings = {} of UInt64 => {Semantics::DefMap, IDE::Typing}
 
-    # Typing state follows the DefMap: a new map (declarations changed)
-    # means a fresh type table and caches.
-    private def typing : IDE::Typing
-      map = index.def_map
-      if (t = @typing) && @typing_map.same?(map)
-        return t
+    private def typing(file : FileId) : IDE::Typing
+      map = index.def_map_for(file)
+      key = map.object_id
+      if (t = @typings[key]?) && t[0].same?(map)
+        return t[1]
       end
-      @typing_map = map
-      @typing = IDE::Typing.new(map, @vfs)
+      # Drop typings of maps that no longer exist.
+      @typings.reject! { |_, (m, _)| !m.same?(index.def_map) && !m.same?(map) } if @typings.size >= 8
+      @typings[key] = {map, IDE::Typing.new(map, @vfs)}
+      @typings[key][1]
+    end
+
+    private def typing(state : FileState) : IDE::Typing
+      typing(state.id)
     end
 
     private def type_info(state : FileState) : IDE::TypeInfo
-      IDE::TypeInfo.new(state, bodies(state), typing)
+      IDE::TypeInfo.new(state, bodies(state), typing(state))
     end
 
     @body_cache = IDE::BodyCache.new
@@ -386,7 +394,7 @@ module ClearLS::LSP
     end
 
     private def analysis(state : FileState) : IDE::Analysis
-      IDE::Analysis.new(state, index)
+      IDE::Analysis.new(state, index, index.def_map_for(state.id))
     end
 
     private def document(params : JSON::Any) : FileState

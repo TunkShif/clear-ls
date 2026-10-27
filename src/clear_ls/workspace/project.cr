@@ -1,4 +1,5 @@
 require "log"
+require "yaml"
 require "./require_resolver"
 
 module ClearLS::Workspace
@@ -34,11 +35,57 @@ module ClearLS::Workspace
     end
 
     # Workspace source files: everything under root except `lib/` (shards,
-    # indexed through requires instead) and hidden directories.
+    # indexed through requires instead), hidden directories, and nested
+    # directories with their own `shard.yml` (separate projects).
     def source_files : Array(String)
       files = [] of String
       walk(@root, files, top: true)
       files.sort!
+    end
+
+    # Files that make up the project's program view: the `shard.yml`
+    # targets (their require closure is followed by the index), else
+    # everything under `src/`, else every source file. Without a
+    # `shard.yml` the root is not a project (a folder of loose files):
+    # no roots, every file gets a view of its own.
+    def program_roots : Array(String)
+      return [] of String unless File.file?(File.join(@root, "shard.yml"))
+      targets = Project.shard_targets(@root)
+      return targets unless targets.empty?
+      src = File.join(@root, "src")
+      if Dir.exists?(src)
+        files = [] of String
+        walk(src, files, top: false)
+        return files.sort! unless files.empty?
+      end
+      source_files
+    end
+
+    # `targets.*.main` from `shard.yml` under *root*, as absolute paths of
+    # existing files.
+    def self.shard_targets(root : String) : Array(String)
+      path = File.join(root, "shard.yml")
+      return [] of String unless File.file?(path)
+      yaml = YAML.parse(File.read(path))
+      targets = yaml["targets"]?.try(&.as_h?) || return [] of String
+      targets.values.compact_map do |t|
+        main = t["main"]?.try(&.as_s?) || next
+        full = File.expand_path(main, root)
+        full if File.file?(full)
+      end.uniq!
+    rescue YAML::ParseException
+      [] of String
+    end
+
+    # Nearest directory at or above *path*'s directory with a `shard.yml`.
+    def self.find_root(path : String) : String?
+      dir = File.dirname(path)
+      loop do
+        return dir if File.file?(File.join(dir, "shard.yml"))
+        parent = File.dirname(dir)
+        return nil if parent == dir
+        dir = parent
+      end
     end
 
     def prelude : String?
@@ -51,6 +98,7 @@ module ClearLS::Workspace
         full = File.join(dir, name)
         if File.directory?(full)
           next if top && name.in?("lib", "bin", "build", "vendor", "node_modules")
+          next if File.file?(File.join(full, "shard.yml")) # nested project
           walk(full, files, top: false) unless File.symlink?(full)
         elsif name.ends_with?(".cr")
           files << full

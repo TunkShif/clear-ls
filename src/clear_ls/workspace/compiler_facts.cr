@@ -42,7 +42,8 @@ module ClearLS::Workspace
     # Adds the facts to *map*. *file_id* interns a path; *text* reads the
     # (saved) text of a file to convert compiler locations to offsets.
     # Returns the number of added members.
-    def apply(map : Semantics::DefMap, file_id : String -> FileId, text : String -> String?) : Int32
+    # Only facts located in *visible* files (the map's view) apply.
+    def apply(map : Semantics::DefMap, file_id : String -> FileId, text : String -> String?, visible : Set(FileId)? = nil) : Int32
       signatures = parse_headers
       files = {} of String => {FileId, LineIndex?}
       added = 0
@@ -52,6 +53,7 @@ module ClearLS::Workspace
         next if map[owner].kind.lib? # `fun`s are indexed from source
         file, index = files.fetch(f.file) { files[f.file] = {file_id.call(f.file), line_index(f.file, text)} }
         index || next
+        next if visible && !visible.includes?(file)
         offset = index.offset(LineCol.new((f.line - 1).to_u32, (f.column - 1).to_u32), PositionEncoding::UTF32)
         item = method_item(parsed, f, index, offset)
         next if declared?(map, owner, file, item, offset)
@@ -65,6 +67,7 @@ module ClearLS::Workspace
         next if map.ancestors(owner).any? { |a| map[a].members[f.name]?.try &.any? { |s| s.item.kind.instance_var? && !s.item.origin.assigned? } }
         info = map[owner]
         site = info.sites.first? || next
+        next if visible && !visible.includes?(site.file)
         item = Items::Item.new(Items::ItemKind::InstanceVar, f.name, site.item.name_range, site.item.name_range,
           origin: Items::Origin::Compiler, detail: f.type)
         map.add_synthetic(owner, site.file, item)

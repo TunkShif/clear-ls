@@ -18,7 +18,7 @@ above it in this table):
 | vfs | `vfs.cr` | `FileId` interning, overlays over disk, immutable `Snapshot`, `FileState` (revision, tree) |
 | items | `items/item.cr`, `cond.cr`, `lower.cr`, `dump.cr` | CST → per-file `ItemTree` (declarations only); `{% if flag? %}` via reparsed ranges + `Cond`; ERROR recovery; accessor/record macros; `fingerprint` |
 | semantics | `semantics/def_map.cr` | merged types (reopenings), compiler-style `lookup_path`, ancestors (includes before superclass), members, `namespace_at`, `add_synthetic` |
-| workspace | `workspace/project.cr`, `require_resolver.cr`, `index.cr`, `compiler_facts.cr` | `crystal env` detection, `CrystalPath`-compatible requires, parallel indexing of prelude closure + workspace, DefMap rebuilt only on fingerprint/facts change |
+| workspace | `workspace/project.cr`, `require_resolver.cr`, `index.cr`, `compiler_facts.cr` | `crystal env` detection, `CrystalPath`-compatible requires, parallel indexing of prelude closure + workspace, one DefMap per program view (`Index::View`), rebuilt only on fingerprint/facts change |
 | hir | `hir/expr.cr`, `body.cr`, `lower_body.cr`, `dump.cr` | def/file body → arena HIR with scopes, bindings, read/write refs |
 | flow | `flow/builder.cr`, `cfg.cr` | HIR → CFG of evaluation-ordered ops, branches, merges, rescue edges |
 | types | `types/ty.cr`, `type_expr.cr`, `infer.cr`, `call_resolver.cr`, `summaries.cr` | interned `Ty`, restriction parser, `Subst`, dataflow `Infer`, overload resolution, per-call-shape return summaries |
@@ -53,7 +53,13 @@ crystal build/tool (background fibers) → diagnostics, facts, expansions, conte
   (`HIR::Body`, lowered on demand, cached per file revision in
   `IDE::BodyCache`).
 - **Body-only edits do not rebuild the DefMap** (`ItemTree#fingerprint`;
-  `Index#rebuilds` is asserted in specs).
+  `Index#rebuilds` is asserted in specs). The DefMap shares the file's
+  `Item`s, which take the new positions in place (`Item#move_to`).
+- **A file sees what its program sees.** One DefMap per view: the
+  project (prelude + closure of shard targets, else `src/`), each nested
+  project, and each workspace file outside them (scripts, specs, loose
+  files: prelude + own closure). `Index#def_map_for(file)`; the server
+  keys Typing by map.
 - **Tree-sitter allocator is libc malloc** (`-Dcrystal_tree_sitter_no_init`
   in `CRYSTAL_FLAGS`): 17 MB vs 282 MB GC heap and 4.7× faster parallel
   parsing. Native strings from Tree-sitter are freed with
@@ -157,4 +163,6 @@ the roadmap):
 - Inlay hints don't cover parameters.
 - No persistent stdlib index cache; every start re-indexes (~0.6 s).
 - Requests are handled one at a time on one fiber; no cancellation.
-- Single workspace root (first `workspaceFolders` entry / `rootUri`).
+- Single workspace root (first `workspaceFolders` entry / `rootUri`, or
+  the project above it); nested projects get their own views, but
+  diagnostics still run in the root's toolchain.

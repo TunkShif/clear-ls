@@ -111,9 +111,11 @@ describe Index do
       idx.load(workers: 1)
       size = idx.size
       uri = VFS.uri_for(File.join(root, "src/a.cr"))
-      idx.update(vfs.open(uri, %(require "./b"), 1)).should be_true
+      state = vfs.open(uri, %(require "./b"), 1)
+      idx.update(state).should be_true
       idx.size.should eq size
-      idx.def_map.lookup_path("FromB").should_not be_nil
+      # No shard.yml: a.cr is a loose file and sees what it requires.
+      idx.def_map_for(state.id).lookup_path("FromB").should_not be_nil
     end
   end
 end

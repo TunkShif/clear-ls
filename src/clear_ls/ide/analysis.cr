@@ -27,7 +27,7 @@ module ClearLS::IDE
   #
   # Phase 1 features use only declarations: no body analysis.
   class Analysis
-    def initialize(@state : FileState, @index : Workspace::Index)
+    def initialize(@state : FileState, @index : Workspace::Index, @def_map : Semantics::DefMap = index.def_map)
     end
 
     private def tree : Syntax::Tree
@@ -35,7 +35,7 @@ module ClearLS::IDE
     end
 
     private def def_map : Semantics::DefMap
-      @index.def_map
+      @def_map
     end
 
     # -- document symbols ----------------------------------------------------

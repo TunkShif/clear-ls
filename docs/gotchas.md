@@ -93,6 +93,9 @@ changing it. Grammar quirks are in
   tag.
 - `TypeNode#instance_vars` only works inside a method body (ivars are typed
   late); calling it in a top-level macro is an error.
+- Without a `shard.yml` every file is its own program: spec fixtures
+  that need cross-file lookups must `require` each other or add a
+  `shard.yml` with a target.
 - `VFS#id_for` costs ~9 µs (URI normalisation): cache it in loops.
 - The real compiler rejects some fixtures that the fake spec prelude
   accepts (a class named `Box` collides with stdlib `Box(T)`).

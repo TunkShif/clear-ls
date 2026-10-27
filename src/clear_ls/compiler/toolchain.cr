@@ -1,5 +1,5 @@
-require "yaml"
 require "./job"
+require "../workspace/project"
 require "./output"
 
 module ClearLS::Compiler
@@ -90,17 +90,7 @@ module ClearLS::Compiler
     # `targets.*.main` from `shard.yml`, as absolute paths of existing
     # files.
     def self.shard_targets(root : String) : Array(String)
-      path = File.join(root, "shard.yml")
-      return [] of String unless File.file?(path)
-      yaml = YAML.parse(File.read(path))
-      targets = yaml["targets"]?.try(&.as_h?) || return [] of String
-      targets.values.compact_map do |t|
-        main = t["main"]?.try(&.as_s?) || next
-        full = File.expand_path(main, root)
-        full if File.file?(full)
-      end.uniq!
-    rescue YAML::ParseException
-      [] of String
+      Workspace::Project.shard_targets(root)
     end
 
     # Entry points that check *file*. *requires* gives the resolved

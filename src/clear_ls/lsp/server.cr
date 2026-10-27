@@ -171,7 +171,15 @@ module ClearLS::LSP
     @root : String = Dir.current
     @client_capabilities = JSON::Any.new({} of String => JSON::Any)
 
+    # The client's root, or the project containing it when the client
+    # opened a directory inside a project (no `shard.yml` of its own).
     private def workspace_root(params : JSON::Any) : String
+      root = client_root(params)
+      return root if File.file?(File.join(root, "shard.yml"))
+      Workspace::Project.find_root(File.join(root, "x")) || root
+    end
+
+    private def client_root(params : JSON::Any) : String
       if folders = params["workspaceFolders"]?.try(&.as_a?)
         folders.each { |f| (p = VFS.path_for(f["uri"].as_s)) && return p }
       end

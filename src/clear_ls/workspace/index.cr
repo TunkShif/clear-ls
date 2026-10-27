@@ -4,55 +4,165 @@ require "../semantics/def_map"
 require "./compiler_facts"
 
 module ClearLS::Workspace
-  # Item trees for every indexed file plus the merged `DefMap`.
+  # Item trees for every indexed file, and `DefMap`s over program views.
   #
   # Files come from two sources:
   # - the require closure of the prelude and of every workspace file
   #   (stdlib, shards in `lib/`, required project files);
-  # - all `.cr` files under the project root.
+  # - all `.cr` files under the project root (not in nested projects).
+  #
+  # A *view* is what one program can see, like the compiler would compile
+  # it: the prelude plus the require closure of its root files. The
+  # project view's roots are `Project#program_roots` (shard targets, else
+  # `src/`); a workspace file outside that closure (a script, a spec) gets
+  # a view of its own, so it sees what it requires but nothing else, and
+  # the project does not see it. `#def_map` is the project view's map.
   #
   # Only item trees are kept for closed files; syntax trees are dropped
   # after lowering. Open buffers come from the VFS and override disk.
   #
-  # The DefMap is rebuilt from item trees when any file's item fingerprint
-  # changes. Edits inside method bodies keep the fingerprint, so they do not
-  # rebuild it (`#rebuilds` counts rebuilds for tests).
+  # DefMaps are rebuilt from item trees when a file of their view changes
+  # its item fingerprint. Edits inside method bodies keep the fingerprint,
+  # so they do not rebuild them (`#rebuilds` counts rebuilds for tests).
   class Index
     record Entry, path : String, items : Items::ItemTree, fingerprint : UInt64, requires : Array(String)
+
+    # A program view: root files and the DefMap over their closure.
+    class View
+      getter roots : Array(FileId)
+      property def_map : Semantics::DefMap? = nil
+      property files : Set(FileId)? = nil
+
+      def initialize(@roots)
+      end
+    end
 
     getter project : Project
     getter rebuilds = 0
     @entries = {} of FileId => Entry
-    @def_map : Semantics::DefMap? = nil
+    @project_view = View.new([] of FileId)
+    # Views of workspace files outside the project's closure, by file.
+    @file_views = {} of FileId => View
     @facts = CompilerFacts.new
-    # Members added from compiler facts in the current DefMap.
+    # Members added from compiler facts in the last built DefMap.
     getter fact_members = 0
 
     getter facts
 
-    # Replaces the compiler facts; rebuilds the DefMap when they changed.
+    # Replaces the compiler facts; rebuilds the DefMaps when they changed.
     def facts=(facts : CompilerFacts) : Nil
       return if facts == @facts
       @facts = facts
-      @def_map = nil
+      invalidate_maps
     end
 
     def initialize(@project : Project, @vfs : VFS)
     end
 
+    # The project view's DefMap.
     def def_map : Semantics::DefMap
-      @def_map ||= begin
+      map_of(@project_view)
+    end
+
+    # DefMap of the view that *file* belongs to.
+    def def_map_for(file : FileId) : Semantics::DefMap
+      map_of(view_for(file))
+    end
+
+    # The project view when *file* is in its closure (or not indexed),
+    # else the file's own view.
+    def view_for(file : FileId) : View
+      return @project_view if files_of(@project_view).includes?(file)
+      entry = @entries[file]? || return @project_view
+      # Stdlib and shard files outside the project's closure (opened by
+      # go-to-definition) are seen through the project too.
+      return @project_view if library_path?(entry.path)
+      @file_views[file] ||= begin
+        # Inside a nested project (its own `shard.yml` below the root):
+        # that project's program, else the file alone.
+        sub = Project.find_root(entry.path)
+        if sub && sub != @project.root && (view = nested_view(sub, file))
+          view
+        else
+          View.new([file])
+        end
+      end
+    end
+
+    @nested_views = {} of String => View
+
+    # The program view of the nested project at *root*, when *file* is in
+    # its closure. Its files are indexed on first use.
+    private def nested_view(root : String, file : FileId) : View?
+      view = @nested_views[root] ||= begin
+        nested = Project.new(root, [] of String, nil, nil, @project.target_triple)
+        paths = nested.program_roots
+        load_missing(paths)
+        View.new(paths.map { |p| id_of(p) })
+      end
+      files_of(view).includes?(file) ? view : nil
+    end
+
+    # In the stdlib or a shard (a `CRYSTAL_PATH` entry).
+    private def library_path?(path : String) : Bool
+      @project.crystal_path.any? { |d| path.starts_with?(d.ends_with?('/') ? d : d + "/") }
+    end
+
+    # Files visible in *file*'s view.
+    def visible_files(file : FileId) : Set(FileId)
+      files_of(view_for(file))
+    end
+
+    private def map_of(view : View) : Semantics::DefMap
+      view.def_map ||= begin
         @rebuilds += 1
         map = Semantics::DefMap.new(@project.flags)
-        @entries.each { |id, e| map.add_file(id, e.items) }
+        visible = files_of(view)
+        @entries.each { |id, e| map.add_file(id, e.items) if visible.includes?(id) }
         unless @facts.empty?
           elapsed = Time.measure do
-            @fact_members = @facts.apply(map, ->(path : String) { @vfs.id_for(VFS.uri_for(path)) }, ->saved_text(String))
+            @fact_members = @facts.apply(map, ->(path : String) { @vfs.id_for(VFS.uri_for(path)) }, ->saved_text(String), visible)
           end
           Log.debug { "applied compiler facts: #{@fact_members} members in #{elapsed.total_milliseconds.round(1)}ms" }
         end
         map
       end
+    end
+
+    # Prelude closure plus the view's roots' closure.
+    private def files_of(view : View) : Set(FileId)
+      view.files ||= begin
+        roots = view.roots.empty? ? project_roots : view.roots
+        @project.prelude.try { |p| roots = [id_of(p)] + roots }
+        closure(roots)
+      end
+    end
+
+    private def project_roots : Array(FileId)
+      @project.program_roots.map { |p| id_of(p) }
+    end
+
+    private def closure(roots : Array(FileId)) : Set(FileId)
+      seen = Set(FileId).new
+      queue = roots.dup
+      while id = queue.pop?
+        next unless seen.add?(id)
+        @entries[id]?.try &.requires.each { |r| queue << id_of(r) }
+      end
+      seen
+    end
+
+    private def id_of(path : String) : FileId
+      @vfs.id_for(VFS.uri_for(path))
+    end
+
+    # Drops every DefMap and view closure (declarations or requires
+    # changed somewhere).
+    private def invalidate_maps : Nil
+      @project_view.def_map = nil
+      @project_view.files = nil
+      @file_views.clear
+      @nested_views.each_value { |v| v.def_map = nil; v.files = nil }
     end
 
     def entry?(file : FileId) : Entry?
@@ -88,7 +198,7 @@ module ClearLS::Workspace
           entry.requires.each { |r| pending << r unless seen.includes?(r) }
         end
       end
-      @def_map = nil
+      invalidate_maps
       Log.info { "indexed #{@entries.size} files" }
     end
 
@@ -102,7 +212,7 @@ module ClearLS::Workspace
       changed = old.nil? || old.fingerprint != entry.fingerprint
       if changed
         @entries[state.id] = entry
-        @def_map = nil
+        invalidate_maps
         load_missing(entry.requires)
       else
         # Same declarations, possibly moved by a body edit: the DefMap's
@@ -110,14 +220,20 @@ module ClearLS::Workspace
         old = old.not_nil!
         old.items.move_to(items)
         @entries[state.id] = Entry.new(path, old.items, old.fingerprint, entry.requires)
-        @def_map.try(&.positions_changed)
+        each_map(&.positions_changed)
       end
       changed
     end
 
     # Removes a file (deleted from disk).
     def remove(file : FileId) : Nil
-      @def_map = nil if @entries.delete(file)
+      invalidate_maps if @entries.delete(file)
+    end
+
+    private def each_map(& : Semantics::DefMap ->) : Nil
+      @project_view.def_map.try { |m| yield m }
+      @file_views.each_value { |v| v.def_map.try { |m| yield m } }
+      @nested_views.each_value { |v| v.def_map.try { |m| yield m } }
     end
 
     # Text of a file as the compiler saw it, unless an open buffer differs
@@ -131,12 +247,19 @@ module ClearLS::Workspace
       text
     end
 
+    # Indexes *paths* and, transitively, what they require.
     private def load_missing(paths : Array(String)) : Nil
-      missing = paths.reject { |p| @entries.has_key?(@vfs.id_for(VFS.uri_for(p))) }
-      return if missing.empty?
-      parse_batch(missing, 1).each do |path, items|
-        next unless items
-        @entries[@vfs.id_for(VFS.uri_for(path))] = make_entry(path, items)
+      pending = paths
+      until pending.empty?
+        missing = pending.uniq.reject { |p| @entries.has_key?(@vfs.id_for(VFS.uri_for(p))) }
+        return if missing.empty?
+        pending = [] of String
+        parse_batch(missing, 1).each do |path, items|
+          next unless items
+          entry = make_entry(path, items)
+          @entries[@vfs.id_for(VFS.uri_for(path))] = entry
+          pending.concat(entry.requires)
+        end
       end
     end
 
