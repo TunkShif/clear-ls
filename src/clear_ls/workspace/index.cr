@@ -1,6 +1,7 @@
 require "./project"
 require "../vfs"
 require "../semantics/def_map"
+require "../semantics/def_id"
 require "./compiler_facts"
 
 module ClearLS::Workspace
@@ -26,6 +27,12 @@ module ClearLS::Workspace
   # so they do not rebuild them (`#rebuilds` counts rebuilds for tests).
   class Index
     record Entry, path : String, items : Items::ItemTree, fingerprint : UInt64, requires : Array(String)
+
+    # Identifier-like words of each workspace file (not the stdlib or
+    # shards), for narrowing reference searches: a file can only refer to
+    # `foo` if it contains the word. Hashes keep it small; a collision
+    # only adds a candidate file.
+    @words = {} of FileId => Set(UInt64)
 
     # A program view: root files and the DefMap over their closure.
     class View
@@ -195,6 +202,7 @@ module ClearLS::Workspace
           next if @entries[id]? && @vfs.open?(VFS.uri_for(path))
           entry = make_entry(path, items)
           @entries[id] = entry
+          read_words(id, path)
           entry.requires.each { |r| pending << r unless seen.includes?(r) }
         end
       end
@@ -206,6 +214,7 @@ module ClearLS::Workspace
     # when declarations changed (DefMap invalidated).
     def update(state : FileState) : Bool
       path = VFS.path_for(state.uri) || state.uri
+      @words[state.id] = Index.words(state.text) unless library_path?(path)
       items = Items::Lower.lower(state.tree)
       entry = make_entry(path, items)
       old = @entries[state.id]?
@@ -227,7 +236,35 @@ module ClearLS::Workspace
 
     # Removes a file (deleted from disk).
     def remove(file : FileId) : Nil
+      @words.delete(file)
       invalidate_maps if @entries.delete(file)
+    end
+
+    WORD = /[A-Za-z_][A-Za-z0-9_]*[?!=]?/
+
+    def self.words(text : String) : Set(UInt64)
+      set = Set(UInt64).new
+      text.scrub.scan(WORD) { |m| set << m[0].hash }
+      set
+    end
+
+    # Workspace files whose text contains *word* (open buffers as edited).
+    def files_with_word(word : String) : Array(FileId)
+      h = word.hash
+      found = [] of FileId
+      @words.each { |id, set| found << id if set.includes?(h) }
+      found
+    end
+
+    # The `DefId` of a site, if its item is still in the index.
+    def def_id(site : Semantics::Site) : Semantics::DefId?
+      tree = @entries[site.file]?.try(&.items) || return nil
+      Semantics::DefId.of(site.file, tree, site.item)
+    end
+
+    # The item a `DefId` names, if the file still has it.
+    def item(id : Semantics::DefId) : Items::Item?
+      @entries[id.file]?.try { |e| id.item_in(e.items) }
     end
 
     private def each_map(& : Semantics::DefMap ->) : Nil
@@ -257,10 +294,18 @@ module ClearLS::Workspace
         parse_batch(missing, 1).each do |path, items|
           next unless items
           entry = make_entry(path, items)
-          @entries[@vfs.id_for(VFS.uri_for(path))] = entry
+          id = @vfs.id_for(VFS.uri_for(path))
+          @entries[id] = entry
+          read_words(id, path)
           pending.concat(entry.requires)
         end
       end
+    end
+
+    private def read_words(id : FileId, path : String) : Nil
+      return if library_path?(path)
+      @words[id] = Index.words(File.read(path))
+    rescue File::Error
     end
 
     private def make_entry(path : String, items : Items::ItemTree) : Entry

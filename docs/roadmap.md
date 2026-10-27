@@ -651,6 +651,11 @@ Steps (one commit each):
 3. **DefIds and the candidate word index.** `Semantics::DefId`, lookup
    site ↔ DefId, and a per-file set of identifier words (from the CST,
    updated per edit). Unit specs.
+   *Done:* `Semantics::DefId` (file + item index path; `Index#def_id`,
+   `Index#item`). The word index hashes identifier words of workspace
+   files from their text (stdlib/shards excluded; 1646 stdlib files
+   would cost 0.2 s and 10 MB), refreshed on every update;
+   `Index#files_with_word`.
 4. **Workspace references.** Methods (calls, def headers, `super`/
    `previous_def` excluded), types and constants (constant paths in
    bodies, restrictions, superclass/include, headers of reopenings),

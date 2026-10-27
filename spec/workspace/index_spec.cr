@@ -119,3 +119,36 @@ describe Index do
     end
   end
 end
+
+describe "DefIds and the word index" do
+  it "names items by index path and finds files by word" do
+    with_project({
+      "shard.yml" => "name: x\ntargets:\n  x:\n    main: src/a.cr\n",
+      "src/a.cr"  => "require \"./b\"\nclass A\n  def foo; end\n  def foo(x); end\nend\nA.new.foo\n",
+      "src/b.cr"  => "class B\n  def bar?; end\nend\n",
+    }) do |root|
+      vfs = VFS.new
+      idx = Index.new(project(root), vfs)
+      idx.load(workers: 1)
+      map = idx.def_map
+      a = map.lookup_path("A").not_nil!
+      sites = map[a].members["foo"]
+      ids = sites.map { |s| idx.def_id(s).not_nil! }
+      ids.map(&.path).should eq [[0, 0], [0, 1]] # overloads are distinct
+      idx.item(ids[1]).not_nil!.same?(sites[1].item).should be_true
+
+      a_id = vfs.id_for(VFS.uri_for(File.join(root, "src/a.cr")))
+      b_id = vfs.id_for(VFS.uri_for(File.join(root, "src/b.cr")))
+      idx.files_with_word("foo").should eq [a_id]
+      idx.files_with_word("bar?").should eq [b_id]
+      idx.files_with_word("B").should eq [b_id]
+
+      # A body edit keeps the ids; an edit adding a word updates the index.
+      uri = VFS.uri_for(File.join(root, "src/a.cr"))
+      state = vfs.open(uri, File.read(File.join(root, "src/a.cr")) + "B.new.bar?\n", 1)
+      idx.update(state).should be_false
+      idx.def_id(sites[1]).should eq ids[1]
+      idx.files_with_word("bar?").sort_by(&.value).should eq [a_id, b_id].sort_by(&.value)
+    end
+  end
+end
