@@ -106,6 +106,15 @@ module ClearLS::Semantics
       @subtypes_index = nil
       @path_cache.clear
       tree.items.each { |item| add_item(file, item, PROGRAM) }
+      tree.mixins.each do |m|
+        next if Items::Cond.all(m.conditions, @flags) == false
+        site = Site.new(file, Items::Item.new(Items::ItemKind::Module, m.path, m.range, m.range))
+        (m.extend ? program.extend_refs : program.include_refs) << {m.path, site}
+      end
+      # Declaring the file's types looked up paths, which cached ancestors
+      # before this file's includes were known.
+      @ancestors_cache.clear
+      @path_cache.clear
     end
 
     # Item positions moved in place (`Item#move_to`); drops what caches
@@ -285,17 +294,32 @@ module ClearLS::Semantics
     # Included modules, resolved, in declaration order.
     def includes(id : TypeId) : Array(TypeId)
       info = self[id]
+      if id == PROGRAM
+        # Top-level `include M`: resolve M among the program's own types
+        # (`lookup_path` from the program would ask for the program's
+        # ancestors, i.e. this list, and stop at the cycle guard).
+        return info.include_refs.compact_map { |(text, _)| program_path(text) }.uniq
+      end
       ns = info.namespace || PROGRAM
       info.include_refs.compact_map do |(text, _)|
         lookup_path(text, id) || lookup_path(text, ns)
       end.uniq
     end
 
+    # `Foo::Bar` from the top level without the program's includes.
+    private def program_path(text : String) : TypeId?
+      names = DefMap.strip_generics(text).lchop("::").split("::")
+      cur = PROGRAM
+      names.each { |n| cur = self[cur].types[n]? || return nil }
+      resolve_alias(cur)
+    end
+
     # Extended modules; `extend self` resolves to the type itself.
     def extends(id : TypeId) : Array(TypeId)
       info = self[id]
       info.extend_refs.compact_map do |(text, _)|
-        text == "self" ? id : lookup_path(text, id)
+        next id if text == "self"
+        id == PROGRAM ? program_path(text) : lookup_path(text, id)
       end.uniq
     end
 

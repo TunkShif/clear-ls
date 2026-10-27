@@ -270,7 +270,9 @@ module ClearLS::IDE
       owners.each do |owner|
         sites = map.lookup_member(owner, name).select(&.item.kind.constant?)
         unless sites.empty?
-          full = map[owner].full_name
+          # Through an ancestor (`include Outer`): name it by its declarer.
+          declarer = map.ancestors(owner).find { |a| map[a].members[name]?.try { |ms| ms.includes?(sites.first) } } || owner
+          full = map[declarer].full_name
           return [{full_name: full.empty? ? name : "#{full}::#{name}", sites: sites, range: range}]
         end
       end

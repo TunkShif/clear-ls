@@ -205,14 +205,19 @@ module ClearLS::Items
   # A `require` statement.
   record Require, path : String, range : TextRange, conditions : Array(Cond)
 
+  # `include M` / `extend M` at the top level: the program includes `M`
+  # (its types, constants and instance methods are visible everywhere).
+  record TopLevelMixin, path : String, extend : Bool, range : TextRange, conditions : Array(Cond)
+
   # All declarations of one file. Bodies of defs are not represented.
   class ItemTree
     getter items : Array(Item)
     getter requires : Array(Require)
     # True when declarations were recovered from parse errors.
     getter recovered : Bool
+    getter mixins : Array(TopLevelMixin)
 
-    def initialize(@items, @requires, @recovered)
+    def initialize(@items, @requires, @recovered, @mixins = [] of TopLevelMixin)
     end
 
     def each_item(& : Item ->) : Nil
@@ -228,6 +233,7 @@ module ClearLS::Items
     def move_to(other : ItemTree) : Nil
       @items.each_with_index { |item, i| other.items[i]?.try { |o| item.move_to(o) } }
       @requires = other.requires
+      @mixins = other.mixins
     end
 
     # Changes only when declarations change, not when def bodies or
@@ -236,6 +242,7 @@ module ClearLS::Items
       digest = String.build do |io|
         @items.each(&.fingerprint(io))
         @requires.each { |r| io << "require " << r.path << r.conditions.join(',') << '\n' }
+        @mixins.each { |m| io << (m.extend ? "extend " : "include ") << m.path << m.conditions.join(',') << '\n' }
       end
       digest.hash
     end

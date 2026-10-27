@@ -2348,10 +2348,22 @@ module ClearLS::Types
       groups
     end
 
+    # Top-level defs and macros named *name*, then those of modules
+    # included at the top level (`include Spec::Methods` gives `describe`,
+    # `it`), nearest first: the program's own defs, then the last include.
+    # Instance methods only (a module's `def self.x` is not included).
     def top_level_sites(name : String) : Array(MethodMatch)
-      sites = map.program.members[name]? || return [] of MethodMatch
-      sites.select { |s| s.item.kind.def? || s.item.kind.macro? }
-        .map { |s| MethodMatch.new(s, Semantics::DefMap::PROGRAM, {} of String => TyId) }
+      result = [] of MethodMatch
+      map.ancestors(Semantics::DefMap::PROGRAM).each do |anc|
+        sites = map[anc].members[name]? || next
+        sites.each do |s|
+          next unless s.item.kind.def? || s.item.kind.macro?
+          result << MethodMatch.new(s, anc, {} of String => TyId)
+        end
+        # Nearer declarations shadow included ones of the same name.
+        break unless result.empty?
+      end
+      result
     end
 
     # The ancestor that declares *site* (for parsing its types).

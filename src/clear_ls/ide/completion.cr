@@ -320,14 +320,18 @@ module ClearLS::IDE
           items << CompletionItem.new(i.label, i.kind, i.detail, i.documentation, "1#{i.sort_text}", i.insert_text, i.overloads) if seen.add?(i.label)
         end
       end
-      map.program.members.each do |name, sites|
-        next unless name.starts_with?(prefix) && !name.starts_with?("self.") && !seen.includes?(name)
-        # `private def` at top level is file-private.
-        site = sites.find { |s| (s.item.kind.def? || s.item.kind.macro?) && (!s.item.visibility.private? || s.file == @state.id) } || next
-        seen << name
-        sig = site.item.signature
-        kind = site.item.kind.macro? ? CompletionKind::Macro : CompletionKind::Function
-        items << CompletionItem.new(name, kind, detail: sig ? "#{name}#{sig}" : nil, documentation: site.item.doc, sort_text: "2#{name}")
+      # Top-level defs and macros, then those of modules included at the
+      # top level (`include Spec::Expectations`: `eq`, `be_nil`, ...).
+      map.ancestors(Semantics::DefMap::PROGRAM).each do |anc|
+        map[anc].members.each do |name, sites|
+          next unless name.starts_with?(prefix) && !name.starts_with?("self.") && !seen.includes?(name)
+          # `private def` at top level is file-private.
+          site = sites.find { |s| (s.item.kind.def? || s.item.kind.macro?) && (!s.item.visibility.private? || s.file == @state.id) } || next
+          seen << name
+          sig = site.item.signature
+          kind = site.item.kind.macro? ? CompletionKind::Macro : CompletionKind::Function
+          items << CompletionItem.new(name, kind, detail: sig ? "#{name}#{sig}" : nil, documentation: site.item.doc, sort_text: "2#{name}")
+        end
       end
       KEYWORDS.each do |kw|
         items << CompletionItem.new(kw, CompletionKind::Keyword, sort_text: "3#{kw}") if kw.starts_with?(prefix) && seen.add?(kw)

@@ -54,6 +54,7 @@ module ClearLS::Items
     @requires = [] of Require
     @recovered = false
     @conds = [] of Cond
+    @mixins = [] of TopLevelMixin
     @parser : Syntax::Parser? = nil
 
     def initialize(@tree : Syntax::Tree)
@@ -62,7 +63,7 @@ module ClearLS::Items
     def run : ItemTree
       items = [] of Item
       lower_body(@tree.root, items, nil)
-      ItemTree.new(items, @requires, @recovered)
+      ItemTree.new(items, @requires, @recovered, @mixins)
     end
 
     # Lowers the statements of *body* into *dest*. *owner* is the enclosing
@@ -159,8 +160,12 @@ module ClearLS::Items
           dest << item(k, lhs.text, node, lhs, vis, detail: node.field_text(Syntax::Field::Rhs))
         end
       when .include?, .extend?
-        if owner && (target = node.named_children.find { |c| !c.kind.error? && !c.kind.comment? })
-          (kind.include? ? owner.includes : owner.extends) << target.text
+        if target = node.named_children.find { |c| !c.kind.error? && !c.kind.comment? }
+          if owner
+            (kind.include? ? owner.includes : owner.extends) << target.text
+          else
+            @mixins << TopLevelMixin.new(target.text, kind.extend?, node.range, @conds.dup)
+          end
         end
       when .require?
         if str = node.named_child(0)
