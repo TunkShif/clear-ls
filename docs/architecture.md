@@ -57,9 +57,9 @@ crystal build/tool (background fibers) → diagnostics, facts, expansions, conte
   `Item`s, which take the new positions in place (`Item#move_to`).
 - **A file sees what its program sees.** One DefMap per view: the
   project (prelude + closure of shard targets, else `src/`), each nested
-  project, and each workspace file outside them (scripts, specs, loose
-  files: prelude + own closure). `Index#def_map_for(file)`; the server
-  keys Typing by map.
+  project, each spec program, and each other workspace file (scripts,
+  loose files: prelude + own closure). `Index#def_map_for(file)`; the
+  server keys Typing by map and keeps it while the map is live.
 - **Tree-sitter allocator is libc malloc** (`-Dcrystal_tree_sitter_no_init`
   in `CRYSTAL_FLAGS`): 17 MB vs 282 MB GC heap and 4.7× faster parallel
   parsing. Native strings from Tree-sitter are freed with
@@ -133,8 +133,10 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
 ### Workspace identity (Phase 9)
 
 - `Index::View`: project (shard targets or `src/`), nested projects,
-  per-file views for scripts/loose files, a library view (all indexed
-  files) for stdlib/shard files outside the project. One DefMap and one
+  spec programs (spec files grouped by their top `spec_helper`, like
+  `crystal spec`; support files under `spec/` join the program that
+  requires them), per-file views for scripts/loose files, a library
+  view (all indexed files) for stdlib/shard files outside the project. One DefMap and one
   `IDE::Typing` per view.
 - `Semantics::DefId` = file + item index path. `Item#move_to` keeps it
   and the DefMap's sites valid across body edits.

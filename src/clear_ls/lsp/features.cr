@@ -535,8 +535,10 @@ module ClearLS::LSP
       if (t = @typings[key]?) && t[0].same?(map)
         return t[1]
       end
-      # Drop typings of maps that no longer exist.
-      @typings.reject! { |_, (m, _)| !m.same?(index.def_map) && !m.same?(map) } if @typings.size >= 8
+      # Drop typings of maps no view uses any more (declarations changed).
+      # Live views keep theirs: a references search walks many views, and
+      # evicting by count threw their summary caches away every search.
+      @typings.reject! { |_, (m, _)| !index.live_map?(m) }
       @typings[key] = {map, IDE::Typing.new(map, @vfs)}
       @typings[key][1]
     end

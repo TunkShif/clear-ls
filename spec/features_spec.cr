@@ -222,3 +222,35 @@ describe "workspace scope" do
     end
   end
 end
+
+describe "spec program views" do
+  files = {
+    "shard.yml"                 => "name: app\ntargets:\n  app:\n    main: src/app.cr\n",
+    "src/app.cr"                => "class App\nend\n",
+    "spec/spec_helper.cr"       => "require \"../src/app\"\nrequire \"./support/fixture\"\n",
+    "spec/support/fixture.cr"   => "class Fixture\nend\n",
+    "spec/a/spec_helper.cr"     => "require \"../spec_helper\"\n",
+    "spec/a/one_spec.cr"        => "require \"./spec_helper\"\nmodule OneSpec\n  class Helper\n  end\nend\nApp.new\n",
+    "spec/two_spec.cr"          => "require \"./spec_helper\"\nOneSpec::Helper.new\nFixture.new\n",
+    "scripts/tool.cr"           => "require \"../src/app\"\nOneSpec::Helper\n",
+  }
+
+  it "puts specs with one helper into one program" do
+    with_client(files) do |c|
+      one = c.open("spec/a/one_spec.cr")
+      two = c.open("spec/two_spec.cr")
+      idx = c.server.index
+      id = ->(p : String) { c.server.vfs.id_for(c.uri(p)) }
+      idx.def_map_for(id.call("spec/a/one_spec.cr")).should be(idx.def_map_for(id.call("spec/two_spec.cr")))
+      # A spec sees another spec's helper types, like `crystal spec`.
+      d = c.request("textDocument/definition", {textDocument: {uri: two}, position: c.pos("spec/two_spec.cr", "Helper")})
+      d.as_a.map(&.["uri"].as_s).should eq [c.uri("spec/a/one_spec.cr")]
+      # Support files required by the helper belong to that program.
+      idx.def_map_for(id.call("spec/support/fixture.cr")).should be(idx.def_map_for(id.call("spec/two_spec.cr")))
+      # Scripts don't see the specs; the project doesn't either.
+      idx.def_map_for(id.call("scripts/tool.cr")).lookup_path("OneSpec").should be_nil
+      idx.def_map.lookup_path("OneSpec").should be_nil
+      idx.view_stats["spec"].should eq 1
+    end
+  end
+end

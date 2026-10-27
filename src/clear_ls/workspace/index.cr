@@ -86,6 +86,14 @@ module ClearLS::Workspace
       # everything indexed, since such a file is usually part of a larger
       # library program (`spec/context.cr` needs `spec/example.cr`).
       return library_view if library_path?(entry.path)
+      if (group = spec_group(entry))
+        return spec_view(group)
+      end
+      # A support file of the specs (`spec/test_project/...`, required by
+      # the helper): the spec program it belongs to.
+      if (view = spec_view_containing(file, entry))
+        return view
+      end
       @file_views[file] ||= begin
         # Inside a nested project (its own `shard.yml` below the root):
         # that project's program, else the file alone.
@@ -100,6 +108,88 @@ module ClearLS::Workspace
 
     @nested_views = {} of String => View
     @library_view : View? = nil
+    # Spec programs by (project root, first required file).
+    @spec_views = {} of {String, String} => View
+
+    # `crystal spec` compiles every `spec/**/*_spec.cr` of a project as one
+    # program. Spec files whose first `require` is the same file (the
+    # spec helper) are grouped into one view the same way: they are
+    # written to compile together, and one view means one DefMap and one
+    # summary cache however many of them are open.
+    private def spec_group(entry : Entry) : {String, String}?
+      return nil unless entry.path.ends_with?("_spec.cr")
+      root = Project.find_root(entry.path) || @project.root
+      spec_dir = File.join(root, "spec") + "/"
+      return nil unless entry.path.starts_with?(spec_dir)
+      first = entry.requires.first?
+      return nil unless first
+      {root, top_helper(first, spec_dir)}
+    end
+
+    # Per-directory helpers usually chain up (`spec/a/b/spec_helper.cr`
+    # requires `../spec_helper`): follow first requires while they stay
+    # in `spec/` and are named like the helper, so every spec of the
+    # project lands in one group.
+    private def top_helper(helper : String, spec_dir : String) : String
+      seen = Set{helper}
+      name = File.basename(helper)
+      cur = helper
+      while (e = @entries[id_of(cur)]?) && (nxt = e.requires.first?)
+        break unless nxt.starts_with?(spec_dir) && File.basename(nxt) == name && seen.add?(nxt)
+        cur = nxt
+      end
+      cur
+    end
+
+    private def spec_view_containing(file : FileId, entry : Entry) : View?
+      return @support_views[file] if @support_views.has_key?(file)
+      @support_views[file] = spec_view_containing_uncached(file, entry)
+    end
+
+    private def spec_view_containing_uncached(file : FileId, entry : Entry) : View?
+      root = Project.find_root(entry.path) || @project.root
+      return nil unless entry.path.starts_with?(File.join(root, "spec") + "/")
+      # Build the views of this project's spec groups (cheap: one per
+      # helper), then pick the one whose closure has the file.
+      helper_groups(root).each do |g|
+        v = spec_view(g)
+        return v if files_of(v).includes?(file)
+      end
+      nil
+    end
+
+    @helper_groups = {} of String => Array({String, String})
+    # File → its spec program, for support files (cleared with the views).
+    @support_views = {} of FileId => View?
+
+    private def helper_groups(root : String) : Array({String, String})
+      @helper_groups[root] ||= helper_groups_uncached(root)
+    end
+
+    private def helper_groups_uncached(root : String) : Array({String, String})
+      spec_dir = File.join(root, "spec") + "/"
+      groups = Set({String, String}).new
+      @entries.each_value do |e|
+        next unless e.path.ends_with?("_spec.cr") && e.path.starts_with?(spec_dir)
+        g = spec_group(e)
+        groups << g if g
+      end
+      groups.to_a
+    end
+
+    private def spec_view(group : {String, String}) : View
+      @spec_views[group] ||= begin
+        root, helper = group
+        spec_dir = File.join(root, "spec") + "/"
+        files = [] of FileId
+        @entries.each do |id, e|
+          next unless e.path.ends_with?("_spec.cr") && e.path.starts_with?(spec_dir)
+          first = e.requires.first? || next
+          files << id if top_helper(first, spec_dir) == helper && Project.find_root(e.path) == root
+        end
+        View.new(files.sort_by(&.value))
+      end
+    end
 
     # Every indexed file (what the old single DefMap covered).
     private def library_view : View
@@ -187,6 +277,9 @@ module ClearLS::Workspace
       @file_views.clear
       @nested_views.each_value { |v| v.def_map = nil; v.files = nil }
       @library_view = nil
+      @spec_views.clear
+      @helper_groups.clear
+      @support_views.clear
     end
 
     def entry?(file : FileId) : Entry?
@@ -284,11 +377,29 @@ module ClearLS::Workspace
       @entries[id.file]?.try { |e| id.item_in(e.items) }
     end
 
+    # Views with a built DefMap, by kind (debugging / probes).
+    def view_stats : Hash(String, Int32)
+      h = Hash(String, Int32).new(0)
+      h["project"] += 1 if @project_view.def_map
+      @file_views.each_value { |v| h["file"] += 1 if v.def_map }
+      @nested_views.each_value { |v| h["nested"] += 1 if v.def_map }
+      @spec_views.each_value { |v| h["spec"] += 1 if v.def_map }
+      h["library"] += 1 if @library_view.try(&.def_map)
+      h
+    end
+
+    # True while *map* is the current DefMap of some view.
+    def live_map?(map : Semantics::DefMap) : Bool
+      each_map { |m| return true if m.same?(map) }
+      false
+    end
+
     private def each_map(& : Semantics::DefMap ->) : Nil
       @project_view.def_map.try { |m| yield m }
       @file_views.each_value { |v| v.def_map.try { |m| yield m } }
       @nested_views.each_value { |v| v.def_map.try { |m| yield m } }
       @library_view.try(&.def_map).try { |m| yield m }
+      @spec_views.each_value { |v| v.def_map.try { |m| yield m } }
     end
 
     # Text of a file as the compiler saw it, unless an open buffer differs

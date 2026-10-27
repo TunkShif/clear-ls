@@ -815,6 +815,19 @@ Steps (one commit each):
    lazily on the first spec opened. Specs: two spec files see each
    other's helper types; a script outside `spec/` keeps its own view;
    memory and references measured with the step 1 probe.
+   *Done:* spec files whose first `require` leads (through chained
+   per-directory `spec_helper`s) to the same helper form one view;
+   support files in `spec/` take the view of the spec program whose
+   closure has them. Two more causes of the memory growth surfaced and
+   were fixed: Typing objects were evicted once 8 maps existed, so every
+   search over spec views re-inferred their bodies; and nested
+   `spec/a/spec_helper.cr` chains split Marten into 22 groups. Soak
+   (Marten): 100 specs 858 → 300–332 MB; after 10 searches 1823 → 399–428
+   MB; references `Request#method` cold 3.5 s → 0.9 s, warm 0.8–1.0 s →
+   35 ms; sweep 60 s: 0 errors, 5 answers over 300 ms (was 78/120 s).
+   Tried and reverted: evicting disk-loaded VFS states (LRU 128) made
+   it worse (re-read files get new revisions, so their inference ran
+   again: 550 MB, warm 250 ms).
 3. **Cheap `prepareRename`.** Only the static refusals (operator,
    generated, library, invalid position); the reference search moves to
    `rename`, which still refuses on possible references.

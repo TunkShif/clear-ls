@@ -14,7 +14,7 @@ stops mid-phase). History and per-phase details are in
   jobs, budgets), split into six steps in
   [roadmap.md](roadmap.md#phase-10--responsiveness); then Phase 11
   (startup and warm caches) and Phase 12 (multi-root, deferred).
-- **In progress:** Phase 10, step 2 (step 1 done).
+- **In progress:** Phase 10, step 3 (steps 1–2 done).
 
 ## Resume
 
@@ -37,7 +37,5 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
 - Language parity: `tools/book_diff.py` must stay free of mismatches;
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - Diagnostics describe saved files only (compiler limitation).
-- Long requests block others and ignore `$/cancelRequest`; each spec
-  file is its own program view, so memory grows with open specs
-  (Phase 10).
+- Long requests block others and ignore `$/cancelRequest` (Phase 10).
 - No persistent index cache (Phase 11); single root (Phase 12).

@@ -101,6 +101,10 @@ changing it. Grammar quirks are in
 - Without a `shard.yml` every file is its own program: spec fixtures
   that need cross-file lookups must `require` each other or add a
   `shard.yml` with a target.
+- Typing holds the summary cache: dropping one for a still-live map
+  makes the next request re-infer everything it touches (a count-based
+  eviction did this on every multi-view search). Evicting disk-loaded
+  VFS states has the same effect, since re-reading bumps the revision.
 - `VFS#id_for` costs ~9 µs (URI normalisation): cache it in loops.
 - The real compiler rejects some fixtures that the fake spec prelude
   accepts (a class named `Box` collides with stdlib `Box(T)`).
