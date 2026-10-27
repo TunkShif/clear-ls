@@ -15,9 +15,11 @@ Design background:
   CST/HIR split, IDs, DefMap, CFG, inference, overloads, macros, queries.
 - [Cursor position lookup](design/cursor-position-semantic-lookup.md):
   position encoding, cursor bias, syntax→HIR mapping, program points.
+- [Persistent cache](design/persistent-cache.md) (Phase 11): layers,
+  invalidation, file format, compiler facts.
 - [Tree-sitter grammar notes](tree-sitter-grammar-notes.md): known parse gaps.
 
-Those design docs were written for the earlier "Opal" prototype; the names
+The first two design docs were written for the earlier "Opal" prototype; the names
 differ but the architecture applies unchanged.
 
 ## Pipeline
@@ -941,15 +943,22 @@ definition leads on to the target. Inference keeps `lookup_path`
 
 ### Phase 11 — startup and warm caches
 
+Design and measurements: [persistent-cache.md](design/persistent-cache.md).
+Marten today: `Index#load` 1.1 s for 1955 files (stdlib 460, shards 149,
+project 1346); decoding all their item trees from a binary pack takes
+15–25 ms, and statting every file ~10 ms.
+
 - **Parallel work-queue indexing.** Workers pick up newly discovered
   requires instead of waiting for each round. Measured ceiling on
   Marten: 1044 ms (8 workers, rounds) → 505 ms (one flat batch).
-- **Persistent cache** under the project: `.clear-ls/cache/` with its
-  own `.gitignore` (`*`), so it never shows in `git status`. Item
-  trees, requires and word sets per file, keyed by path, mtime, size and
-  content hash, plus the clear-ls version, grammar ABI and `crystal env`.
-  `--no-cache` and a `clearLs/clearCache` command. The stdlib part is
-  duplicated per project (size to be measured, est. 5–10 MB).
+- **Persistent cache in two layers.** Global
+  (`$XDG_CACHE_HOME/clear-ls/`): item trees of the stdlib, one pack per
+  Crystal version and stdlib path, and of each shard version.
+  Project-local (`.clear-ls/cache/`, ignored by its own `.gitignore`):
+  project files, path dependencies, resolved requires, word sets and
+  compiler facts. Entries are checked by size and content hash. Packs
+  carry a build key (`ClearLS::VERSION`, schema, grammar ABI). Custom
+  binary format with a string table, written atomically.
 - **Background warm-up** (idle, lowest priority, cancellable via the
   Phase 10 jobs): infer workspace bodies once so the first references
   search is warm.
@@ -957,9 +966,41 @@ definition leads on to the target. Inference keeps `lookup_path`
   libc for Tree-sitter under the Marten soak; keep or change
   `-Dcrystal_tree_sitter_no_init`.
 
+Steps (one commit each):
+
+1. **Version and measurement.** Bump `ClearLS::VERSION` to 0.10.1 for
+   the fix round after Phase 10 and start the version workflow
+   ([development.md](development.md#versions)). Add a startup probe that
+   splits `Index#load` into stat/read, parse+lower, require resolution
+   and DefMap build, so each later step has a baseline.
+2. **Stable hashes.** `String#hash` is seeded per process. A fixed
+   64-bit hash (FNV-1a or xxHash64, written in clear-ls, no new library)
+   for `ItemTree#fingerprint`, `Index.words` and `CompilerFacts`
+   digests. Spec: same value in two processes.
+3. **Work-queue indexing.** One worker pool with a shared queue; newly
+   resolved requires are queued as soon as they are found.
+4. **Codec.** `Cache::Pack` reader/writer (header, string table,
+   directory, payloads, checksum) for `ItemTree`. Round-trip spec over
+   the stdlib and a fixture project: equal fingerprints and
+   `dump-items`. Corrupt/truncated packs read as missing.
+5. **Global layer.** Stdlib and shard packs; lookup by pack key, use of
+   an entry only on size + hash match; merge-and-rename when a project
+   needs new files; eviction. Spec: two projects share the stdlib pack;
+   a patched file in `lib/` is re-parsed.
+6. **Local layer and controls.** Project pack with resolved requires,
+   word sets, path dependencies and the pack list; `.clear-ls/.gitignore`;
+   `--no-cache`, `initializationOptions.cache`, `clearLs/clearCache`,
+   `clear-ls cache info|clear`. Persist the compiler facts snapshot per
+   entry point and apply it at start (digest rule as today).
+7. **Background warm-up.**
+8. **Allocator measurement.**
+9. **Verification and docs.** Soak, sweep, `make nvim-check`, README.
+
 Exit criteria: Marten warm start < 300 ms; the first references search
 after warm-up matches warm time; cache invalidation specs (file edit,
-Crystal upgrade, clear-ls upgrade, deleted file).
+patched shard file, Crystal upgrade, clear-ls version bump, deleted file,
+corrupt pack); facts from the previous session are applied before the
+first check.
 
 ### Phase 12 — multi-root (deferred)
 

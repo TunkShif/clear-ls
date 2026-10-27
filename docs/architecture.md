@@ -180,8 +180,9 @@ the roadmap):
 - Module instance methods: `self` inside a module def is the module type,
   not "any includer".
 - Inlay hints don't cover parameters.
-- No persistent stdlib index cache; every start re-indexes (~0.6 s,
-  ~1.0 s on Marten) (Phase 11).
+- No persistent index cache; every start re-indexes (~0.6 s, ~1.1 s
+  on Marten). Design: [persistent-cache.md](design/persistent-cache.md)
+  (Phase 11).
 - One thread: long requests (references, rename, incoming calls) are
   `LSP::Job`s that yield at checkpoints; other requests still run one
   at a time.

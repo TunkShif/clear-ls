@@ -118,6 +118,9 @@ changing it. Grammar quirks are in
   makes the next request re-infer everything it touches (a count-based
   eviction did this on every multi-view search). Evicting disk-loaded
   VFS states has the same effect, since re-reading bumps the revision.
+- `String#hash` / `Object#hash` are seeded per process: never persist
+  them or compare them across processes (Phase 11 cache, compiler fact
+  digests). Use the stable hash.
 - `VFS#id_for` costs ~9 µs (URI normalisation): cache it in loops.
 - The real compiler rejects some fixtures that the fake spec prelude
   accepts (a class named `Box` collides with stdlib `Box(T)`).

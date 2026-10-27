@@ -28,11 +28,31 @@ Work proceeds phase by phase ([roadmap.md](roadmap.md)):
 3. **Verify in a real client** before calling a phase done: `make
    nvim-check`, plus a new check under `tools/nvim/` for the phase's
    features.
-4. **End of phase:** update the phase's *Status* and *Measurements* in the
+4. **Bump the version** with the change that needs it
+   ([Versions](#versions)).
+5. **End of phase:** update the phase's *Status* and *Measurements* in the
    roadmap and the feature list in `README.md`. Record new pitfalls in
    [gotchas.md](gotchas.md) and structural changes in
    [architecture.md](architecture.md).
-5. Stop and report at phase boundaries. Don't push.
+6. Stop and report at phase boundaries. Don't push.
+
+## Versions
+
+`ClearLS::VERSION` (`src/clear_ls/version.cr`) and `shard.yml`'s
+`version` stay equal. The version is reported in `serverInfo` and by
+`clear-ls version`. It is also part of the persistent cache's build key
+([persistent-cache.md](design/persistent-cache.md#invalidation-key)), so
+a wrong version can make a new binary read caches written by an old one.
+
+While pre-1.0, `0.<phase>.<patch>`:
+
+- **Minor** = the last completed phase: set in the commit that closes the
+  phase (`chore: release 0.11.0`), patch reset to 0.
+- **Patch** bumped in any commit that changes what is cached or how it
+  is read: item lowering (`src/clear_ls/items/`), the grammar pin, the
+  cache codec, the stable hash, or the compiler facts exporter. Also once
+  per fix round. The bump goes in the same commit as the change.
+- Bumping the cache `SCHEMA` (format change) also bumps the patch.
 
 ## Tests
 

@@ -14,10 +14,12 @@ stops mid-phase). History and per-phase details are in
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
 - **Also done:** fix round after Phase 10 — top-level `include` and the
   file-body namespace ([roadmap.md](roadmap.md#fix-round-after-phase-10-top-level-include-done)).
-- **Next:** Phase 11 — startup and warm caches (work-queue indexing,
-  persistent cache under `.clear-ls/cache/`, background warm-up,
-  allocator measurement). Measure first, then split into steps
-  ([roadmap.md](roadmap.md#phase-11--startup-and-warm-caches)).
+- **Next:** Phase 11 — startup and warm caches: work-queue indexing,
+  a two-layer persistent cache (global stdlib/shard packs, project-local
+  `.clear-ls/cache/`), background warm-up, allocator measurement.
+  Measured and split into steps
+  ([roadmap.md](roadmap.md#phase-11--startup-and-warm-caches), design in
+  [persistent-cache.md](design/persistent-cache.md)); start at step 1.
 - **In progress:** nothing.
 
 ## Resume
@@ -43,3 +45,7 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - Diagnostics describe saved files only (compiler limitation).
 - No persistent index cache (Phase 11); single root (Phase 12).
+- `String#hash` is seeded per process: fingerprints, word sets and fact
+  digests can't be persisted until Phase 11 step 2.
+- `ClearLS::VERSION` is still 0.1.0; the version workflow starts with
+  Phase 11 step 1 ([development.md](development.md#versions)).
