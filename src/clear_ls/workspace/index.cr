@@ -1,4 +1,5 @@
 require "./project"
+require "../base/memory"
 require "../vfs"
 require "../semantics/def_map"
 require "../semantics/def_id"
@@ -317,6 +318,7 @@ module ClearLS::Workspace
         end
       end
       invalidate_maps
+      ClearLS::Memory.trim # parse workers' freed trees (see Memory)
       Log.info { "indexed #{@entries.size} files" }
     end
 

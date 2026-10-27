@@ -18,6 +18,11 @@ changing it. Grammar quirks are in
    `Language#abi_version` fails to link if called. Use
    `Syntax::Grammar.abi_version`.
 
+4. **libc arenas keep freed Tree-sitter memory.** Trees parsed on
+   parallel workers are freed into those threads' malloc arenas, which
+   glibc doesn't return to the OS: RSS stays at the peak. `Memory.trim`
+   (`malloc_trim(0)`, ~20 ms) after indexing and after long jobs.
+
 ## Grammar
 
 - Punctuation is tagged with fields: use `Node#field`, which skips

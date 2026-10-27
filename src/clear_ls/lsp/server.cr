@@ -5,6 +5,7 @@ require "./job"
 require "../vfs"
 require "../version"
 require "../workspace/index"
+require "../base/memory"
 
 module ClearLS::LSP
   Log = ::Log.for("clear-ls.lsp")
@@ -136,6 +137,9 @@ module ClearLS::LSP
           @transport.write(JsonRpc.error(id, ErrorCode::InternalError, ex.message || ex.class.name))
         ensure
           @jobs.delete(id)
+          # A search parses many files; their freed trees stay in malloc
+          # arenas otherwise (`Memory`).
+          ClearLS::Memory.trim if @jobs.empty?
           Log.debug { "job #{method} #{id}: #{(Time.instant - job.started).total_milliseconds.round}ms#{job.cancelled? ? " (cancelled)" : ""}" }
         end
       end

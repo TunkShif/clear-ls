@@ -857,6 +857,11 @@ Steps (one commit each):
    Over budget: `references stopped after 5.0 s: 61 of 84 candidate
    files searched`; over the cap: ``` `run` appears in 2412 files (limit
    2000); search not run```.
+   *Also:* `ClearLS::Memory.trim` (glibc `malloc_trim`) after indexing
+   and after jobs. Tree-sitter's libc allocations freed by parallel
+   parse workers stayed in per-thread arenas: on Marten 130 of 234 MB
+   RSS right after indexing. Soak RSS: index 234 → 121 MB, 100 specs
+   324 → 214 MB, after 10 searches 421–441 → 277 MB.
 6. **Verification and docs.** Probe numbers before/after, `make
    nvim-check`, README.
 
