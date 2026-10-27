@@ -104,6 +104,113 @@ module ClearLS::IDE
       dedupe(found)
     end
 
+    # -- rename -----------------------------------------------------------------------
+
+    record RenamePlan, edits : Array(Reference)?, error : String?, range : TextRange?
+
+    METHOD_NAME = /\A[a-z_][A-Za-z0-9_]*[?!=]?\z/
+    TYPE_NAME   = /\A[A-Z][A-Za-z0-9_]*\z/
+    IVAR_NAME   = /\A@@?[a-z_][A-Za-z0-9_]*\z/
+
+    # Workspace rename of the symbol at *offset*: every exact reference,
+    # or a reason to refuse. Refuses when identity is not certain (any
+    # possible reference), when a declaration is generated (macro or
+    # compiler) or outside the workspace (stdlib, shards), and for
+    # operators. *new_name* nil only checks (prepareRename).
+    def rename_plan(ctx : Context, offset : UInt32, new_name : String?) : RenamePlan
+      target = target_at(ctx, offset) || return refuse("nothing to rename here")
+      sites = target_sites(target)
+      case target
+      when MethodTarget
+        return refuse("operators can't be renamed") unless target.name.matches?(METHOD_NAME)
+        return refuse("`#{target.name}` is defined by a macro or the compiler") if sites.any? { |s| !s.item.origin.source? }
+        if new_name && !new_name.matches?(METHOD_NAME)
+          return refuse("#{new_name.inspect} is not a valid method name")
+        end
+      when PathTarget
+        if sites.any? { |s| !s.item.origin.source? }
+          return refuse("`#{target.full_name}` is defined by a macro or the compiler")
+        end
+        if new_name && !new_name.matches?(TYPE_NAME)
+          return refuse("#{new_name.inspect} is not a valid type or constant name")
+        end
+      when IvarTarget
+        if new_name && (!new_name.matches?(IVAR_NAME) || new_name.starts_with?("@@") != target.class_var?)
+          return refuse("#{new_name.inspect} is not a valid #{target.class_var? ? "class" : "instance"} variable name")
+        end
+      end
+      if sites.any? { |s| @index.library_file?(s.file) }
+        return refuse("`#{target.name}` is declared outside the workspace")
+      end
+      if target.is_a?(MethodTarget)
+        # Overrides and implementations are one virtual method: renaming
+        # one alone would break the others (an abstract def left
+        # unimplemented, an override that no longer overrides).
+        target = family(ctx, target)
+        sites = target.sites
+        return refuse("`#{target.name}` is defined by a macro or the compiler") if sites.any? { |s| !s.item.origin.source? }
+        return refuse("`#{target.name}` overrides a method declared outside the workspace") if sites.any? { |s| @index.library_file?(s.file) }
+      end
+      refs = find(target, ctx.state.id)
+      if refs.any? { |r| !r.exact }
+        return refuse("#{refs.count { |r| !r.exact }} use(s) of `#{target.name}` can't be confirmed (unknown receiver type)")
+      end
+      if refs.any? { |r| @index.library_file?(r.file) }
+        return refuse("`#{target.name}` is used outside the workspace")
+      end
+      if target.is_a?(IvarTarget) && (gen = ivar_generated?(ctx, target))
+        return refuse(gen)
+      end
+      range = refs.find { |r| r.file == ctx.state.id && r.range.touches?(offset) }.try(&.range)
+      RenamePlan.new(refs, nil, range)
+    end
+
+    # Every def with the same name in the targets' hierarchy: from the
+    # topmost ancestor that declares it, all descendants that do.
+    def family(ctx : Context, target : MethodTarget) : MethodTarget
+      map = ctx.typing.def_map
+      key = ->(s : Semantics::Site) { s.item.signature.try(&.receiver) ? "self.#{s.item.name}" : s.item.name }
+      result = target.sites.dup
+      target.sites.each do |site|
+        k = key.call(site)
+        owner = map.namespace_at(site.file, site.item.range.start)
+        tops = map.ancestors(owner).select { |a| map[a].members[k]?.try &.any?(&.item.kind.def?) }
+        tops = [owner] if tops.empty?
+        tops.each do |top|
+          ([top] + map.descendants(top)).each do |t|
+            map[t].members[k]?.try &.each { |s| result << s if s.item.kind.def? }
+          end
+        end
+      end
+      MethodTarget.new(target.name, result.uniq { |s| site_key(s) }, target.owner)
+    end
+
+    # A def's name under the cursor (takes precedence over the class-body
+    # "locals" that accessor macro arguments lower to).
+    def def_name_at?(ctx : Context, offset : UInt32) : Bool
+      map = ctx.typing.def_map
+      ns = map.namespace_at(ctx.state.id, offset)
+      map[ns].each_member_site do |site|
+        next unless site.file == ctx.state.id && (site.item.kind.def? || site.item.kind.macro?)
+        return true if site.item.name_range.touches?(offset)
+      end
+      false
+    end
+
+    private def refuse(msg : String) : RenamePlan
+      RenamePlan.new(nil, msg, nil)
+    end
+
+    # Ivars of an accessor macro (`property x`) are renamed by renaming
+    # the accessor; refuse here rather than leave `x` behind.
+    private def ivar_generated?(ctx : Context, target : IvarTarget) : String?
+      map = ctx.typing.def_map
+      owner = map.lookup_path("::" + target.owner_name) || return nil
+      sites = map[owner].members[target.name]? || return nil
+      return nil unless sites.any? { |s| s.item.origin.macro? || s.item.origin.compiler? }
+      "`#{target.name}` comes from an accessor macro; rename the accessor instead"
+    end
+
     private def target_sites(target : RefTarget) : Array(Semantics::Site)
       case target
       when MethodTarget then target.sites

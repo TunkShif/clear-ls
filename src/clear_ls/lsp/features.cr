@@ -223,7 +223,7 @@ module ClearLS::LSP
       state = document(params)
       off = offset(state, params["position"])
       include_decl = params.dig?("context", "includeDeclaration").try(&.as_bool) != false
-      local = locals(state).references(off, include_decl)
+      local = def_name_at?(state, off) ? [] of HIR::Reference : locals(state).references(off, include_decl)
       unless local.empty?
         return local.map { |r| {uri: state.uri, range: range_json(state, r.range)} }
       end
@@ -258,20 +258,50 @@ module ClearLS::LSP
 
     private def prepare_rename(params : JSON::Any)
       state = document(params)
-      r, name = locals(state).prepare_rename(offset(state, params["position"])) ||
-                raise ResponseError.new(ErrorCode::InvalidRequest, "only local variables can be renamed yet")
-      {range: range_json(state, r), placeholder: name}
+      off = offset(state, params["position"])
+      if !def_name_at?(state, off) && (hit = locals(state).prepare_rename(off))
+        r, name = hit
+        return {range: range_json(state, r), placeholder: name}
+      end
+      plan = rename_plan(state, off, nil)
+      if err = plan.error
+        raise ResponseError.new(ErrorCode::InvalidRequest, err)
+      end
+      r = plan.range || raise ResponseError.new(ErrorCode::InvalidRequest, "nothing to rename here")
+      {range: range_json(state, r), placeholder: state.text.byte_slice(r.start, r.size)}
     end
 
     private def rename(params : JSON::Any)
       state = document(params)
+      off = offset(state, params["position"])
       new_name = params["newName"].as_s
-      unless IDE::Locals.valid_local?(new_name)
-        raise ResponseError.new(ErrorCode::InvalidParams, "#{new_name.inspect} is not a valid local variable name")
+      if !def_name_at?(state, off) && locals(state).prepare_rename(off)
+        unless IDE::Locals.valid_local?(new_name)
+          raise ResponseError.new(ErrorCode::InvalidParams, "#{new_name.inspect} is not a valid local variable name")
+        end
+        edits = locals(state).rename(off, new_name) ||
+                raise ResponseError.new(ErrorCode::InvalidRequest, "cannot rename this symbol")
+        return {changes: {state.uri => edits.map { |(r, t)| {range: range_json(state, r), newText: t} }}}
       end
-      edits = locals(state).rename(offset(state, params["position"]), new_name) ||
-              raise ResponseError.new(ErrorCode::InvalidRequest, "cannot rename this symbol")
-      {changes: {state.uri => edits.map { |(r, t)| {range: range_json(state, r), newText: t} }}}
+      plan = rename_plan(state, off, new_name)
+      if err = plan.error
+        raise ResponseError.new(ErrorCode::InvalidRequest, err)
+      end
+      changes = {} of String => Array(NamedTuple(range: NamedTuple(start: NamedTuple(line: UInt32, character: UInt32), end: NamedTuple(line: UInt32, character: UInt32)), newText: String))
+      plan.edits.not_nil!.each do |r|
+        loc = location_json(IDE::Location.new(r.file, r.range)) || next
+        (changes[loc[:uri]] ||= [] of NamedTuple(range: NamedTuple(start: NamedTuple(line: UInt32, character: UInt32), end: NamedTuple(line: UInt32, character: UInt32)), newText: String)) << {range: loc[:range], newText: new_name}
+      end
+      {changes: changes}
+    end
+
+    private def def_name_at?(state : FileState, off : UInt32) : Bool
+      references_finder.def_name_at?(IDE::References::Context.new(state, bodies(state), typing(state)), off)
+    end
+
+    private def rename_plan(state : FileState, off : UInt32, new_name : String?) : IDE::References::RenamePlan
+      ctx = IDE::References::Context.new(state, bodies(state), typing(state))
+      references_finder.rename_plan(ctx, off, new_name)
     end
 
     private def semantic_tokens(params : JSON::Any, range : JSON::Any?)

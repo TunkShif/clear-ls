@@ -180,3 +180,72 @@ describe "ivar definitions and references" do
     end
   end
 end
+
+private def rename_edits(c, path, needle, shift, new_name) : Array(String)
+  u = c.open(path)
+  r = c.request("textDocument/rename", {textDocument: {uri: u}, position: c.pos(path, needle, shift), newName: new_name})
+  r["changes"].as_h.flat_map do |uri, edits|
+    edits.as_a.map { |e| "#{uri.split("/").last}:#{e["range"]["start"]["line"].as_i + 1}:#{e["range"]["start"]["character"].as_i}-#{e["range"]["end"]["character"].as_i}=#{e["newText"]}" }
+  end.sort
+end
+
+private def rename_error(c, path, needle, shift, new_name = "x") : String
+  u = c.open(path)
+  c.request("textDocument/rename", {textDocument: {uri: u}, position: c.pos(path, needle, shift), newName: new_name})
+  "no error"
+rescue ex
+  ex.message.not_nil!
+end
+
+describe "workspace rename" do
+  it "renames a method without touching same-name methods of other types or programs" do
+    with_client(REFS_APP, PRELUDE_FILES) do |c|
+      # Square#area implements Shape#area: the whole family is renamed
+      # (Circle#area too), the other program's Square#area is not.
+      rename_edits(c, "src/app.cr", "sq.area", 3, "size").should eq [
+        "app.cr:11:2-6=size", "app.cr:4:4-8=size", "app.cr:8:3-7=size",
+        "shapes.cr:18:6-10=size", "shapes.cr:2:15-19=size", "shapes.cr:8:6-10=size",
+      ]
+      rename_edits(c, "src/app.cr", "Square::SIDES", 8, "EDGES").should eq [
+        "app.cr:12:13-18=EDGES", "shapes.cr:6:2-7=EDGES", "shapes.cr:9:4-9=EDGES",
+      ]
+    end
+  end
+
+  it "renames an unambiguous method, a type with its reopenings, and ivars" do
+    files = {
+      "shard.yml"   => "name: app\ntargets:\n  app:\n    main: src/app.cr\n",
+      "src/app.cr"  => "require \"./w\"\nw = Widget.new(1)\nw.render\nw.size\n",
+      "src/w.cr"    => "class Widget\n  def initialize(@size : Int32)\n  end\n\n  def render : Int32\n    @size + size\n  end\n\n  def size : Int32\n    @size\n  end\nend\n\nclass Widget\n  def again\n    render\n  end\nend\n",
+      "scripts/x.cr" => "class Widget\n  def render; end\nend\nWidget.new.render\n",
+    }
+    with_client(files, PRELUDE_FILES) do |c|
+      rename_edits(c, "src/app.cr", "w.render", 2, "draw").should eq [
+        "app.cr:3:2-8=draw", "w.cr:16:4-10=draw", "w.cr:5:6-12=draw",
+      ]
+      rename_edits(c, "src/app.cr", "Widget.new", 0, "Gadget").should eq [
+        "app.cr:2:4-10=Gadget", "w.cr:14:6-12=Gadget", "w.cr:1:6-12=Gadget",
+      ]
+      rename_edits(c, "src/w.cr", "@size + ", 1, "@count").should eq [
+        "w.cr:10:4-9=@count", "w.cr:2:17-22=@count", "w.cr:6:4-9=@count",
+      ]
+      u = c.open("src/w.cr")
+      prep = c.request("textDocument/prepareRename", {textDocument: {uri: u}, position: c.pos("src/w.cr", "def size", 4)})
+      prep["placeholder"].should eq "size"
+    end
+  end
+
+  it "refuses what it can't rename safely" do
+    files = {
+      "shard.yml"  => "name: app\ntargets:\n  app:\n    main: src/app.cr\n",
+      "src/app.cr" => "class P\n  property x = 1\n\n  def +(o)\n    self\n  end\n\n  def go(v)\n    v.run\n  end\n\n  def run; end\nend\nP.new + P.new\n\"s\".size\n",
+    }
+    with_client(files, PRELUDE_FILES) do |c|
+      rename_error(c, "src/app.cr", "def +", 4).should contain("operators")
+      rename_error(c, "src/app.cr", "property x", 9).should contain("macro")
+      rename_error(c, "src/app.cr", "def run", 4).should contain("can't be confirmed") # v.run
+      rename_error(c, "src/app.cr", "size", 0).should contain("outside the workspace")
+      rename_error(c, "src/app.cr", "def go", 4, "Go").should contain("not a valid method name")
+    end
+  end
+end

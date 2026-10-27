@@ -111,6 +111,10 @@ module ClearLS::Workspace
     end
 
     # In the stdlib or a shard (a `CRYSTAL_PATH` entry).
+    def library_file?(file : FileId) : Bool
+      @entries[file]?.try { |e| library_path?(e.path) } || false
+    end
+
     private def library_path?(path : String) : Bool
       @project.crystal_path.any? { |d| path.starts_with?(d.ends_with?('/') ? d : d + "/") }
     end

@@ -687,6 +687,14 @@ Steps (one commit each):
 6. **Workspace rename.** Methods, types, constants, ivars: exact
    references only; refuse as described above; `prepareRename` explains
    why it refuses. Rename of a type renames every reopening and use.
+   *Done:* `References#rename_plan` (locals keep their path; a def name
+   wins over the class-body "locals" of accessor arguments). A method
+   rename covers its virtual family (the topmost ancestor declaring it
+   and every descendant's def of that name), so overrides stay
+   overrides. Refuses: operators, macro/compiler-generated declarations
+   (including accessor ivars), declarations or uses outside the
+   workspace, any possible (unconfirmed) reference, invalid names.
+   `prepareRename` returns the refusal as the error message.
 7. **Incoming calls and type hierarchy.** `callHierarchy/incomingCalls`
    from method references grouped by enclosing def;
    `typeHierarchy/{prepare,supertypes,subtypes}` from the DefMap

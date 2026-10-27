@@ -51,16 +51,15 @@ describe "LSP phase 2 features" do
     end
   end
 
-  it "renames locals and refuses non-locals" do
+  it "renames locals" do
     with_client(LOCALS_APP) do |c|
       u = c.open("src/app.cr")
       prep = c.request("textDocument/prepareRename", {textDocument: {uri: u}, position: c.pos("src/app.cr", "message =")})
       prep["placeholder"].should eq "message"
       edit = c.request("textDocument/rename", {textDocument: {uri: u}, position: c.pos("src/app.cr", "message ="), newName: "text"})
       edit["changes"][u].as_a.size.should eq 4
-      expect_raises(Exception, /only local variables/) do
-        c.request("textDocument/prepareRename", {textDocument: {uri: u}, position: c.pos("src/app.cr", "greet")})
-      end
+      # Methods go through workspace rename (phase 9 specs).
+      c.request("textDocument/prepareRename", {textDocument: {uri: u}, position: c.pos("src/app.cr", "greet")})["placeholder"].should eq "greet"
       expect_raises(Exception, /not a valid local/) do
         c.request("textDocument/rename", {textDocument: {uri: u}, position: c.pos("src/app.cr", "message ="), newName: "Text"})
       end
