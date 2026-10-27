@@ -32,6 +32,18 @@ Example: `bin/probes/coverage $PWD $PWD/src`, or with the stdlib as PREFIX
 | `book_diff.py [FILE...]` | compiler `typeof` vs clear-ls for the `__t` markers in `fixtures/book/` (examples from the Crystal 1.22 syntax & semantics book) |
 | `gen_syntax.cr` | generates `src/clear_ls/syntax/kinds.cr` (`make syntax-gen`) |
 
+## Load probes on an external project
+
+`tools/external.sh` clones pinned external projects (Marten, 1955 indexed
+files) into `tools/external/` (gitignored) and installs their shards.
+Both scripts use `tools/lsp_client.py` and `bin/clear-ls` (`make
+release` first; `CLEAR_LS_BIN` overrides).
+
+| Script | Use |
+|---|---|
+| `soak.py [--specs N] [--searches N]` | index time and RSS, RSS after opening N specs, references cold/warm, hover p50/p99 while a references search runs, `$/cancelRequest`; prints `EXIT ok/FAIL` for the Phase 10 exit criteria |
+| `sweep.py [--seconds S]` | random-position hover/definition/completion/... over source files: internal errors and timeouts (exit 1), p50/p99/max per method, answers over 300 ms |
+
 ## Headless Neovim checks (`tools/nvim/`, `tools/fixtures/`)
 
 `make nvim-check` builds the release binary and runs each check in turn.

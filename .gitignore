@@ -5,3 +5,5 @@
 /.crystal-cache/
 /.shards/
 /*_tmp.cr
+/tools/external/
+__pycache__/

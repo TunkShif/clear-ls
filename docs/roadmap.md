@@ -802,6 +802,13 @@ Steps (one commit each):
    committed): internal errors, answers over budget, p50/p99 per method,
    hover latency during a long request, RSS after opening N specs. This
    is the phase's baseline and regression shield.
+   *Done:* `tools/external.sh` (Marten pinned at `9c29576`),
+   `tools/soak.py`, `tools/sweep.py`, `tools/lsp_client.py`. Baseline:
+   index 1.1 s / 208 MB; 100 specs opened 858 MB; after 10 searches
+   1823 MB; references `Request#method` 3.5 s cold, 0.8–1.0 s warm;
+   hover during that search 3.8 s; cancel ignored (full result 0.9 s
+   later). Sweep (120 s, 28,384 requests): 0 errors, 0 timeouts, 78
+   answers over 300 ms (77 prepareRename, p99 788 ms, max 3.2 s).
 2. **Spec program views.** `Index::View` for each spec helper group:
    roots are all `*_spec.cr` files under `spec/` that require that
    helper (detected from the first `require` of each spec), indexed
