@@ -11,6 +11,8 @@ module ClearLS::CLI
       dump-items FILE     Print the declarations (item tree) of FILE
       dump-hir FILE LINE  Print the body HIR of the def at LINE (1-based)
       dump-cfg FILE LINE  Print the control-flow graph of the def at LINE
+      cache info [ROOT]   Print cache locations and pack sizes
+      cache clear [ROOT]  Delete ROOT's local cache and the global packs it uses
       version             Print version information
 
     Options:
@@ -20,6 +22,7 @@ module ClearLS::CLI
     log_level = ::Log::Severity::Info
     log_file = nil.as(String?)
     show_ranges = false
+    use_cache = true
 
     parser = OptionParser.new do |opts|
       opts.banner = USAGE
@@ -27,6 +30,7 @@ module ClearLS::CLI
         log_level = ::Log::Severity.parse?(v) || abort "unknown log level #{v}"
       end
       opts.on("--log-file PATH", "Write logs to PATH instead of stderr") { |v| log_file = v }
+      opts.on("--no-cache", "lsp: don't read or write the persistent index cache") { use_cache = false }
       opts.on("--ranges", "dump-cst: include byte ranges") { show_ranges = true }
       opts.on("-h", "--help", "Show this help") { puts opts; exit 0 }
       opts.invalid_option { |o| STDERR.puts "unknown option #{o}"; STDERR.puts opts; exit 2 }
@@ -41,6 +45,7 @@ module ClearLS::CLI
     when "lsp"
       STDOUT.sync = false
       server = LSP::Server.new(LSP::Transport.new(STDIN, STDOUT))
+      server.cache_enabled = use_cache
       server.run
     when "dump-cst"
       file = args.shift? || abort "dump-cst: missing FILE"
@@ -69,8 +74,32 @@ module ClearLS::CLI
         Flow::Builder.build(body).dump(body, text, STDOUT)
       end
       0
+    when "cache"
+      sub = args.shift? || "info"
+      root = File.expand_path(args.shift? || Dir.current)
+      project = Workspace::Project.detect(root)
+      store = Cache::Store.new(Cache::Store.default_dir, project.stdlib_dir, project.crystal_version, project.root)
+      local = File.join(Cache::Local.dir_for(project.root), "cache")
+      case sub
+      when "info"
+        puts "build key #{Cache.build_key}"
+        puts "global #{store.dir}"
+        store.pack_keys.each do |k|
+          path = store.pack_path(k)
+          puts "  #{File.basename(path)} #{File.exists?(path) ? "#{File.size(path) // 1024} KB" : "(none)"}"
+        end
+        puts "local #{local}"
+        Dir.glob(File.join(local, "*.pack")).sort.each { |p| puts "  #{File.basename(p)} #{File.size(p) // 1024} KB" }
+      when "clear"
+        store.pack_keys.each { |k| File.delete?(store.pack_path(k)) }
+        Cache::Local.clear(project.root)
+        puts "cleared #{local} and #{store.pack_keys.size} global packs"
+      else
+        abort "cache: unknown subcommand #{sub} (info, clear)"
+      end
+      0
     when "version"
-      puts "clear-ls #{VERSION}"
+      puts "clear-ls #{VERSION} (#{Cache::BUILD_ID})"
       puts "tree-sitter-crystal ABI #{Syntax::Grammar.abi_version}"
       0
     else

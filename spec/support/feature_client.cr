@@ -14,31 +14,39 @@ class FeatureClient
   # requires them all.
   # *compiler*: `initializationOptions.compiler`; the real compiler is off
   # unless a spec asks for it.
-  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false}, budgets = {} of String => Float64)
-    @root = File.tempname("clear-ls-feat")
+  # *cache*: `initializationOptions.cache` (off unless given). *root*:
+  # reuse a project directory (a second session over the same files).
+  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false}, budgets = {} of String => Float64,
+                 cache = {enabled: false}, root : String? = nil)
+    @root = root || File.tempname("clear-ls-feat")
     files.each do |path, text|
       full = File.join(@root, path)
       Dir.mkdir_p(File.dirname(full))
-      File.write(full, text)
+      # Unchanged files keep their mtime (cache specs reuse *root*).
+      write_if_changed(full, text)
     end
     @server = Server.new(Transport.new(IO::Memory.new, @out))
     std_dir = nil
     if stdlib
       std_dir = File.join(@root, ".stdlib")
       Dir.mkdir_p(std_dir)
-      stdlib.each { |path, text| File.write(File.join(std_dir, path), text) }
-      File.write(File.join(std_dir, "prelude.cr"), stdlib.keys.map { |k| %(require "./#{k.rchop(".cr")}") }.join('\n'))
+      stdlib.each { |path, text| write_if_changed(File.join(std_dir, path), text) }
+      write_if_changed(File.join(std_dir, "prelude.cr"), stdlib.keys.map { |k| %(require "./#{k.rchop(".cr")}") }.join('\n'))
     end
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
     @server.project_factory = ->(root : String) { Workspace::Project.new(root, paths, std_dir, nil, "x86_64-unknown-linux-gnu") }
     @server.index_workers = 1
-    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets}})
+    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets, cache: cache}})
     notify("initialized", {} of String => String)
   end
 
-  def cleanup
+  private def write_if_changed(path : String, text : String) : Nil
+    File.write(path, text) unless File.file?(path) && File.read(path) == text
+  end
+
+  def cleanup(keep = false)
     request("shutdown") rescue nil
-    FileUtils.rm_rf(@root)
+    FileUtils.rm_rf(@root) unless keep
   end
 
   def uri(path : String) : String

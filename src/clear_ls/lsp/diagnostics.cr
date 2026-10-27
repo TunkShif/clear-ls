@@ -86,6 +86,23 @@ module ClearLS::LSP
       methods = parsed.methods || old.try(&.methods) || [] of Compiler::Exporter::MethodFact
       ivars = parsed.ivars || old.try(&.ivars) || [] of Compiler::Exporter::IvarFact
       @entry_facts[entry] = Workspace::CompilerFacts.snapshot(methods, ivars)
+      @index.try(&.local).try(&.write_facts(@entry_facts))
+      apply_entry_facts
+    end
+
+    # Facts of the previous session (local cache), applied before the
+    # first check; each file's facts apply only while its text matches
+    # the digest taken with them. The first check replaces them.
+    private def restore_facts : Nil
+      return unless compiler_enabled? && @compiler_options["facts"]?.try(&.as_bool?) != false
+      local = @index.try(&.local) || return
+      saved = local.read_facts
+      return if saved.empty?
+      @entry_facts = saved
+      apply_entry_facts
+    end
+
+    private def apply_entry_facts : Nil
       digests = {} of String => UInt64
       @entry_facts.each_value { |f| digests.merge!(f.digests) }
       merged = Workspace::CompilerFacts.new(

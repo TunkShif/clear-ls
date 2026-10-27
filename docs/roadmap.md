@@ -1020,6 +1020,17 @@ Steps (one commit each):
    `--no-cache`, `initializationOptions.cache`, `clearLs/clearCache`,
    `clear-ls cache info|clear`. Persist the compiler facts snapshot per
    entry point and apply it at start (digest rule as today).
+   *Done:* `Cache::Local` (`src/clear_ls/cache/local.cr`): entries by
+   size + mtime (ns), so a hit doesn't read the file; word sets in the
+   payload; requires are still resolved on load (globs and new files;
+   ~7 ms on Marten across workers). Dropped files are pruned on flush.
+   Facts: `facts.pack`, written after each check, restored on
+   `initialized` before the first check. The pack key is the Crystal
+   version, target and `CRYSTAL_PATH`. `clear-ls lsp` enables the cache;
+   `Server#cache_enabled` is off for embedders and specs. Marten through
+   the server (compiler off, `index ready` log): cold 976 ms (writes
+   packs), warm 213–227 ms, first `workspace/symbol` answered 233–247 ms
+   after `initialized`; local pack 2.2 MB. 0.10.4.
 7. **Background warm-up.**
 8. **Allocator measurement.**
 9. **Verification and docs.** Soak, sweep, `make nvim-check`, README.

@@ -80,6 +80,11 @@ module ClearLS::Cache
       {} of String => String
     end
 
+    # Pack keys of this project's stdlib and shards.
+    def pack_keys : Array(String)
+      @areas.map(&.key)
+    end
+
     # True when *path* belongs to the global layer.
     def global?(path : String) : Bool
       !area_of(path).nil?

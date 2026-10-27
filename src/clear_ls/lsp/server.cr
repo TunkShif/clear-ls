@@ -45,6 +45,11 @@ module ClearLS::LSP
     # Overridable for tests: builds the project for a workspace root.
     property project_factory : Proc(String, Workspace::Project) = ->(root : String) { Workspace::Project.detect(root) }
     property index_workers : Int32? = nil
+    # Persistent cache (`--no-cache` / `initializationOptions.cache`).
+    # Off by default for embedders and specs; `clear-ls lsp` turns it on.
+    property cache_enabled = false
+    # Global cache directory override (else `Cache::Store.default_dir`).
+    property cache_dir : String? = nil
 
     def initialize(@transport : Transport)
     end
@@ -204,9 +209,10 @@ module ClearLS::LSP
 
       case method
       when "initialize"         then initialize_request(params)
-      when "shutdown"           then stop_compiler; @state = State::ShuttingDown; nil
+      when "shutdown"           then stop_compiler; @index.try(&.flush_cache); @state = State::ShuttingDown; nil
       when "clearLs/syntaxTree" then syntax_tree(params)
       when "clearLs/expandMacro" then expand_macro(params)
+      when "clearLs/clearCache" then clear_cache
       else                           feature_request(method, params)
       end
     end
@@ -252,6 +258,10 @@ module ClearLS::LSP
       @references_options = params.dig?("initializationOptions", "references") || @references_options
       @budget_options = params.dig?("initializationOptions", "budgets") || @budget_options
       read_compiler_options(params)
+      if opts = params.dig?("initializationOptions", "cache")
+        opts["enabled"]?.try(&.as_bool?).try { |v| @cache_enabled = v }
+        opts["dir"]?.try(&.as_s?).try { |v| @cache_dir = v }
+      end
       @state = State::Initialized
 
       {
@@ -292,7 +302,9 @@ module ClearLS::LSP
     private def load_index : Nil
       return if @index
       elapsed = Time.measure do
-        idx = Workspace::Index.new(@project_factory.call(@root), @vfs)
+        project = @project_factory.call(@root)
+        idx = Workspace::Index.new(project, @vfs)
+        attach_cache(idx, project) if @cache_enabled
         workers = @index_workers
         workers ? idx.load(workers) : idx.load
         # Open buffers may have arrived before indexing; they win.
@@ -300,7 +312,51 @@ module ClearLS::LSP
         idx.def_map # build now rather than on the first request
         @index = idx
       end
-      Log.info { "index ready: #{index.size} files in #{elapsed.total_milliseconds.round}ms" }
+      Log.info { "index ready: #{index.size} files in #{elapsed.total_milliseconds.round}ms#{cache_summary}" }
+      restore_facts
+    end
+
+    private def attach_cache(idx : Workspace::Index, project : Workspace::Project) : Nil
+      idx.store = Cache::Store.new(@cache_dir || Cache::Store.default_dir, project.stdlib_dir, project.crystal_version, project.root)
+      idx.local = Cache::Local.new(project.root, local_cache_key(project))
+    rescue ex
+      Log.warn { "cache disabled: #{ex.message}" }
+      idx.store = nil
+      idx.local = nil
+    end
+
+    # What local entries depend on besides file contents: resolved
+    # requires aren't stored, so only the toolchain identity matters for
+    # the facts.
+    private def local_cache_key(project : Workspace::Project) : String
+      "#{project.crystal_version || "unknown"} #{project.target_triple} #{project.crystal_path.join(':')}"
+    end
+
+    private def cache_summary : String
+      idx = @index || return ""
+      g = idx.store
+      l = idx.local
+      return "" unless g || l
+      " (cache: global #{g.try(&.hits) || 0}/#{(g.try(&.hits) || 0) + (g.try(&.misses) || 0)}, " \
+      "local #{l.try(&.hits) || 0}/#{(l.try(&.hits) || 0) + (l.try(&.misses) || 0)})"
+    end
+
+    # `clearLs/clearCache`: drops this project's local cache and the
+    # global packs it uses, then re-indexes from source.
+    private def clear_cache
+      idx = @index || raise ResponseError.new(ErrorCode::ServerNotInitialized, "workspace not indexed")
+      project = idx.project
+      idx.store.try { |st| st.pack_keys.each { |k| File.delete?(st.pack_path(k)) } }
+      Cache::Local.clear(project.root)
+      @index = nil
+      @typings.clear
+      load_index
+      # This session's facts are current: keep them in the new index.
+      unless @entry_facts.empty?
+        index.local.try(&.write_facts(@entry_facts))
+        apply_entry_facts
+      end
+      {cleared: true, files: index.size}
     end
 
     # -- text sync ----------------------------------------------------------

@@ -5,6 +5,7 @@ require "../semantics/def_map"
 require "../semantics/def_id"
 require "./compiler_facts"
 require "../cache/store"
+require "../cache/local"
 
 module ClearLS::Workspace
   # Item trees for every indexed file, and `DefMap`s over program views.
@@ -48,8 +49,10 @@ module ClearLS::Workspace
 
     getter project : Project
     getter rebuilds = 0
-    # Persistent item trees of the stdlib and shards (nil: no cache).
+    # Persistent item trees of the stdlib and shards, and of everything
+    # else (nil: no cache). See design/persistent-cache.md.
     property store : Cache::Store? = nil
+    property local : Cache::Local? = nil
     @entries = {} of FileId => Entry
     @project_view = View.new([] of FileId)
     # Views of workspace files outside the project's closure, by file.
@@ -307,11 +310,20 @@ module ClearLS::Workspace
 
     getter load_stats = LoadStats.new
 
+    # Which cache layer a file belongs to, and whether it came from it.
+    enum Cached
+      None
+      GlobalHit
+      GlobalMiss
+      LocalHit
+      LocalMiss
+    end
+
     # What a worker produces for one file. `words` is nil for library files
-    # (not searched for references). `fresh` is set when the tree was
-    # lowered here and belongs in the global cache.
+    # (not searched for references). `meta` is set for cache misses (the
+    # entry to record).
     record Loaded, path : String, entry : Entry?, words : Set(UInt64)?,
-      fresh : {Cache::FileMeta, Items::ItemTree}? = nil
+      cached : Cached = Cached::None, meta : Cache::FileMeta? = nil
 
     # Indexes the prelude closure and workspace files from disk, then their
     # require closure, on *workers* threads. A shared work queue: each
@@ -328,7 +340,7 @@ module ClearLS::Workspace
       index = t.elapsed
       invalidate_maps
       trim = Time.measure { ClearLS::Memory.trim } # parse workers' freed trees (see Memory)
-      @store.try(&.flush)
+      flush_cache
       @load_stats = LoadStats.new(count, walk, index, trim, start.elapsed)
       Log.info { "indexed #{@entries.size} files" }
     end
@@ -342,7 +354,7 @@ module ClearLS::Workspace
       roots.each { |p| todo << p if seen.add?(p) }
       add = ->(l : Loaded) do
         entry = l.entry || return
-        l.fresh.try { |(meta, tree)| @store.try(&.record(l.path, meta, tree)) }
+        record_cached(l, entry)
         id = @vfs.id_for(VFS.uri_for(l.path))
         # An open buffer is authoritative; keep its entry.
         return if keep_open && @entries[id]? && @vfs.open?(VFS.uri_for(l.path))
@@ -400,25 +412,56 @@ module ClearLS::Workspace
     # its words. Runs on workers: touches only its arguments and read-only
     # project state (resolver, flags, CRYSTAL_PATH).
     private def load_file(parser : Syntax::Parser, path : String) : Loaded
-      text = File.read(path)
-      words = library_path?(path) ? nil : Index.words(text)
-      if (store = @store) && store.global?(path)
+      store = @store
+      if store && store.global?(path)
+        # Global entries are shared between checkouts: validated by content.
+        text = File.read(path)
+        words = library_path?(path) ? nil : Index.words(text)
         hash = StableHash.hash(text)
         if tree = store.lookup(path, text.bytesize.to_i64, hash)
-          return Loaded.new(path, make_entry(path, tree), words)
+          return Loaded.new(path, make_entry(path, tree), words, Cached::GlobalHit)
         end
-        tree = Items::Lower.lower(parser.parse(text))
-        mtime = File.info?(path).try(&.modification_time.to_unix) || 0_i64
-        return Loaded.new(path, make_entry(path, tree), words, {Cache::FileMeta.new(path, text.bytesize.to_i64, mtime, hash), tree})
+        meta = Cache::FileMeta.new(path, text.bytesize.to_i64, 0_i64, hash)
+        return Loaded.new(path, make_entry(path, Items::Lower.lower(parser.parse(text))), words, Cached::GlobalMiss, meta)
       end
-      entry = make_entry(path, Items::Lower.lower(parser.parse(text)))
-      Loaded.new(path, entry, words)
+      if local = @local
+        # Local entries: size + mtime, so a hit doesn't read the file.
+        # Stat before reading: a write in between makes the next lookup miss.
+        info = File.info(path)
+        if hit = local.lookup(path, info)
+          return Loaded.new(path, make_entry(path, hit.tree), hit.words, Cached::LocalHit)
+        end
+        text = File.read(path)
+        words = library_path?(path) ? nil : Index.words(text)
+        meta = Cache::FileMeta.new(path, info.size, Cache::Local.mtime(info), 0_u64)
+        return Loaded.new(path, make_entry(path, Items::Lower.lower(parser.parse(text))), words, Cached::LocalMiss, meta)
+      end
+      text = File.read(path)
+      words = library_path?(path) ? nil : Index.words(text)
+      Loaded.new(path, make_entry(path, Items::Lower.lower(parser.parse(text))), words)
     rescue ex : IO::Error | File::Error
       Log.warn { "cannot read #{path}: #{ex.message}" }
       Loaded.new(path, nil, nil)
     rescue ex
       Log.error(exception: ex) { "failed to index #{path}" }
       Loaded.new(path, nil, nil)
+    end
+
+    # Hands a loaded file to its cache layer (indexing fiber only).
+    private def record_cached(l : Loaded, entry : Entry) : Nil
+      case l.cached
+      in .global_miss? then @store.try(&.record(l.path, l.meta.not_nil!, entry.items))
+      in .local_miss?  then @local.try(&.record(l.path, l.meta.not_nil!, entry.items, l.words))
+      in .local_hit?   then @local.try(&.use(l.path))
+      in .global_hit?, .none?
+      end
+    end
+
+    # Writes cache entries of files indexed since the last flush (after
+    # `#load`, and at shutdown for files indexed later).
+    def flush_cache : Nil
+      @store.try(&.flush)
+      @local.try(&.flush)
     end
 
     # Re-lowers an open/changed file from its current VFS state. Returns true
