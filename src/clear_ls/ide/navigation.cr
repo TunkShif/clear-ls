@@ -13,8 +13,8 @@ module ClearLS::IDE
   # Implementations of a method are same-named defs in subtypes of the
   # owner (overrides, implementations of an abstract def, module methods
   # implemented by includers). Implementations of a type are its
-  # transitive subtypes and includers. Incoming calls need workspace
-  # references (Phase 9).
+  # transitive subtypes and includers. Incoming calls come from
+  # workspace references (`References`, LSP `incoming_calls`).
   class Navigation
     MAX_RESULTS = 200
 

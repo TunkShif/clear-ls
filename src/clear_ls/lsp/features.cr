@@ -54,6 +54,7 @@ module ClearLS::LSP
         implementationProvider:  true,
         documentFormattingProvider: true,
         callHierarchyProvider:   true,
+        typeHierarchyProvider:   true,
         signatureHelpProvider:   {triggerCharacters: ["(", ","], retriggerCharacters: [" "]},
         semanticTokensProvider:  {
           legend: {
@@ -86,7 +87,10 @@ module ClearLS::LSP
       when "textDocument/formatting"     then formatting(params)
       when "textDocument/prepareCallHierarchy" then prepare_call_hierarchy(params)
       when "callHierarchy/outgoingCalls" then outgoing_calls(params)
-      when "callHierarchy/incomingCalls" then [] of Nil
+      when "callHierarchy/incomingCalls" then incoming_calls(params)
+      when "textDocument/prepareTypeHierarchy" then prepare_type_hierarchy(params)
+      when "typeHierarchy/supertypes"    then type_hierarchy(params, super: true)
+      when "typeHierarchy/subtypes"      then type_hierarchy(params, super: false)
       when "textDocument/semanticTokens/full"  then semantic_tokens(params, nil)
       when "textDocument/semanticTokens/range" then semantic_tokens(params, params["range"])
       else
@@ -372,6 +376,99 @@ module ClearLS::LSP
         to = call_item_json(c.target, index.def_map_for(state.id)) || next
         {to: to, fromRanges: c.ranges.map { |r| range_json(state, r) }}
       end
+    end
+
+    # Callers of the def in *item*: exact references grouped by the def
+    # (or file body) that contains them.
+    private def incoming_calls(params : JSON::Any)
+      data = params["item"]["data"]?
+      uri = params["item"]["uri"].as_s
+      state = @vfs.file?(uri) || @vfs.load(uri) || return [] of Nil
+      start = data.try(&.["start"]?.try(&.as_i64.to_u32)) || offset(state, params["item"]["selectionRange"]["start"])
+      item = navigation(state).call_item_at(start + 1) || return [] of Nil
+      finder = references_finder
+      target = IDE::MethodTarget.new(item.site.item.name, [item.site], item.owner)
+      groups = {} of {FileId, UInt32} => {IDE::CallItem?, FileState, Array(TextRange)}
+      finder.find(target, state.id).each do |r|
+        next if r.declaration || !r.exact
+        st = @vfs.file?(@vfs.uri(r.file)) || @vfs.load(@vfs.uri(r.file)) || next
+        caller = navigation(st).call_item_at(r.range.start)
+        key = {r.file, caller.try(&.site.item.range.start) || 0_u32}
+        g = groups[key] ||= {caller, st, [] of TextRange}
+        g[2] << r.range
+      end
+      groups.values.compact_map do |(caller, st, ranges)|
+        from = if caller
+                 call_item_json(caller, index.def_map_for(st.id))
+               else
+                 file_item_json(st)
+               end
+        from || next
+        {from: from, fromRanges: ranges.map { |r| range_json(st, r) }}
+      end
+    end
+
+    # Top-level code of a file as a call hierarchy item.
+    private def file_item_json(state : FileState)
+      path = VFS.path_for(state.uri) || state.uri
+      {
+        name:           File.basename(path),
+        kind:           1, # File
+        detail:         "top level",
+        uri:            state.uri,
+        range:          range_json(state, TextRange.new(0_u32, state.text.bytesize.to_u32)),
+        selectionRange: range_json(state, TextRange.new(0_u32, 0_u32)),
+        data:           {start: -1},
+      }
+    end
+
+    # -- type hierarchy -----------------------------------------------------------
+
+    private def prepare_type_hierarchy(params : JSON::Any)
+      state = document(params)
+      off = offset(state, params["position"])
+      target = references_finder.target_at(IDE::References::Context.new(state, bodies(state), typing(state)), off)
+      return nil unless target.is_a?(IDE::PathTarget) && target.type?
+      map = index.def_map_for(state.id)
+      id = map.lookup_path("::" + target.full_name) || return nil
+      [type_item_json(map, id, state.id)].compact
+    end
+
+    private def type_hierarchy(params : JSON::Any, super is_super : Bool)
+      data = params["item"]["data"]
+      file = FileId.new(data["file"].as_i.to_u32)
+      map = index.def_map_for(file)
+      id = map.lookup_path("::" + data["name"].as_s) || return [] of Nil
+      related = if is_super
+                  (map.includes(id) + [map.superclass(id)].compact).uniq
+                else
+                  map.subtypes(id)
+                end
+      related.compact_map { |t| type_item_json(map, t, file) }
+    end
+
+    TYPE_SYMBOL_KINDS = {
+      Semantics::TypeKind::Module => 2, Semantics::TypeKind::Class => 5, Semantics::TypeKind::Struct => 23,
+      Semantics::TypeKind::Enum => 10, Semantics::TypeKind::Lib => 3, Semantics::TypeKind::Annotation => 5,
+      Semantics::TypeKind::CStruct => 23, Semantics::TypeKind::CUnion => 23,
+    }
+
+    # *view_file*: a file of the program the type is seen from (items of
+    # one hierarchy all come from that view's DefMap).
+    private def type_item_json(map : Semantics::DefMap, id : Semantics::TypeId, view_file : FileId)
+      info = map[id]
+      site = info.sites.first? || return nil
+      loc = location_json(IDE::Location.new(site.file, site.item.name_range)) || return nil
+      whole = location_json(IDE::Location.new(site.file, site.item.range)) || return nil
+      {
+        name:           info.full_name,
+        kind:           TYPE_SYMBOL_KINDS[info.kind]? || 5,
+        detail:         info.sites.size > 1 ? "#{info.sites.size} declarations" : nil,
+        uri:            loc[:uri],
+        range:          whole[:range],
+        selectionRange: loc[:range],
+        data:           {name: info.full_name, file: view_file.value},
+      }
     end
 
     # *map*: the DefMap the item's owner TypeId comes from.

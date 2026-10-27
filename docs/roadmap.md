@@ -699,6 +699,11 @@ Steps (one commit each):
    from method references grouped by enclosing def;
    `typeHierarchy/{prepare,supertypes,subtypes}` from the DefMap
    (superclass, includes, subtypes).
+   *Done:* incoming calls are the def's exact references grouped by the
+   enclosing def (top-level code as a File item); abstract defs are
+   found through virtual calls. Type hierarchy items carry the type's
+   full name and a file of the view they come from (`data`), so
+   supertypes/subtypes resolve in the same program view.
 8. **Code actions.** Measured candidates only. Start with: add a missing
    `require` for an unresolved constant defined in a workspace file;
    "did you mean" for an `undefined method` diagnostic whose receiver

@@ -249,3 +249,31 @@ describe "workspace rename" do
     end
   end
 end
+
+describe "incoming calls and type hierarchy" do
+  it "groups callers by enclosing def" do
+    with_client(REFS_APP, PRELUDE_FILES) do |c|
+      u = c.open("src/shapes.cr")
+      items = c.request("textDocument/prepareCallHierarchy", {textDocument: {uri: u}, position: c.pos("src/shapes.cr", "area : Int32\n    SIDES", 0)})
+      inc = c.request("callHierarchy/incomingCalls", {item: items[0]}).as_a
+      inc.map { |i| {i["from"]["name"].as_s, i["fromRanges"].as_a.map(&.["start"]["line"].as_i)} }.sort.should eq [{"app.cr", [7]}]
+      # Abstract Shape#area: called from `area_of` (virtual call).
+      items = c.request("textDocument/prepareCallHierarchy", {textDocument: {uri: u}, position: c.pos("src/shapes.cr", "def area : Int32\nend", 13)})
+      inc = c.request("callHierarchy/incomingCalls", {item: items[0]}).as_a
+      inc.map(&.["from"]["name"].as_s).should eq ["area_of"]
+    end
+  end
+
+  it "walks supertypes and subtypes" do
+    with_client(REFS_APP, PRELUDE_FILES) do |c|
+      u = c.open("src/app.cr")
+      items = c.request("textDocument/prepareTypeHierarchy", {textDocument: {uri: u}, position: c.pos("src/app.cr", "Square.new")}).as_a
+      items.map(&.["name"].as_s).should eq ["Square"]
+      items[0]["detail"].should eq "2 declarations"
+      sup = c.request("typeHierarchy/supertypes", {item: items[0]}).as_a
+      sup.map(&.["name"].as_s).should eq ["Shape"]
+      sub = c.request("typeHierarchy/subtypes", {item: sup[0]}).as_a
+      sub.map(&.["name"].as_s).sort.should eq ["Circle", "Square"]
+    end
+  end
+end
