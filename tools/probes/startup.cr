@@ -1,6 +1,6 @@
 # Where startup time goes: project detection, `Index#load` split into
-# source walk / parse+lower rounds / require resolution / word sets /
-# malloc_trim, then the project DefMap build. Phase 11 baseline.
+# source walk / work-queue indexing (parse, lower, require resolution,
+# word sets) / malloc_trim, then the project DefMap build.
 #
 #   bin/probes/startup ROOT [RUNS]     e.g. bin/probes/startup tools/external/marten 3
 #
@@ -18,8 +18,7 @@ runs.times do |i|
   workers ? idx.load(workers) : idx.load
   map = Time.measure { idx.def_map }
   s = idx.load_stats
-  rest = s.total - s.walk - s.parse - s.resolve - s.words - s.trim
-  puts "run #{i + 1}: files=#{idx.size} rounds=#{s.rounds} detect=#{ms.call(detect)} load=#{ms.call(s.total)} " \
-       "(walk=#{ms.call(s.walk)} parse=#{ms.call(s.parse)} resolve=#{ms.call(s.resolve)} words=#{ms.call(s.words)} " \
-       "trim=#{ms.call(s.trim)} other=#{ms.call(rest)}) def_map=#{ms.call(map)} total=#{ms.call(detect + s.total + map)}ms"
+  puts "run #{i + 1}: files=#{idx.size} detect=#{ms.call(detect)} load=#{ms.call(s.total)} " \
+       "(walk=#{ms.call(s.walk)} index=#{ms.call(s.index)} trim=#{ms.call(s.trim)}) " \
+       "def_map=#{ms.call(map)} total=#{ms.call(detect + s.total + map)}ms"
 end

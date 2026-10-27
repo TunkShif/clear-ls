@@ -982,6 +982,14 @@ Steps (one commit each):
    Word sets on Marten 137–144 ms (was 127–154). 0.10.2.
 3. **Work-queue indexing.** One worker pool with a shared queue; newly
    resolved requires are queued as soon as they are found.
+   *Done:* `Index#index_files`. Workers also resolve requires and collect
+   word sets (both were serial, ~210 ms on Marten); the main fiber only
+   adds entries and queues new paths. Marten load 1040–1100 → 720–820 ms
+   (startup probe; 8, 12 or 16 workers within noise, 4 workers ~1 s),
+   soak index 1.13–1.17 → 0.83–0.87 s; index RSS 130–135 MB (old build
+   91–160 MB across runs). This repo 670–800 → 400–630 ms. Still above
+   the 505 ms one-batch ceiling: parsing is CPU-bound (3.5 s user over
+   8 workers), so the cache is what gets below 300 ms.
 4. **Codec.** `Cache::Pack` reader/writer (header, string table,
    directory, payloads, checksum) for `ItemTree`. Round-trip spec over
    the stdlib and a fixture project: equal fingerprints and

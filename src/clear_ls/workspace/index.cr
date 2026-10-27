@@ -295,53 +295,113 @@ module ClearLS::Workspace
       @entries.each { |id, e| yield id, e }
     end
 
-    # Where the last `#load` spent its time (wall clock; parse is the
-    # parallel batches, the rest runs on the calling fiber).
-    record LoadStats, rounds : Int32 = 0, walk : Time::Span = Time::Span.zero,
-      parse : Time::Span = Time::Span.zero, resolve : Time::Span = Time::Span.zero,
-      words : Time::Span = Time::Span.zero, trim : Time::Span = Time::Span.zero,
+    # Where the last `#load` spent its time (wall clock). `index` is the
+    # work-queue phase: parse, lower, require resolution and word sets on
+    # the workers, entries added on the calling fiber.
+    record LoadStats, files : Int32 = 0, walk : Time::Span = Time::Span.zero,
+      index : Time::Span = Time::Span.zero, trim : Time::Span = Time::Span.zero,
       total : Time::Span = Time::Span.zero
 
     getter load_stats = LoadStats.new
 
+    # What a worker produces for one file. `words` is nil for library files
+    # (not searched for references).
+    record Loaded, path : String, entry : Entry?, words : Set(UInt64)?
+
     # Indexes the prelude closure and workspace files from disk, then their
-    # require closure. Parses in parallel with *workers* threads.
+    # require closure, on *workers* threads. A shared work queue: each
+    # file's resolved requires are queued as soon as it is done, so workers
+    # never wait for a whole round.
     def load(workers : Int32 = default_workers) : Nil
       start = Time.instant
-      rounds = 0
-      parse = resolve = words = Time::Span.zero
       roots = [] of String
       walk = Time.measure { roots = @project.source_files }
       @project.prelude.try { |p| roots.unshift(p) }
-      pending = roots.to_set
-      seen = Set(String).new
-      until pending.empty?
-        rounds += 1
-        batch = pending.to_a.reject { |p| seen.includes?(p) }
-        seen.concat(batch)
-        pending = Set(String).new
-        t = Time.instant
-        parsed = parse_batch(batch, workers)
-        parse += t.elapsed
-        parsed.each do |path, items|
-          next unless items
-          id = @vfs.id_for(VFS.uri_for(path))
-          # An open buffer is authoritative; keep its entry.
-          next if @entries[id]? && @vfs.open?(VFS.uri_for(path))
-          t = Time.instant
-          entry = make_entry(path, items)
-          resolve += t.elapsed
-          @entries[id] = entry
-          t = Time.instant
-          read_words(id, path)
-          words += t.elapsed
-          entry.requires.each { |r| pending << r unless seen.includes?(r) }
-        end
-      end
+      t = Time.instant
+      count = 0
+      index_files(roots, workers, keep_open: true) { count += 1 }
+      index = t.elapsed
       invalidate_maps
       trim = Time.measure { ClearLS::Memory.trim } # parse workers' freed trees (see Memory)
-      @load_stats = LoadStats.new(rounds, walk, parse, resolve, words, trim, start.elapsed)
+      @load_stats = LoadStats.new(count, walk, index, trim, start.elapsed)
       Log.info { "indexed #{@entries.size} files" }
+    end
+
+    # Indexes *roots* and their require closure, skipping files already
+    # indexed. With *keep_open*, an open buffer's existing entry wins over
+    # the disk text. Yields once per added entry.
+    private def index_files(roots : Array(String), workers : Int32, keep_open : Bool, & : ->) : Nil
+      seen = Set(String).new
+      todo = [] of String
+      roots.each { |p| todo << p if seen.add?(p) }
+      add = ->(l : Loaded) do
+        entry = l.entry || return
+        id = @vfs.id_for(VFS.uri_for(l.path))
+        # An open buffer is authoritative; keep its entry.
+        return if keep_open && @entries[id]? && @vfs.open?(VFS.uri_for(l.path))
+        @entries[id] = entry
+        if w = l.words
+          @words[id] = w
+        else
+          @words.delete(id)
+        end
+        entry.requires.each { |r| todo << r if seen.add?(r) && !@entries.has_key?(id_of(r)) }
+        nil
+      end
+      if workers <= 1
+        parser = Syntax::Parser.new
+        while path = todo.shift?
+          add.call(load_file(parser, path))
+          yield
+        end
+        return
+      end
+
+      # Every send happens with fewer than CAPACITY paths in flight, so
+      # neither channel's buffer is ever full: no send blocks.
+      capacity = 4096
+      queue = Channel(String).new(capacity)
+      results = Channel(Loaded).new(capacity)
+      ctx = Fiber::ExecutionContext::Parallel.new("clear-ls-index", workers)
+      workers.times { ctx.spawn { index_worker(queue, results) } }
+      in_flight = 0
+      loop do
+        while in_flight < capacity && (path = todo.shift?)
+          queue.send(path)
+          in_flight += 1
+        end
+        break if in_flight == 0
+        add.call(results.receive)
+        in_flight -= 1
+        yield
+      end
+      queue.close
+    end
+
+    # Kept in separate methods on purpose: Crystal closures capture
+    # *method-level* variables, so a `parser = ...` local declared anywhere in
+    # `index_files` would be one variable shared by every spawned block, i.e.
+    # one TSParser used from many threads at once.
+    private def index_worker(queue : Channel(String), results : Channel(Loaded)) : Nil
+      parser = Syntax::Parser.new
+      while path = queue.receive?
+        results.send(load_file(parser, path))
+      end
+    end
+
+    # Reads, parses and lowers one file, resolves its requires and collects
+    # its words. Runs on workers: touches only its arguments and read-only
+    # project state (resolver, flags, CRYSTAL_PATH).
+    private def load_file(parser : Syntax::Parser, path : String) : Loaded
+      text = File.read(path)
+      entry = make_entry(path, Items::Lower.lower(parser.parse(text)))
+      Loaded.new(path, entry, library_path?(path) ? nil : Index.words(text))
+    rescue ex : IO::Error | File::Error
+      Log.warn { "cannot read #{path}: #{ex.message}" }
+      Loaded.new(path, nil, nil)
+    rescue ex
+      Log.error(exception: ex) { "failed to index #{path}" }
+      Loaded.new(path, nil, nil)
     end
 
     # Re-lowers an open/changed file from its current VFS state. Returns true
@@ -439,26 +499,8 @@ module ClearLS::Workspace
 
     # Indexes *paths* and, transitively, what they require.
     private def load_missing(paths : Array(String)) : Nil
-      pending = paths
-      until pending.empty?
-        missing = pending.uniq.reject { |p| @entries.has_key?(@vfs.id_for(VFS.uri_for(p))) }
-        return if missing.empty?
-        pending = [] of String
-        parse_batch(missing, 1).each do |path, items|
-          next unless items
-          entry = make_entry(path, items)
-          id = @vfs.id_for(VFS.uri_for(path))
-          @entries[id] = entry
-          read_words(id, path)
-          pending.concat(entry.requires)
-        end
-      end
-    end
-
-    private def read_words(id : FileId, path : String) : Nil
-      return if library_path?(path)
-      @words[id] = Index.words(File.read(path))
-    rescue File::Error
+      missing = paths.reject { |p| @entries.has_key?(id_of(p)) }
+      index_files(missing, 1, keep_open: false) { } unless missing.empty?
     end
 
     private def make_entry(path : String, items : Items::ItemTree) : Entry
@@ -472,48 +514,6 @@ module ClearLS::Workspace
 
     private def default_workers : Int32
       (System.cpu_count.to_i // 2).clamp(1, 8)
-    end
-
-    # Reads, parses and lowers files on a parallel execution context. Each
-    # worker owns its parser; only item trees cross threads.
-    private def parse_batch(paths : Array(String), workers : Int32) : Array({String, Items::ItemTree?})
-      return [] of {String, Items::ItemTree?} if paths.empty?
-      workers = Math.min(workers, paths.size)
-      return parse_sequential(paths) if workers <= 1 || paths.size < 8
-
-      queue = Channel(String).new(paths.size)
-      paths.each { |p| queue.send(p) }
-      queue.close
-      results = Channel({String, Items::ItemTree?}).new(paths.size)
-      ctx = Fiber::ExecutionContext::Parallel.new("clear-ls-index", workers)
-      workers.times { ctx.spawn { parse_worker(queue, results) } }
-      Array.new(paths.size) { results.receive }
-    end
-
-    # Kept in separate methods on purpose: Crystal closures capture
-    # *method-level* variables, so a `parser = ...` local declared anywhere in
-    # `parse_batch` would be one variable shared by every spawned block, i.e.
-    # one TSParser used from many threads at once.
-    private def parse_sequential(paths : Array(String)) : Array({String, Items::ItemTree?})
-      parser = Syntax::Parser.new
-      paths.map { |p| {p, lower_file(parser, p)} }
-    end
-
-    private def parse_worker(queue : Channel(String), results : Channel({String, Items::ItemTree?})) : Nil
-      parser = Syntax::Parser.new
-      while path = queue.receive?
-        results.send({path, lower_file(parser, path)})
-      end
-    end
-
-    private def lower_file(parser : Syntax::Parser, path : String) : Items::ItemTree?
-      Items::Lower.lower(parser.parse(File.read(path)))
-    rescue ex : IO::Error | File::Error
-      Log.warn { "cannot read #{path}: #{ex.message}" }
-      nil
-    rescue ex
-      Log.error(exception: ex) { "failed to index #{path}" }
-      nil
     end
   end
 end
