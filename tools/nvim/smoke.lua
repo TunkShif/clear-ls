@@ -9,8 +9,7 @@ local hints = req("textDocument/inlayHint", { textDocument = td, range = { start
 local hs = {} for _, h in ipairs(hints) do table.insert(hs, (h.position.line + 1) .. ":" .. h.position.character .. h.label) end
 print("inlay hints (line:col): " .. table.concat(hs, "  "))
 local function complete(text)
-  vim.api.nvim_buf_set_lines(0, 21, 22, false, { "  " .. text })
-  vim.wait(150)
+  H.set_line(21, "  " .. text) -- waits past the 150 ms didChange debounce
   local items, ms = req("textDocument/completion", { textDocument = td, position = { line = 21, character = 2 + #text } })
   local ls = {} for i, it in ipairs(items.items) do if i <= 8 then table.insert(ls, it.label) end end
   return #items.items, table.concat(ls, " "), ms

@@ -60,12 +60,17 @@ changing it. Grammar quirks are in
 - The compiler narrows only locals (`if @a` leaves `@a` nilable); clear-ls
   does the same on purpose.
 - Rebuild probe binaries after source changes before comparing numbers.
+- Probes need a Typing per program view (`Index#def_map_for(file)`): a
+  stdlib file outside the project's closure is seen through the library
+  view (all indexed files), a script through its own.
 
 ## Editors and LSP tests
 
 - Neovim debounces `didChange` by 150 ms; headless scripts must wait longer
   than that after `nvim_buf_set_lines` before a request
-  (`tools/nvim/common.lua` `set_line` waits 400 ms).
+  (`tools/nvim/common.lua` `set_line` waits 400 ms). The smoke check
+  waited exactly 150 ms until Phase 9 and sometimes completed the
+  unedited line.
 - Honour LSP result shapes exactly (`outgoingCalls` items have `to` and
   `fromRanges`).
 - Run headless Neovim with `-n`, or a crashed run leaves swap files that

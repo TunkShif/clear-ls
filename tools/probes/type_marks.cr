@@ -16,9 +16,10 @@ vfs = VFS.new
 idx = Workspace::Index.new(proj, vfs)
 ::Log.setup(:error)
 idx.load
-typing = IDE::Typing.new(idx.def_map, vfs)
-table = typing.table
-map = idx.def_map
+# One Typing per program view (a stdlib file outside the project's
+# require closure is a program of its own).
+typings = {} of UInt64 => IDE::Typing
+typing_for = ->(f : FileId) { m = idx.def_map_for(f); typings[m.object_id] ||= IDE::Typing.new(m, vfs) }
 
 # Compiler spelling: `Tuple(A, B)`, `(A | B)` with sorted members,
 # `Proc(A, R)`, `NamedTuple(x: A)`, `A.class`.
@@ -51,6 +52,9 @@ end
 ARGV[1..].each do |path|
   path = File.expand_path(path)
   state = vfs.load(VFS.uri_for(path)).not_nil!
+  typing = typing_for.call(state.id)
+  table = typing.table
+  map = typing.def_map
   bodies = IDE::Bodies.new(state)
   marks = [] of Syntax::Node
   state.tree.root.walk do |n|

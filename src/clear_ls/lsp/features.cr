@@ -255,10 +255,15 @@ module ClearLS::LSP
     end
 
     private def references_finder : IDE::References
+      root = index.project.root
       IDE::References.new(index, ->(file : FileId) do
         uri = @vfs.uri(file)
         st = @vfs.file?(uri) || @vfs.load(uri)
         st.try { |x| IDE::References::Context.new(x, bodies(x), typing(x)) }
+      end, ->(r : IDE::Reference) do
+        path = VFS.path_for(@vfs.uri(r.file)) || @vfs.uri(r.file)
+        line = @vfs.line_index_for(r.file).try { |li| li.position(r.range.start, PositionEncoding::UTF8).line + 1 }
+        "#{Path[path].relative_to(root)}:#{line}"
       end)
     end
 

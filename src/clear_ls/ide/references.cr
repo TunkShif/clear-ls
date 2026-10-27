@@ -70,7 +70,9 @@ module ClearLS::IDE
 
     # *context_for*: analysis context of another file (open buffer or
     # disk), with the typing of its own program view.
-    def initialize(@index : Workspace::Index, @context_for : Proc(FileId, Context?))
+    # *describe*: `file:line` of a reference, for messages.
+    def initialize(@index : Workspace::Index, @context_for : Proc(FileId, Context?),
+                   @describe : Proc(Reference, String) = ->(r : Reference) { "#{r.file.value}:#{r.range.start}" })
     end
 
     def target_at(ctx : Context, offset : UInt32) : RefTarget?
@@ -152,8 +154,11 @@ module ClearLS::IDE
         return refuse("`#{target.name}` overrides a method declared outside the workspace") if sites.any? { |s| @index.library_file?(s.file) }
       end
       refs = find(target, ctx.state.id)
-      if refs.any? { |r| !r.exact }
-        return refuse("#{refs.count { |r| !r.exact }} use(s) of `#{target.name}` can't be confirmed (unknown receiver type)")
+      unsure = refs.reject(&.exact)
+      unless unsure.empty?
+        where = unsure.first(3).map { |r| @describe.call(r) }.join(", ")
+        more = unsure.size > 3 ? " and #{unsure.size - 3} more" : ""
+        return refuse("#{unsure.size} use(s) of `#{target.name}` can't be confirmed (unknown receiver type): #{where}#{more}")
       end
       if refs.any? { |r| @index.library_file?(r.file) }
         return refuse("`#{target.name}` is used outside the workspace")

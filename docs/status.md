@@ -4,14 +4,16 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–8 (through language-semantics parity: every Crystal
-  book example matches the compiler or is a recorded deviation,
+- **Done:** Phases 0–9 (through workspace identity: references, rename,
+  incoming calls, type hierarchy and quick fixes by resolved identity,
+  one program view per project/script; earlier: every Crystal book
+  example matches the compiler or is a recorded deviation,
   [book-gaps.md](book-gaps.md)), plus the post-Phase-8 usage-feedback
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
-- **Next:** Phase 9 — workspace identity, split into nine steps in
-  [roadmap.md](roadmap.md#phase-9--workspace-identity) (measurements and
-  decisions there). Step 1 fixes stale DefMap positions after body edits.
-- **In progress:** Phase 9, step 9 (steps 1–8 done).
+- **Next:** Phase 10 — hardening (persistent index cache, cancellation
+  and budgets, multi-root). Measure first, then split into steps
+  ([development.md](development.md#workflow)).
+- **In progress:** nothing.
 
 ## Resume
 

@@ -1,7 +1,15 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 8 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 9 —
+
+- workspace identity: references, rename, incoming calls by resolved
+  identity across the program (overloads, unrelated same-name methods
+  and other programs stay apart; rename refuses when any use is
+  unconfirmed and takes override families along); ivar definitions and
+  references; type hierarchy; quick fixes from compiler diagnostics
+  ("did you mean", missing `require`); one program view per project,
+  nested project, script, or loose file;
 
 - language-semantics parity: every example of the Crystal 1.22 syntax and
   semantics book gets the compiler's type or a documented deviation
@@ -26,12 +34,12 @@ Tree-sitter with an editor-oriented semantic model. Status: Phase 8 —
 - overload resolution: hover, definition, and signature help show the
   overloads that fit the call's arguments; named-argument completion;
 - implementation (overrides, abstract def implementers, subtypes) and
-  outgoing call hierarchy;
+  call hierarchy (incoming and outgoing);
 - hover with inferred types for locals and resolved method signatures;
 - inlay type hints for locals and block arguments;
 - document and workspace symbols, folding, selection ranges;
-- goto-definition for types, constants, locals, and method calls;
-- references, highlights, and rename for local variables and parameters;
+- goto-definition for types, constants, locals, ivars, and method calls;
+- highlights, and references/rename for locals and parameters;
 - semantic tokens (params, locals, ivars, types, declarations);
 - links and goto-definition for `require` paths.
 

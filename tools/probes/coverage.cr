@@ -11,8 +11,10 @@ proj = ClearLS::Workspace::Project.detect(root)
 vfs = ClearLS::VFS.new
 idx = ClearLS::Workspace::Index.new(proj, vfs)
 idx.load
-typing = ClearLS::IDE::Typing.new(idx.def_map, vfs)
-table = typing.table
+# One Typing per program view (a stdlib file outside the project's
+# require closure is a program of its own).
+typings = {} of UInt64 => ClearLS::IDE::Typing
+typing_for = ->(f : ClearLS::FileId) { m = idx.def_map_for(f); typings[m.object_id] ||= ClearLS::IDE::Typing.new(m, vfs) }
 SLOW = [] of {Float64, String}
 reasons = Hash(String, Int32).new(0)
 known = 0; total = 0; defs = 0
@@ -21,6 +23,8 @@ idx.each_entry { |id, e| files << e.path if e.path.starts_with?(ARGV[1]) }
 t = Time.measure do
   files.sort.first(ENV["N"]?.try(&.to_i) || 100000).each do |path|
     state = vfs.load(ClearLS::VFS.uri_for(path)).not_nil!
+    typing = typing_for.call(state.id)
+    table = typing.table
     bodies = ClearLS::IDE::Bodies.new(state)
     nodes = [] of ClearLS::Syntax::Node
     state.tree.root.walk { |n| nodes << n if n.kind.method_def?; true }

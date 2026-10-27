@@ -23,7 +23,7 @@ above it in this table):
 | flow | `flow/builder.cr`, `cfg.cr` | HIR → CFG of evaluation-ordered ops, branches, merges, rescue edges |
 | types | `types/ty.cr`, `type_expr.cr`, `infer.cr`, `call_resolver.cr`, `summaries.cr` | interned `Ty`, restriction parser, `Subst`, dataflow `Infer`, overload resolution, per-call-shape return summaries |
 | compiler | `compiler/job.cr`, `output.cr`, `toolchain.cr`, `checker.cr`, `exporter.cr` | `crystal` subprocesses and their output (no LSP types) |
-| ide | `ide/*.cr` | protocol-free features: analysis, locals, typing, completion, type info, tokens, signature help, navigation |
+| ide | `ide/*.cr` | protocol-free features: analysis, locals, typing, completion, type info, tokens, signature help, navigation, references/rename |
 | lsp | `lsp/transport.cr`, `json_rpc.cr`, `server.cr`, `features.cr`, `diagnostics.cr`, `formatting.cr`, `expand.cr`, `context.cr`, `code_actions.cr` | stdio server; `features.cr` and the others reopen `Server` |
 
 `compiler/` sits beside `types/`: it does not depend on analysis, and
@@ -129,6 +129,21 @@ summarise to unknown.
 Budgets: depth 12, 16 shapes per (def, receiver), 20k summaries per
 generation. `Infer#contract` covers stdlib methods whose types come from
 macros. Constants: `const_expr_type`; big tables via `truncated_value`.
+
+### Workspace identity (Phase 9)
+
+- `Index::View`: project (shard targets or `src/`), nested projects,
+  per-file views for scripts/loose files, a library view (all indexed
+  files) for stdlib/shard files outside the project. One DefMap and one
+  `IDE::Typing` per view.
+- `Semantics::DefId` = file + item index path. `Item#move_to` keeps it
+  and the DefMap's sites valid across body edits.
+- `Index#files_with_word`: hashed identifier words of workspace files.
+- `IDE::References`: target at cursor (def header, call, constant
+  path, ivar) → candidate files (word index ∩ program) → exact or
+  possible references; `rename_plan` (override family, refusals);
+  incoming calls group exact references by enclosing def.
+- `lsp/code_actions.cr`: quick fixes from compiler diagnostics only.
 
 ### Compiler integration (Phase 7)
 

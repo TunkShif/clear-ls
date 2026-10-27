@@ -81,9 +81,11 @@ module ClearLS::Workspace
     def view_for(file : FileId) : View
       return @project_view if files_of(@project_view).includes?(file)
       entry = @entries[file]? || return @project_view
-      # Stdlib and shard files outside the project's closure (opened by
-      # go-to-definition) are seen through the project too.
-      return @project_view if library_path?(entry.path)
+      # A stdlib or shard file outside the project's closure (opened by
+      # go-to-definition, or required only by specs): the union view over
+      # everything indexed, since such a file is usually part of a larger
+      # library program (`spec/context.cr` needs `spec/example.cr`).
+      return library_view if library_path?(entry.path)
       @file_views[file] ||= begin
         # Inside a nested project (its own `shard.yml` below the root):
         # that project's program, else the file alone.
@@ -97,6 +99,16 @@ module ClearLS::Workspace
     end
 
     @nested_views = {} of String => View
+    @library_view : View? = nil
+
+    # Every indexed file (what the old single DefMap covered).
+    private def library_view : View
+      @library_view ||= begin
+        v = View.new([] of FileId)
+        v.files = @entries.keys.to_set
+        v
+      end
+    end
 
     # The program view of the nested project at *root*, when *file* is in
     # its closure. Its files are indexed on first use.
@@ -174,6 +186,7 @@ module ClearLS::Workspace
       @project_view.files = nil
       @file_views.clear
       @nested_views.each_value { |v| v.def_map = nil; v.files = nil }
+      @library_view = nil
     end
 
     def entry?(file : FileId) : Entry?
@@ -275,6 +288,7 @@ module ClearLS::Workspace
       @project_view.def_map.try { |m| yield m }
       @file_views.each_value { |v| v.def_map.try { |m| yield m } }
       @nested_views.each_value { |v| v.def_map.try { |m| yield m } }
+      @library_view.try(&.def_map).try { |m| yield m }
     end
 
     # Text of a file as the compiler saw it, unless an open buffer differs

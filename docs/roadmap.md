@@ -723,6 +723,30 @@ Steps (one commit each):
 Exit criterion (design doc): workspace rename does not edit unrelated
 same-name symbols.
 
+Status: done (exit criterion met: rename uses exact references only and
+refuses when any same-name use is unconfirmed; specs cover a same-name
+method of an unrelated class, a same-name class in another program, and
+an untyped receiver). Every step landed as planned except step 8, which
+reuses the compiler's "Did you mean" suggestions instead of an edit
+distance.
+
+Measurements (`--release`, this repo): references cold 53–930 ms
+(`DefMap` 53 refs 53 ms; `Typing#infer_at` 21 refs 930 ms, which infers
+every body of 21 candidate files), warm 1–16 ms; rename of `DefMap` 53
+edits in 15 files 152 ms. `infer_at` and `Infer#type_of` renames are
+refused because probes/specs call them on untyped receivers (the
+message lists the uses). Neovim `workspace` check: references 577 ms
+cold. Coverage unchanged (repo 94.3%, stdlib sample 71.8%); regression
+diff vs Phase 8: repo 0 regressed / 22 improved, stdlib 0 / 16 (the
+`def f(@x)` ivar items); book diff 527 + 25 accepted, 0 mismatches.
+`make spec`: 231 examples.
+
+Not yet: references search one root (Phase 10 multi-root); reference
+search is on demand (no persistent index; first search over a large
+program infers its candidate bodies); method references inside macro
+bodies and `{{...}}` are not found; rename of a method reached through a
+`responds_to?`/duck-typed call is refused rather than guessed.
+
 ### Phase 10 — hardening
 
 - Persistent stdlib/shard index cache, parallel indexing, cancellation and

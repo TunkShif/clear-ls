@@ -46,6 +46,7 @@ assert; read the output against the expectations below.
 | `smoke` | `smoke/src/demo.cr` | typed hovers of locals/block args; member completion on inferred receivers; inlay hints (`11:40 : String?` after the `)`); stdlib definition; glob require hover lists `parts/a.cr parts/b.cr` |
 | `calls` | `calls/src/demo.cr` | `IO#gets` overload narrowing (1 vs 4), signature help, named-arg completion, implementation, outgoing calls |
 | `chains` | `chains/src/c.cr` | every collection-chain local typed (no `nil`); inferred return in def hover; `&.\|` completes `Item`'s methods (`discounted label name price` first) |
+| `workspace` | `workspace/` (project + script + nested project) | references of `sq.area` = `scripts/try.cr:3 src/app.cr:8 src/shapes.cr:13`; `Square` definition in `src/shapes.cr` only (not `other/`); incoming `area_of`; subtypes `Circle Square`; `@side` rename; `area` rename edits app×3, shapes×3, try×1; `puts` refused; `Add require "../src/widget"` |
 | `compiler` | `compiler/` (shard with target) | hover before the check, `@label : String` before the check (assignment rule), async diagnostic at 15:8, inlay hints `12: Int32 13: String` refreshed after the check, 1 diagnostic after `:e`, generated methods/ivars typed after it, cleared after fix+save, `compiler:` types for `twice`, `getter` expansion, formatting edit |
 
 Shared helpers (`start`, `req`, `hover`, `set_line`, `finish`) are in

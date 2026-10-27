@@ -12,11 +12,15 @@ vfs = ClearLS::VFS.new
 idx = ClearLS::Workspace::Index.new(proj, vfs)
 ::Log.setup(:error)
 idx.load
-typing = ClearLS::IDE::Typing.new(idx.def_map, vfs)
+# One Typing per program view (a stdlib file outside the project's
+# require closure is a program of its own).
+typings = {} of UInt64 => ClearLS::IDE::Typing
+typing_for = ->(f : ClearLS::FileId) { m = idx.def_map_for(f); typings[m.object_id] ||= ClearLS::IDE::Typing.new(m, vfs) }
 files = [] of String
 idx.each_entry { |id, e| files << e.path if e.path.starts_with?(ARGV[1]) }
 files.sort.each do |path|
   state = vfs.load(ClearLS::VFS.uri_for(path)).not_nil!
+  typing = typing_for.call(state.id)
   bodies = ClearLS::IDE::Bodies.new(state)
   nodes = [] of ClearLS::Syntax::Node
   state.tree.root.walk { |n| nodes << n if n.kind.method_def?; true }

@@ -13,8 +13,9 @@ proj = ClearLS::Workspace::Project.detect(root)
 vfs = ClearLS::VFS.new
 idx = ClearLS::Workspace::Index.new(proj, vfs)
 idx.load
-map = idx.def_map
-typing = ClearLS::IDE::Typing.new(map, vfs)
+# One Typing per program view.
+typings = {} of UInt64 => ClearLS::IDE::Typing
+typing_for = ->(f : ClearLS::FileId) { m = idx.def_map_for(f); typings[m.object_id] ||= ClearLS::IDE::Typing.new(m, vfs) }
 kinds = Hash(String, Int32).new(0)
 receiverless = Hash(String, Int32).new(0)
 consts = Hash(String, Int32).new(0)
@@ -27,6 +28,8 @@ lower_t = Time::Span.zero
 t = Time.measure do
   files.sort.each do |path|
     state = vfs.load(ClearLS::VFS.uri_for(path)).not_nil!
+    typing = typing_for.call(state.id)
+    map = typing.def_map
     bodies = ClearLS::IDE::Bodies.new(state)
     starts = [0_u32]
     state.tree.root.walk { |n| starts << n.start_byte + 1 if n.kind.method_def?; true }
@@ -69,7 +72,7 @@ puts "const paths: #{consts}"
 # Name-filtered lookup: for each NAMES entry, infer only the bodies whose
 # text contains the word (cold Typing per name), count resolved calls.
 (ENV["NAMES"]? || "infer_at,def_map,lookup_path,size,each").split(',').each do |name|
-  ty = ClearLS::IDE::Typing.new(map, vfs)
+  cold = {} of UInt64 => ClearLS::IDE::Typing
   word = /(?<![\w@])#{Regex.escape(name)}(?![\w])/
   hits = 0; cand_files = 0; cand_bodies = 0; exact = 0; loose = 0
   elapsed = Time.measure do
@@ -78,6 +81,8 @@ puts "const paths: #{consts}"
       next unless text.matches?(word)
       cand_files += 1
       state = vfs.load(ClearLS::VFS.uri_for(path)).not_nil!
+      m = idx.def_map_for(state.id)
+      ty = cold[m.object_id] ||= ClearLS::IDE::Typing.new(m, vfs)
       bodies = ClearLS::IDE::Bodies.new(state)
       seen = Set(UInt32).new
       text.scan(word) do |m|
