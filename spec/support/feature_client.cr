@@ -17,7 +17,7 @@ class FeatureClient
   # *cache*: `initializationOptions.cache` (off unless given). *root*:
   # reuse a project directory (a second session over the same files).
   def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false}, budgets = {} of String => Float64,
-                 cache = {enabled: false}, root : String? = nil)
+                 cache = {enabled: false}, root : String? = nil, warmup = {enabled: false})
     @root = root || File.tempname("clear-ls-feat")
     files.each do |path, text|
       full = File.join(@root, path)
@@ -36,7 +36,7 @@ class FeatureClient
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
     @server.project_factory = ->(root : String) { Workspace::Project.new(root, paths, std_dir, nil, "x86_64-unknown-linux-gnu") }
     @server.index_workers = 1
-    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets, cache: cache}})
+    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets, cache: cache, warmup: warmup}})
     notify("initialized", {} of String => String)
   end
 

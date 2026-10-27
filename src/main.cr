@@ -46,6 +46,7 @@ module ClearLS::CLI
       STDOUT.sync = false
       server = LSP::Server.new(LSP::Transport.new(STDIN, STDOUT))
       server.cache_enabled = use_cache
+      server.warmup_enabled = true
       server.run
     when "dump-cst"
       file = args.shift? || abort "dump-cst: missing FILE"

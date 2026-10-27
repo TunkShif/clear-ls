@@ -137,3 +137,50 @@ describe "persistent cache" do
     end
   end
 end
+
+describe "background warm-up" do
+  files = {
+    "shard.yml"    => "name: app\ntargets:\n  app:\n    main: src/app.cr\n",
+    "src/app.cr"   => %(require "./model"\ndef use(m : Model)\n  m.name\nend\nuse(Model.new)\n),
+    "src/model.cr" => "class Model\n  def name : String\n    \"m\"\n  end\n\n  def other\n    name\n  end\nend\n",
+  }
+
+  it "infers workspace bodies while idle and restarts after declaration edits" do
+    c = FeatureClient.new(files, PRELUDE_FILES, warmup: {enabled: true})
+    begin
+      deadline = Time.instant + 10.seconds
+      until c.server.warmup_done
+        raise "warm-up did not finish" if Time.instant > deadline
+        sleep 20.milliseconds
+      end
+      c.server.warmup_bodies.should be >= 4 # 2 file bodies, use, name, other
+      u = c.open("src/model.cr")
+      c.server.warmup_done.should be_true # a body-only edit or open doesn't restart
+      c.notify("textDocument/didChange", {textDocument: {uri: u, version: 2}, contentChanges: [{text: File.read(File.join(c.root, "src/model.cr")) + "class Extra; end\n"}]})
+      c.server.warmup_done.should be_false
+      deadline = Time.instant + 10.seconds
+      until c.server.warmup_done
+        raise "warm-up did not restart" if Time.instant > deadline
+        sleep 20.milliseconds
+      end
+      refs = c.request("textDocument/references", {textDocument: {uri: u}, position: c.pos("src/model.cr", "name"), context: {includeDeclaration: false}})
+      refs.as_a.size.should eq 2
+    ensure
+      c.cleanup
+    end
+  end
+
+  it "waits while requests keep arriving" do
+    c = FeatureClient.new(files, PRELUDE_FILES, warmup: {enabled: true})
+    begin
+      u = c.open("src/app.cr")
+      20.times do
+        c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/app.cr", "m.name", 2)})
+        sleep 50.milliseconds
+      end
+      c.server.warmup_bodies.should eq 0
+    ensure
+      c.cleanup
+    end
+  end
+end

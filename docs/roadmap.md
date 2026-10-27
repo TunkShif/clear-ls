@@ -1032,6 +1032,22 @@ Steps (one commit each):
    packs), warm 213–227 ms, first `workspace/symbol` answered 233–247 ms
    after `initialized`; local pack 2.2 MB. 0.10.4.
 7. **Background warm-up.**
+   *Done:* `src/clear_ls/lsp/warmup.cr`: after indexing, a fiber infers
+   every body of the workspace files, one per step, only after 300 ms
+   without messages and with no job running; a declaration change
+   restarts it. On for `clear-ls lsp` (`initializationOptions.warmup`).
+   What it keeps is the point: a kept `Infer` per body cost 460 MB on
+   Marten (RSS 772 MB), summaries alone left the first search at
+   600–740 ms (re-inferring 185 candidate bodies, 86% of it spec files'
+   file bodies). So `Typing#call_facts` stores per call only name range,
+   resolution kind and target keys (89k calls), and the reference
+   search reads those instead of `Infer#resolutions`. `tools/warm.py`
+   on Marten: warm-up ~7.5 s idle, RSS 300 MB, first `Request#method`
+   search after it 88 ms (cold 1340 ms, warm 36–44 ms). References on
+   150 sampled Marten defs: identical to the previous build (664 refs).
+   Soak: RSS after 100 specs + 10 searches 239 MB (was 277), hover p99
+   39 ms; sweep 0 errors, 0 over 300 ms. `soak.py`/`sweep.py` turn the
+   warm-up off (Phase 10 numbers are of a cold server). 0.10.5.
 8. **Allocator measurement.**
 9. **Verification and docs.** Soak, sweep, `make nvim-check`, README.
 

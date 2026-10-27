@@ -342,33 +342,25 @@ module ClearLS::IDE
         body = ctx.bodies.at(off) || next
         next unless seen_bodies.add?(body.range.start)
         @checkpoint.call("", nil) if seen_bodies.size > 1
-        _, inf = ctx.typing.infer_at(ctx.state, ctx.bodies, off) || next
-        body.exprs.each do |e|
-          next unless e.kind.call? && e.name == target.name && (nr = e.name_range)
-          res = inf.resolutions[e.id]?
-          if res && !res.candidates.empty?
-            hit = res.matches.any? { |mm| keys.includes?(site_key(mm.site)) }
-            next unless hit
-            exact = res.kind.unique? || res.kind.multiple_runtime_targets? || res.matches.all? { |mm| keys.includes?(site_key(mm.site)) }
-            found << Reference.new(ctx.state.id, nr, exact, false)
-          elsif res.nil? || res.kind.name_only? || res.kind.unresolved?
+        _, calls = ctx.typing.call_facts(ctx.state, ctx.bodies, off) || next
+        calls[target.name]?.try &.each do |c|
+          if c.resolved && !c.targets.empty?
+            next unless c.targets.any? { |t| keys.includes?(t) }
+            exact = c.kind.unique? || c.kind.multiple_runtime_targets? || c.targets.all? { |t| keys.includes?(t) }
+            found << Reference.new(ctx.state.id, c.name_range, exact, false)
+          elsif !c.resolved || c.kind.name_only? || c.kind.unresolved?
             # Unknown receiver or no fitting overload: same name, unknown
-            # identity.
-            found << Reference.new(ctx.state.id, nr, false, false) if possible_call?(e, res)
+            # identity. A receiverless call that resolved to nothing in a
+            # typed scope is not a use.
+            possible = !c.resolved || c.kind.name_only? || c.has_receiver
+            found << Reference.new(ctx.state.id, c.name_range, false, false) if possible
           end
         end
       end
     end
 
-    # A call with an unknown receiver (or a name-only resolution) may be a
-    # use; a receiverless call that resolved to nothing in a typed scope
-    # is not.
-    private def possible_call?(e : HIR::Expr, res : Types::CallResolution?) : Bool
-      return true if res.nil?
-      res.kind.name_only? || !e.receiver.nil?
-    end
-
     private def site_key(s : Semantics::Site) : {Int32, UInt32}
+      # Same key as `Typing::CallFact#targets`.
       {s.file.value.to_i32, s.item.name_range.start}
     end
 

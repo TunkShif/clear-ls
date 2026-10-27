@@ -20,6 +20,8 @@ class Client:
         opts = dict(init_options or {})
         if not compiler:
             opts.setdefault("compiler", {"enabled": False})
+        # Phase 10 measurements are of a cold server; warm.py turns it on.
+        opts.setdefault("warmup", {"enabled": False})
         self.request("initialize", {"rootUri": "file://" + root, "initializationOptions": opts,
                                     "capabilities": {"general": {"positionEncodings": ["utf-16"]}}})
         self.notify("initialized", {})

@@ -28,6 +28,45 @@ module ClearLS::IDE
       Types::Infer.news_check = ->(site : Semantics::Site) { ends_in_new?(site) }
     end
 
+    # What a references search needs from one call: where its name is,
+    # how it resolved, and the targets (`{file, name start}` of each
+    # matched def). `resolved` is false when inference never evaluated
+    # the call.
+    record CallFact, name_range : TextRange, resolved : Bool, kind : Types::ResolutionKind,
+      targets : Array({Int32, UInt32}), has_receiver : Bool
+
+    alias BodyCalls = Hash(String, Array(CallFact))
+
+    # Call facts per file (latest revision only) and body start. A few
+    # bytes per call (Marten's 89k calls: ~13 MB), against ~100 KB per
+    # body for a kept `Infer`: the background warm-up fills these, not
+    # `@results`.
+    @call_facts = {} of FileId => {UInt64, Hash(UInt32, BodyCalls)}
+
+    # Calls of the body containing *offset*, by name; computed once per
+    # file revision (from a cached `Infer` when there is one).
+    def call_facts(state : FileState, bodies : Bodies, offset : UInt32) : {HIR::Body, BodyCalls}?
+      body = bodies.at(offset) || return nil
+      rev, per_body = @call_facts[state.id]?.try { |e| e[0] == state.revision ? e : nil } ||
+                      (@call_facts[state.id] = {state.revision, {} of UInt32 => BodyCalls})
+      if calls = per_body[body.range.start]?
+        return {body, calls}
+      end
+      inf = @results[{state.id, state.revision, body.range.start}]? || run(state, body)
+      calls = BodyCalls.new
+      body.exprs.each do |e|
+        next unless e.kind.call?
+        name = e.name || next
+        nr = e.name_range || next
+        res = inf.resolutions[e.id]?
+        targets = res ? res.matches.map { |m| {m.site.file.value.to_i32, m.site.item.name_range.start} } : [] of {Int32, UInt32}
+        kind = res.try(&.kind) || Types::ResolutionKind::Unresolved
+        (calls[name] ||= [] of CallFact) << CallFact.new(nr, !res.nil?, kind, targets, !e.receiver.nil?)
+      end
+      per_body[body.range.start] = calls
+      {body, calls}
+    end
+
     # Inference for the body containing *offset* in *state*.
     #
     # *cache*: false for throwaway patched copies (completion, signature

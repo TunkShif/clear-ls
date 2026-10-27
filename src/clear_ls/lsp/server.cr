@@ -75,6 +75,7 @@ module ClearLS::LSP
         return
       end
       return if msg.response?
+      touch_activity
 
       if msg.request?
         handle_request(msg)
@@ -172,6 +173,7 @@ module ClearLS::LSP
     # A file's text changed: jobs that read it are stale; a declaration
     # change rebuilds the DefMaps every job works with, so all are.
     private def edited(file : FileId, decls_changed : Bool) : Nil
+      warmup_restart if decls_changed
       return if @jobs.empty?
       if decls_changed
         @jobs.each_value { |j| j.cancel(ErrorCode::ContentModified, "declarations changed during #{j.method.split('/').last}") }
@@ -229,7 +231,7 @@ module ClearLS::LSP
       return if @state.uninitialized? || @state.shutting_down?
 
       case method
-      when "initialized"                     then load_index; start_compiler
+      when "initialized"                     then load_index; start_compiler; start_warmup
       when "textDocument/didOpen"            then did_open(params)
       when "textDocument/didChange"          then did_change(params)
       when "textDocument/didClose"           then did_close(params)
@@ -258,6 +260,7 @@ module ClearLS::LSP
       @references_options = params.dig?("initializationOptions", "references") || @references_options
       @budget_options = params.dig?("initializationOptions", "budgets") || @budget_options
       read_compiler_options(params)
+      params.dig?("initializationOptions", "warmup", "enabled").try(&.as_bool?).try { |v| @warmup_enabled = v }
       if opts = params.dig?("initializationOptions", "cache")
         opts["enabled"]?.try(&.as_bool?).try { |v| @cache_enabled = v }
         opts["dir"]?.try(&.as_s?).try { |v| @cache_dir = v }
@@ -351,6 +354,7 @@ module ClearLS::LSP
       @index = nil
       @typings.clear
       load_index
+      warmup_restart
       # This session's facts are current: keep them in the new index.
       unless @entry_facts.empty?
         index.local.try(&.write_facts(@entry_facts))
