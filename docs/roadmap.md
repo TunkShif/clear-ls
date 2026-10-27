@@ -831,6 +831,9 @@ Steps (one commit each):
 3. **Cheap `prepareRename`.** Only the static refusals (operator,
    generated, library, invalid position); the reference search moves to
    `rename`, which still refuses on possible references.
+   *Done:* `rename_plan(search: false)`; the range is the name token
+   under the cursor (constant segment, ivar, method name). Sweep:
+   prepareRename p99 788 ms → 0.2 ms, max 3.2 s → 15 ms.
 4. **Cancellable jobs.** References, rename, incoming calls (and later
    warm-up) run as jobs with a checkpoint per candidate file and per
    body; `$/cancelRequest` answers `RequestCancelled`; an edit of a file

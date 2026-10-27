@@ -14,7 +14,7 @@ stops mid-phase). History and per-phase details are in
   jobs, budgets), split into six steps in
   [roadmap.md](roadmap.md#phase-10--responsiveness); then Phase 11
   (startup and warm caches) and Phase 12 (multi-root, deferred).
-- **In progress:** Phase 10, step 3 (steps 1–2 done).
+- **In progress:** Phase 10, step 4 (steps 1–3 done).
 
 ## Resume
 

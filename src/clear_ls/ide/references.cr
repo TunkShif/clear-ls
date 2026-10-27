@@ -118,8 +118,11 @@ module ClearLS::IDE
     # or a reason to refuse. Refuses when identity is not certain (any
     # possible reference), when a declaration is generated (macro or
     # compiler) or outside the workspace (stdlib, shards), and for
-    # operators. *new_name* nil only checks (prepareRename).
-    def rename_plan(ctx : Context, offset : UInt32, new_name : String?) : RenamePlan
+    # operators. *new_name* nil only checks (prepareRename). Without
+    # *search* only the static checks run (no reference search; the
+    # range is the token under the cursor): prepareRename must be fast,
+    # and `rename` repeats every check with the search.
+    def rename_plan(ctx : Context, offset : UInt32, new_name : String?, search = true) : RenamePlan
       target = target_at(ctx, offset) || return refuse("nothing to rename here")
       sites = target_sites(target)
       case target
@@ -153,6 +156,13 @@ module ClearLS::IDE
         return refuse("`#{target.name}` is defined by a macro or the compiler") if sites.any? { |s| !s.item.origin.source? }
         return refuse("`#{target.name}` overrides a method declared outside the workspace") if sites.any? { |s| @index.library_file?(s.file) }
       end
+      if target.is_a?(IvarTarget) && (gen = ivar_generated?(ctx, target))
+        return refuse(gen)
+      end
+      unless search
+        r = cursor_range(ctx, target, offset) || return refuse("nothing to rename here")
+        return RenamePlan.new(nil, nil, r)
+      end
       refs = find(target, ctx.state.id)
       unsure = refs.reject(&.exact)
       unless unsure.empty?
@@ -162,9 +172,6 @@ module ClearLS::IDE
       end
       if refs.any? { |r| @index.library_file?(r.file) }
         return refuse("`#{target.name}` is used outside the workspace")
-      end
-      if target.is_a?(IvarTarget) && (gen = ivar_generated?(ctx, target))
-        return refuse(gen)
       end
       range = refs.find { |r| r.file == ctx.state.id && r.range.touches?(offset) }.try(&.range)
       RenamePlan.new(refs, nil, range)
@@ -200,6 +207,21 @@ module ClearLS::IDE
         return true if site.item.name_range.touches?(offset)
       end
       false
+    end
+
+    # The name token under the cursor: the identifier/constant segment or
+    # ivar, for the static prepareRename answer.
+    private def cursor_range(ctx : Context, target : RefTarget, offset : UInt32) : TextRange?
+      if target.is_a?(PathTarget)
+        hit = Analysis.new(ctx.state, @index, ctx.typing.def_map).resolve_path_at(offset).first?
+        return hit.try(&.[:range])
+      end
+      node = ctx.state.tree.root.descendant(offset, offset, named: true) || return nil
+      return node.range if node.text == target.name
+      # `.foo` method token of an implicit-object call, `foo=`, `foo?`.
+      t = node.text
+      i = t.index(target.name) || return nil
+      TextRange.new(node.start_byte + i.to_u32, node.start_byte + (i + target.name.bytesize).to_u32)
     end
 
     private def refuse(msg : String) : RenamePlan

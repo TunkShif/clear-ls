@@ -274,7 +274,7 @@ module ClearLS::LSP
         r, name = hit
         return {range: range_json(state, r), placeholder: name}
       end
-      plan = rename_plan(state, off, nil)
+      plan = rename_plan(state, off, nil, search: false)
       if err = plan.error
         raise ResponseError.new(ErrorCode::InvalidRequest, err)
       end
@@ -310,9 +310,9 @@ module ClearLS::LSP
       references_finder.def_name_at?(IDE::References::Context.new(state, bodies(state), typing(state)), off)
     end
 
-    private def rename_plan(state : FileState, off : UInt32, new_name : String?) : IDE::References::RenamePlan
+    private def rename_plan(state : FileState, off : UInt32, new_name : String?, search = true) : IDE::References::RenamePlan
       ctx = IDE::References::Context.new(state, bodies(state), typing(state))
-      references_finder.rename_plan(ctx, off, new_name)
+      references_finder.rename_plan(ctx, off, new_name, search)
     end
 
     private def semantic_tokens(params : JSON::Any, range : JSON::Any?)

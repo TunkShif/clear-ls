@@ -232,6 +232,11 @@ describe "workspace rename" do
       u = c.open("src/w.cr")
       prep = c.request("textDocument/prepareRename", {textDocument: {uri: u}, position: c.pos("src/w.cr", "def size", 4)})
       prep["placeholder"].should eq "size"
+      au = c.open("src/app.cr")
+      prep = c.request("textDocument/prepareRename", {textDocument: {uri: au}, position: c.pos("src/app.cr", "Widget.new", 2)})
+      prep["placeholder"].should eq "Widget"
+      prep = c.request("textDocument/prepareRename", {textDocument: {uri: u}, position: c.pos("src/w.cr", "@size + ", 1)})
+      prep["placeholder"].should eq "@size"
     end
   end
 
@@ -244,6 +249,14 @@ describe "workspace rename" do
       rename_error(c, "src/app.cr", "def +", 4).should contain("operators")
       rename_error(c, "src/app.cr", "property x", 9).should contain("macro")
       rename_error(c, "src/app.cr", "def run", 4).should contain("can't be confirmed") # v.run
+      # prepareRename only runs the static checks (no reference search):
+      # it accepts `run`, and `rename` refuses.
+      u = c.open("src/app.cr")
+      prep = c.request("textDocument/prepareRename", {textDocument: {uri: u}, position: c.pos("src/app.cr", "def run", 4)})
+      prep["placeholder"].should eq "run"
+      expect_raises(Exception, /operators/) do
+        c.request("textDocument/prepareRename", {textDocument: {uri: u}, position: c.pos("src/app.cr", "def +", 4)})
+      end
       rename_error(c, "src/app.cr", "size", 0).should contain("outside the workspace")
       rename_error(c, "src/app.cr", "def go", 4, "Go").should contain("not a valid method name")
     end
