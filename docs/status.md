@@ -11,7 +11,7 @@ stops mid-phase). History and per-phase details are in
 - **Next:** Phase 9 — workspace identity, split into nine steps in
   [roadmap.md](roadmap.md#phase-9--workspace-identity) (measurements and
   decisions there). Step 1 fixes stale DefMap positions after body edits.
-- **In progress:** Phase 9, step 8 (steps 1–7 done).
+- **In progress:** Phase 9, step 9 (steps 1–8 done).
 
 ## Resume
 

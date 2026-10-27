@@ -277,3 +277,30 @@ describe "incoming calls and type hierarchy" do
     end
   end
 end
+
+describe "code actions" do
+  it "applies the compiler's suggestion and adds missing requires" do
+    files = {
+      "shard.yml"     => "name: ca\ntargets:\n  ca:\n    main: src/app.cr\n",
+      "src/app.cr"    => "require \"./util\"\nw = Widget.new\nw.rendr\n",
+      "src/util.cr"   => "",
+      "src/ui/widget.cr" => "class Widget\n  def render; end\nend\n",
+    }
+    with_client(files) do |c|
+      u = c.open("src/app.cr")
+      typo = {range: {start: {line: 2, character: 2}, end: {line: 2, character: 7}}, severity: 1, source: "crystal",
+              message: "undefined method 'rendr' for Widget\nDid you mean 'render'?"}
+      missing = {range: {start: {line: 1, character: 4}, end: {line: 1, character: 10}}, severity: 1, source: "crystal",
+                 message: "undefined constant Widget"}
+      acts = c.request("textDocument/codeAction", {textDocument: {uri: u}, range: typo[:range], context: {diagnostics: [typo, missing]}}).as_a
+      acts.map(&.["title"].as_s).should eq ["Replace with 'render'", %(Add require "./ui/widget")]
+      acts[0]["edit"]["changes"][u][0]["newText"].should eq "render"
+      edit = acts[1]["edit"]["changes"][u][0]
+      edit["newText"].should eq %(require "./ui/widget"\n)
+      edit["range"]["start"]["line"].should eq 1 # after `require "./util"`
+      # Not from other sources.
+      acts = c.request("textDocument/codeAction", {textDocument: {uri: u}, range: typo[:range], context: {diagnostics: [typo.merge({source: "ameba"})]}}).as_a
+      acts.should be_empty
+    end
+  end
+end

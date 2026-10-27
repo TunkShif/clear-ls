@@ -55,6 +55,7 @@ module ClearLS::LSP
         documentFormattingProvider: true,
         callHierarchyProvider:   true,
         typeHierarchyProvider:   true,
+        codeActionProvider:      {codeActionKinds: ["quickfix"]},
         signatureHelpProvider:   {triggerCharacters: ["(", ","], retriggerCharacters: [" "]},
         semanticTokensProvider:  {
           legend: {
@@ -89,6 +90,7 @@ module ClearLS::LSP
       when "callHierarchy/outgoingCalls" then outgoing_calls(params)
       when "callHierarchy/incomingCalls" then incoming_calls(params)
       when "textDocument/prepareTypeHierarchy" then prepare_type_hierarchy(params)
+      when "textDocument/codeAction"     then code_action(params)
       when "typeHierarchy/supertypes"    then type_hierarchy(params, super: true)
       when "typeHierarchy/subtypes"      then type_hierarchy(params, super: false)
       when "textDocument/semanticTokens/full"  then semantic_tokens(params, nil)

@@ -708,6 +708,14 @@ Steps (one commit each):
    `require` for an unresolved constant defined in a workspace file;
    "did you mean" for an `undefined method` diagnostic whose receiver
    type has a close name (edit distance ≤ 2).
+   *Done (adjusted):* the compiler already prints "Did you mean 'x'?"
+   for methods, constants and locals, so the quick fix applies that
+   suggestion instead of computing edit distances (checked with Crystal
+   1.22: `undefined method 'rendr' for Widget\nDid you mean 'render'?`).
+   `undefined constant Foo` offers `require` of workspace files that
+   declare `Foo` at the top level (a file only sees what it requires,
+   step 2), inserted after the last top-level require. Only diagnostics
+   with `source: crystal`.
 9. **Verification and docs.** Neovim check `workspace` (references,
    rename, incoming calls, hierarchy, a code action) on a multi-file
    fixture, timings, roadmap/README/architecture.
