@@ -14,7 +14,7 @@ class FeatureClient
   # requires them all.
   # *compiler*: `initializationOptions.compiler`; the real compiler is off
   # unless a spec asks for it.
-  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String)
+  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false})
     @root = File.tempname("clear-ls-feat")
     files.each do |path, text|
       full = File.join(@root, path)
@@ -32,7 +32,7 @@ class FeatureClient
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
     @server.project_factory = ->(root : String) { Workspace::Project.new(root, paths, std_dir, nil, "x86_64-unknown-linux-gnu") }
     @server.index_workers = 1
-    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler}})
+    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler, references: references}})
     notify("initialized", {} of String => String)
   end
 
@@ -123,8 +123,8 @@ class FeatureClient
   end
 end
 
-def with_client(files, stdlib = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, &)
-  c = FeatureClient.new(files, stdlib, compiler, workspace_caps)
+def with_client(files, stdlib = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false}, &)
+  c = FeatureClient.new(files, stdlib, compiler, workspace_caps, references)
   yield c
 ensure
   c.try(&.cleanup)

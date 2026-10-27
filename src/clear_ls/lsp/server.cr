@@ -152,6 +152,7 @@ module ClearLS::LSP
       @encoding = [PositionEncoding::UTF8, PositionEncoding::UTF32].find { |e| encodings.includes?(e) } || PositionEncoding::UTF16
       @root = workspace_root(params)
       @client_capabilities = params["capabilities"]? || @client_capabilities
+      @references_options = params.dig?("initializationOptions", "references") || @references_options
       read_compiler_options(params)
       @state = State::Initialized
 

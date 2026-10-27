@@ -226,7 +226,7 @@ module ClearLS::IDE
     # Resolves the `constant` node at *offset* up to the segment under the
     # cursor (`Foo::B|ar::Baz` → `Foo::Bar`). Returns resolved types or
     # constants.
-    private def resolve_path_at(offset : UInt32) : Array(NamedTuple(full_name: String, sites: Array(Semantics::Site), range: TextRange))
+    def resolve_path_at(offset : UInt32) : Array(NamedTuple(full_name: String, sites: Array(Semantics::Site), range: TextRange))
       empty = [] of NamedTuple(full_name: String, sites: Array(Semantics::Site), range: TextRange)
       node = tree.root.descendant(offset, offset, named: true) || return empty
       node = node.parent.not_nil! if !node.kind.constant? && node.parent.try(&.kind.constant?)

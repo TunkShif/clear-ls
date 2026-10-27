@@ -661,6 +661,16 @@ Steps (one commit each):
    bodies, restrictions, superclass/include, headers of reopenings),
    from any position (declaration or use). Exact vs possible; local
    bindings keep the current path.
+   *Done:* `IDE::References` (target at cursor: def header, call, or
+   constant path; search over `files_with_word` candidates that see the
+   declaration). Calls count when their resolution contains a target
+   site: exact if every viable candidate is a target (or the resolution
+   is unique/runtime targets), possible when name-only/unresolved with a
+   receiver; possible ones only with `references.includePossible`. Uses
+   of `Typing#infer_at` in this repo: all 21 found (probes and scripts
+   included, they require the library), none extra; 884 ms cold (infers
+   every body of the candidate files), 2 ms warm. `DefMap` (type): 50
+   refs, 58 ms cold.
 5. **Ivar definitions and references (C5).** Lower `initialize(@x)`
    params to ivar items; definition picks the strongest category
    (declaration, accessor macro, `initialize(@x)`, else every

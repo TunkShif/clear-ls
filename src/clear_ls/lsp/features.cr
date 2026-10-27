@@ -9,6 +9,7 @@ require "../ide/completion"
 require "../ide/type_info"
 require "../ide/signature_help"
 require "../ide/navigation"
+require "../ide/references"
 
 module ClearLS::LSP
   # Phase 1 language features: symbols, folding, selection, and
@@ -210,14 +211,45 @@ module ClearLS::LSP
       end
     end
 
-    # Locals only in Phase 2: other symbols return an empty list rather than
-    # guessing by name.
+    # Locals by binding; methods, types and constants across the
+    # workspace by identity (`IDE::References`). Possible references
+    # (same name, unknown identity) only with
+    # `initializationOptions.references.includePossible`.
     private def references(params : JSON::Any)
       state = document(params)
+      off = offset(state, params["position"])
       include_decl = params.dig?("context", "includeDeclaration").try(&.as_bool) != false
-      locals(state).references(offset(state, params["position"]), include_decl).map do |r|
-        {uri: state.uri, range: range_json(state, r.range)}
+      local = locals(state).references(off, include_decl)
+      unless local.empty?
+        return local.map { |r| {uri: state.uri, range: range_json(state, r.range)} }
       end
+      refs = workspace_references(state, off) || return [] of Nil
+      refs.compact_map do |r|
+        next if r.declaration && !include_decl
+        next unless r.exact || include_possible?
+        location_json(IDE::Location.new(r.file, r.range))
+      end
+    end
+
+    @references_options = JSON::Any.new({} of String => JSON::Any)
+
+    private def include_possible? : Bool
+      @references_options["includePossible"]?.try(&.as_bool?) == true
+    end
+
+    private def workspace_references(state : FileState, off : UInt32) : Array(IDE::Reference)?
+      finder = references_finder
+      ctx = IDE::References::Context.new(state, bodies(state), typing(state))
+      target = finder.target_at(ctx, off) || return nil
+      finder.find(target, state.id)
+    end
+
+    private def references_finder : IDE::References
+      IDE::References.new(index, ->(file : FileId) do
+        uri = @vfs.uri(file)
+        st = @vfs.file?(uri) || @vfs.load(uri)
+        st.try { |x| IDE::References::Context.new(x, bodies(x), typing(x)) }
+      end)
     end
 
     private def prepare_rename(params : JSON::Any)
