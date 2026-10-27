@@ -295,30 +295,52 @@ module ClearLS::Workspace
       @entries.each { |id, e| yield id, e }
     end
 
+    # Where the last `#load` spent its time (wall clock; parse is the
+    # parallel batches, the rest runs on the calling fiber).
+    record LoadStats, rounds : Int32 = 0, walk : Time::Span = Time::Span.zero,
+      parse : Time::Span = Time::Span.zero, resolve : Time::Span = Time::Span.zero,
+      words : Time::Span = Time::Span.zero, trim : Time::Span = Time::Span.zero,
+      total : Time::Span = Time::Span.zero
+
+    getter load_stats = LoadStats.new
+
     # Indexes the prelude closure and workspace files from disk, then their
     # require closure. Parses in parallel with *workers* threads.
     def load(workers : Int32 = default_workers) : Nil
-      roots = @project.source_files
+      start = Time.instant
+      rounds = 0
+      parse = resolve = words = Time::Span.zero
+      roots = [] of String
+      walk = Time.measure { roots = @project.source_files }
       @project.prelude.try { |p| roots.unshift(p) }
       pending = roots.to_set
       seen = Set(String).new
       until pending.empty?
+        rounds += 1
         batch = pending.to_a.reject { |p| seen.includes?(p) }
         seen.concat(batch)
         pending = Set(String).new
-        parse_batch(batch, workers).each do |path, items|
+        t = Time.instant
+        parsed = parse_batch(batch, workers)
+        parse += t.elapsed
+        parsed.each do |path, items|
           next unless items
           id = @vfs.id_for(VFS.uri_for(path))
           # An open buffer is authoritative; keep its entry.
           next if @entries[id]? && @vfs.open?(VFS.uri_for(path))
+          t = Time.instant
           entry = make_entry(path, items)
+          resolve += t.elapsed
           @entries[id] = entry
+          t = Time.instant
           read_words(id, path)
+          words += t.elapsed
           entry.requires.each { |r| pending << r unless seen.includes?(r) }
         end
       end
       invalidate_maps
-      ClearLS::Memory.trim # parse workers' freed trees (see Memory)
+      trim = Time.measure { ClearLS::Memory.trim } # parse workers' freed trees (see Memory)
+      @load_stats = LoadStats.new(rounds, walk, parse, resolve, words, trim, start.elapsed)
       Log.info { "indexed #{@entries.size} files" }
     end
 

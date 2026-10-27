@@ -18,6 +18,7 @@ usage comment.
 | `cfg_all DIR` | builds the CFG of every def (crash check + timing) |
 | `dump_cst_all FILE` | CST including anonymous tokens and field names |
 | `refs_probe ROOT PREFIX` | call-resolution kinds over every body (what a reference index would contain), full-inference time, and name-filtered lookup cost (`NAMES=a,b`); `SHOW=Kind` samples |
+| `startup ROOT [RUNS]` | startup split: detect, `Index#load` (walk / parse rounds / require resolution / word sets / trim), DefMap build. `WORKERS=n` |
 | `type_marks ROOT FILE...` | clear-ls type of every `__t(expr)` marker, spelled like the compiler; used by `book_diff.py` |
 
 Example: `bin/probes/coverage $PWD $PWD/src`, or with the stdlib as PREFIX

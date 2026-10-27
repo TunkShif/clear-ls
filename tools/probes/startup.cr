@@ -1,0 +1,25 @@
+# Where startup time goes: project detection, `Index#load` split into
+# source walk / parse+lower rounds / require resolution / word sets /
+# malloc_trim, then the project DefMap build. Phase 11 baseline.
+#
+#   bin/probes/startup ROOT [RUNS]     e.g. bin/probes/startup tools/external/marten 3
+#
+# `WORKERS=n` overrides the worker count. Each run uses a fresh index.
+require "../../src/clear_ls"
+
+root = File.expand_path(ARGV[0]? || Dir.current)
+runs = (ARGV[1]? || "1").to_i
+workers = ENV["WORKERS"]?.try(&.to_i)
+ms = ->(s : Time::Span) { s.total_milliseconds.round(1) }
+runs.times do |i|
+  project = nil
+  detect = Time.measure { project = ClearLS::Workspace::Project.detect(root) }
+  idx = ClearLS::Workspace::Index.new(project.not_nil!, ClearLS::VFS.new)
+  workers ? idx.load(workers) : idx.load
+  map = Time.measure { idx.def_map }
+  s = idx.load_stats
+  rest = s.total - s.walk - s.parse - s.resolve - s.words - s.trim
+  puts "run #{i + 1}: files=#{idx.size} rounds=#{s.rounds} detect=#{ms.call(detect)} load=#{ms.call(s.total)} " \
+       "(walk=#{ms.call(s.walk)} parse=#{ms.call(s.parse)} resolve=#{ms.call(s.resolve)} words=#{ms.call(s.words)} " \
+       "trim=#{ms.call(s.trim)} other=#{ms.call(rest)}) def_map=#{ms.call(map)} total=#{ms.call(detect + s.total + map)}ms"
+end
