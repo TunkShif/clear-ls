@@ -87,8 +87,14 @@ search_ms = (time.time() - start) * 1000
 print(f"hover during references {label} ({search_ms:.0f}ms, {len(lat)} hovers): p50 {percentile(lat, 50):.0f}ms p99 {percentile(lat, 99):.0f}ms max {max(lat):.0f}ms")
 results["hover_p99"] = percentile(lat, 99)
 
-rid = c.send_request("textDocument/references", {**params, "position": {"line": params["position"]["line"], "character": params["position"]["character"]}})
-time.sleep(0.05)
+c.close()
+
+# Cancellation of a cold search (fresh server: nothing inferred yet).
+c = Client(root)
+c.open(req_file)
+c.request("textDocument/documentSymbol", {"textDocument": {"uri": "file://" + req_file}}, timeout=300)
+rid = c.send_request("textDocument/references", params)
+time.sleep(0.2)
 t = time.time()
 c.notify("$/cancelRequest", {"id": rid})
 msg, at = c.wait(rid, timeout=600)

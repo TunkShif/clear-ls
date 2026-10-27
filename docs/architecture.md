@@ -146,6 +146,10 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
   possible references; `rename_plan` (override family, refusals);
   incoming calls group exact references by enclosing def.
 - `lsp/code_actions.cr`: quick fixes from compiler diagnostics only.
+- `lsp/job.cr` (Phase 10): references/rename/incoming calls run as
+  jobs on fibers; `References` calls a checkpoint per candidate file and
+  body (cancel, budget, `Fiber.yield`). Cancelled by `$/cancelRequest`,
+  by edits of files the job read, and by any declaration edit.
 
 ### Compiler integration (Phase 7)
 
@@ -178,8 +182,9 @@ the roadmap):
 - Inlay hints don't cover parameters.
 - No persistent stdlib index cache; every start re-indexes (~0.6 s,
   ~1.0 s on Marten) (Phase 11).
-- Requests are handled one at a time on one fiber; no cancellation
-  (Phase 10).
+- One thread: long requests (references, rename, incoming calls) are
+  `LSP::Job`s that yield at checkpoints; other requests still run one
+  at a time.
 - Single workspace root (first `workspaceFolders` entry / `rootUri`, or
   the project above it); nested projects get their own views, but
   diagnostics still run in the root's toolchain.

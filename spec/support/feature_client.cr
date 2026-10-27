@@ -14,7 +14,7 @@ class FeatureClient
   # requires them all.
   # *compiler*: `initializationOptions.compiler`; the real compiler is off
   # unless a spec asks for it.
-  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false})
+  def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false}, budgets = {} of String => Float64)
     @root = File.tempname("clear-ls-feat")
     files.each do |path, text|
       full = File.join(@root, path)
@@ -32,7 +32,7 @@ class FeatureClient
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
     @server.project_factory = ->(root : String) { Workspace::Project.new(root, paths, std_dir, nil, "x86_64-unknown-linux-gnu") }
     @server.index_workers = 1
-    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler, references: references}})
+    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets}})
     notify("initialized", {} of String => String)
   end
 
@@ -64,6 +64,23 @@ class FeatureClient
     end
     raise "#{method}: #{reply["error"]}" if reply["error"]?
     reply["result"]
+  end
+
+  # Sends a request without waiting (for jobs); returns the id.
+  def send_request(method : String, params = nil) : Int32
+    @next_id += 1
+    @server.dispatch({jsonrpc: "2.0", id: @next_id, method: method, params: params}.to_json)
+    @next_id
+  end
+
+  # Response (result or error object) of request *id*, waiting for it.
+  def response_of(id : Int32, timeout = 30.seconds) : JSON::Any
+    deadline = Time.instant + timeout
+    while (reply = response(id)).raw.nil?
+      raise "request #{id}: no response" if Time.instant > deadline
+      sleep 1.millisecond
+    end
+    reply
   end
 
   def notify(method : String, params = nil) : Nil
@@ -123,8 +140,8 @@ class FeatureClient
   end
 end
 
-def with_client(files, stdlib = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false}, &)
-  c = FeatureClient.new(files, stdlib, compiler, workspace_caps, references)
+def with_client(files, stdlib = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false}, budgets = {} of String => Float64, &)
+  c = FeatureClient.new(files, stdlib, compiler, workspace_caps, references, budgets)
   yield c
 ensure
   c.try(&.cleanup)

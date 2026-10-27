@@ -34,6 +34,22 @@ table.sort(files)
 print("rename area -> size edits: " .. table.concat(files, " "))
 local pr = req("textDocument/prepareRename", { textDocument = td(), position = { line = 7, character = 1 } })
 print("prepareRename puts (stdlib): " .. (pr and (pr.message or pr.placeholder) or "nil"))
+-- hover while a references search runs (async request, then sync hover)
+vim.cmd("buffer " .. H.work .. "/src/app.cr")
+local done_at, hover_at
+local t0 = vim.uv.hrtime()
+H.client:request("textDocument/references", { textDocument = td(), position = { line = 7, character = 9 }, context = { includeDeclaration = true } }, function() done_at = (vim.uv.hrtime() - t0) / 1e6 end, 0)
+local hv = req("textDocument/hover", { textDocument = td(), position = { line = 6, character = 0 } })
+hover_at = (vim.uv.hrtime() - t0) / 1e6
+vim.wait(10000, function() return done_at ~= nil end)
+print(("hover during references: answered at %.0fms, references at %.0fms, hover ok=%s"):format(hover_at, done_at or -1, tostring(hv ~= nil)))
+-- cancel: Neovim drops the handler of a cancelled request; the server's
+-- side shows in the log ("job ... (cancelled)").
+local _, rid = H.client:request("textDocument/references", { textDocument = td(), position = { line = 7, character = 15 }, context = { includeDeclaration = true } }, function() end, 0)
+H.client:cancel_request(rid)
+vim.wait(500)
+local log = table.concat(vim.fn.readfile(H.log), "\n")
+print("cancel references: server log " .. (log:find("job textDocument/references " .. rid .. ": [%d.]+ms %(cancelled%)") and "shows cancelled job" or "has no cancelled job"))
 -- code action: missing require in the script
 vim.cmd("edit " .. H.work .. "/scripts/try.cr")
 local diag = { range = { start = { line = 3, character = 4 }, ["end"] = { line = 3, character = 10 } }, severity = 1, source = "crystal", message = "undefined constant Widget" }

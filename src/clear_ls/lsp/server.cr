@@ -1,6 +1,7 @@
 require "log"
 require "./transport"
 require "./json_rpc"
+require "./job"
 require "../vfs"
 require "../version"
 require "../workspace/index"
@@ -20,9 +21,12 @@ module ClearLS::LSP
 
   # Language server main loop.
   #
-  # Messages are handled one at a time in arrival order on one fiber, so VFS
-  # mutations and the requests that follow them are naturally ordered.
-  # Long-running analysis will later run on snapshots in other fibers.
+  # Messages are handled in arrival order on one fiber, so VFS mutations
+  # and the requests that follow them are naturally ordered. Long requests
+  # (`JOB_METHODS`) run as `Job`s on their own fibers and yield at
+  # checkpoints; everything stays on one thread, so the dispatcher only
+  # runs between those checkpoints. An edit cancels jobs that read the
+  # edited file; `$/cancelRequest` cancels by id.
   class Server
     enum State
       Uninitialized
@@ -73,9 +77,23 @@ module ClearLS::LSP
       end
     end
 
+    # Requests that may search the whole program.
+    JOB_METHODS = %w(textDocument/references textDocument/rename callHierarchy/incomingCalls)
+
+    # Running jobs by request id.
+    @jobs = {} of RequestId => Job
+
+    def jobs_running : Int32
+      @jobs.size
+    end
+
     private def handle_request(msg : Message) : Nil
       id = msg.id
       method = msg.method.not_nil!
+      if JOB_METHODS.includes?(method) && @state.initialized? && id
+        start_job(id, method, msg.params)
+        return
+      end
       result = request(method, msg.params)
       if result.is_a?(Deferred)
         spawn(name: "clear-ls-deferred") { finish_deferred(id, method, result) }
@@ -87,6 +105,80 @@ module ClearLS::LSP
     rescue ex
       Log.error(exception: ex) { "request #{method} failed" }
       @transport.write(JsonRpc.error(id, ErrorCode::InternalError, ex.message || ex.class.name))
+    end
+
+    # `initializationOptions.budgets`: seconds per request kind
+    # (`references`, `rename`, `incomingCalls`; 0 disables; default 5 s),
+    # and `maxCandidates` (files per search, default 2000).
+    @budget_options = JSON::Any.new({} of String => JSON::Any)
+    DEFAULT_BUDGET = 5.seconds
+
+    private def budget_for(method : String) : Time::Span?
+      key = method.split('/').last
+      secs = @budget_options[key]?.try { |v| v.as_f? || v.as_i?.try(&.to_f) }
+      return DEFAULT_BUDGET if secs.nil?
+      secs <= 0 ? nil : secs.seconds
+    end
+
+    private def start_job(id : RequestId, method : String, params : JSON::Any) : Nil
+      job = Job.new(id, method)
+      job.deadline = budget_for(method).try { |b| job.started + b }
+      @jobs[id] = job
+      spawn(name: "clear-ls-job") do
+        begin
+          result = job.run { request(method, params) }
+          result = result.block.call if result.is_a?(Deferred)
+          @transport.write(JsonRpc.response(id, result)) unless job.cancelled? && request_cancelled?(job)
+        rescue ex : ResponseError
+          @transport.write(JsonRpc.error(id, ex.code, ex.message || ""))
+        rescue ex
+          Log.error(exception: ex) { "request #{method} failed" }
+          @transport.write(JsonRpc.error(id, ErrorCode::InternalError, ex.message || ex.class.name))
+        ensure
+          @jobs.delete(id)
+          Log.debug { "job #{method} #{id}: #{(Time.instant - job.started).total_milliseconds.round}ms#{job.cancelled? ? " (cancelled)" : ""}" }
+        end
+      end
+    end
+
+    # A job cancelled after its last checkpoint finished anyway; the
+    # client asked for an error, so send that.
+    private def request_cancelled?(job : Job) : Bool
+      begin
+        job.checkpoint
+        false
+      rescue ex : ResponseError
+        @transport.write(JsonRpc.error(job.id, ex.code, ex.message || ""))
+        true
+      end
+    end
+
+    # Cancels jobs that read *file* (its contents changed under them).
+    private def cancel_jobs_reading(file : FileId) : Nil
+      @jobs.each_value do |j|
+        j.cancel(ErrorCode::ContentModified, "#{@vfs.uri(file).split('/').last} changed during #{j.method.split('/').last}") if j.read?(file)
+      end
+    end
+
+    # A file's text changed: jobs that read it are stale; a declaration
+    # change rebuilds the DefMaps every job works with, so all are.
+    private def edited(file : FileId, decls_changed : Bool) : Nil
+      return if @jobs.empty?
+      if decls_changed
+        @jobs.each_value { |j| j.cancel(ErrorCode::ContentModified, "declarations changed during #{j.method.split('/').last}") }
+      else
+        cancel_jobs_reading(file)
+      end
+    end
+
+    private def cancel_request(params : JSON::Any) : Nil
+      raw = params["id"]?.try(&.raw)
+      id = case raw
+           when Int64  then raw
+           when String then raw
+           end
+      return unless id
+      @jobs[id]?.try(&.cancel(ErrorCode::RequestCancelled, "cancelled"))
     end
 
     private def finish_deferred(id : RequestId?, method : String, deferred : Deferred) : Nil
@@ -133,7 +225,8 @@ module ClearLS::LSP
       when "textDocument/didClose"           then did_close(params)
       when "textDocument/didSave"            then compiler_saved(params.dig("textDocument", "uri").as_s)
       when "workspace/didChangeWatchedFiles" then did_change_watched(params)
-      when "$/cancelRequest", "$/setTrace"   then nil
+      when "$/cancelRequest"                 then cancel_request(params)
+      when "$/setTrace"                      then nil
       else
         Log.debug { "ignored notification #{method}" }
       end
@@ -153,6 +246,7 @@ module ClearLS::LSP
       @root = workspace_root(params)
       @client_capabilities = params["capabilities"]? || @client_capabilities
       @references_options = params.dig?("initializationOptions", "references") || @references_options
+      @budget_options = params.dig?("initializationOptions", "budgets") || @budget_options
       read_compiler_options(params)
       @state = State::Initialized
 
@@ -227,6 +321,7 @@ module ClearLS::LSP
       end
       state = @vfs.change(doc["uri"].as_s, doc["version"].as_i64, changes, @encoding)
       decls_changed = @index.try(&.update(state))
+      edited(state.id, !!decls_changed)
       Log.debug do
         ranges = state.tree.changed_ranges.try(&.join(", ")) || "full"
         "didChange #{state.uri} v#{state.version}: #{changes.size} edit(s), changed [#{ranges}], error=#{state.tree.has_error?}, decls_changed=#{decls_changed}"
@@ -240,8 +335,9 @@ module ClearLS::LSP
       # Back to the disk contents (or forget an unsaved untitled buffer).
       if idx = @index
         if state = @vfs.file?(uri)
-          idx.update(state)
+          edited(state.id, idx.update(state))
         else
+          edited(@vfs.id_for(uri), true)
           idx.remove(@vfs.id_for(uri))
         end
       end
@@ -258,7 +354,7 @@ module ClearLS::LSP
         if c["type"]?.try(&.as_i) == 3
           idx.remove(@vfs.id_for(uri))
         elsif state = @vfs.load(uri)
-          idx.update(state)
+          edited(state.id, idx.update(state))
         end
       end
     end

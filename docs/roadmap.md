@@ -840,9 +840,23 @@ Steps (one commit each):
    a job has read cancels it with `ContentModified`. Interactive
    requests run between checkpoints. Specs with a fake slow finder;
    Neovim check: hover during references.
+   *Done:* `LSP::Job` (fiber per request, `Job.current`, checkpoint =
+   cancel/budget check + `Fiber.yield`); `References` takes a checkpoint
+   callback (per candidate file and per inferred body). An edit of a file
+   a job read cancels it; a declaration edit cancels every job (the maps
+   are rebuilt). Soak: hover during a cold `Request#method` search p99
+   3.8 s → 48–51 ms; `$/cancelRequest` answered in 2–3 ms with
+   RequestCancelled (was ignored). Neovim `workspace`: hover during
+   references, cancel visible in the server log. Step 5's budgets are in
+   the same commit (the job is where they are checked).
 5. **Budgets.** Per-request time budgets (references/rename/incoming
    calls 5 s, configurable via `initializationOptions.budgets`) and a
    candidate-file cap; failures say what was covered.
+   *Done (with step 4):* `initializationOptions.budgets`
+   (`references`/`rename`/`incomingCalls` seconds, `maxCandidates`).
+   Over budget: `references stopped after 5.0 s: 61 of 84 candidate
+   files searched`; over the cap: ``` `run` appears in 2412 files (limit
+   2000); search not run```.
 6. **Verification and docs.** Probe numbers before/after, `make
    nvim-check`, README.
 

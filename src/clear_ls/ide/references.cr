@@ -53,6 +53,10 @@ module ClearLS::IDE
     end
   end
 
+  # Too many candidate files for one search (`References#max_candidates`).
+  class CandidateLimit < Exception
+  end
+
   # Workspace references by identity (Phase 9).
   #
   # The target comes from the cursor: a def header or a call (methods), a
@@ -71,9 +75,17 @@ module ClearLS::IDE
     # *context_for*: analysis context of another file (open buffer or
     # disk), with the typing of its own program view.
     # *describe*: `file:line` of a reference, for messages.
+    # *checkpoint*: called between candidate files and bodies with what
+    # was covered so far and the file about to be read; it may raise to
+    # stop the search (cancellation, budget) and yield to other work.
     def initialize(@index : Workspace::Index, @context_for : Proc(FileId, Context?),
-                   @describe : Proc(Reference, String) = ->(r : Reference) { "#{r.file.value}:#{r.range.start}" })
+                   @describe : Proc(Reference, String) = ->(r : Reference) { "#{r.file.value}:#{r.range.start}" },
+                   @checkpoint : Proc(String, FileId?, Nil) = ->(_p : String, _f : FileId?) { })
     end
+
+    # Most candidate files searched per request (a common name in a big
+    # program); over it the search fails clearly instead of running on.
+    property max_candidates = 2000
 
     def target_at(ctx : Context, offset : UInt32) : RefTarget?
       ivar_target(ctx, offset) || method_target(ctx, offset) || path_target(ctx, offset)
@@ -91,7 +103,11 @@ module ClearLS::IDE
       # Ivars: files of the requesting file's program.
       candidates.select! { |f| @index.visible_files(from).includes?(f) } if target.is_a?(IvarTarget)
       target_files = target_sites(target).map(&.file).to_set
-      candidates.each do |file|
+      if candidates.size > @max_candidates
+        raise CandidateLimit.new("`#{word}` appears in #{candidates.size} files (limit #{@max_candidates}); search not run")
+      end
+      candidates.each_with_index do |file, i|
+        @checkpoint.call("#{i} of #{candidates.size} candidate files searched", file)
         # The file must see the target's declaration (one of them).
         next unless target.is_a?(IvarTarget) || @index.visible_files(file).any? { |f| target_files.includes?(f) }
         ctx = @context_for.call(file) || next
@@ -325,6 +341,7 @@ module ClearLS::IDE
         off = m.byte_begin(0).to_u32
         body = ctx.bodies.at(off) || next
         next unless seen_bodies.add?(body.range.start)
+        @checkpoint.call("", nil) if seen_bodies.size > 1
         _, inf = ctx.typing.infer_at(ctx.state, ctx.bodies, off) || next
         body.exprs.each do |e|
           next unless e.kind.call? && e.name == target.name && (nr = e.name_range)

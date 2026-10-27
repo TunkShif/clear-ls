@@ -251,7 +251,12 @@ module ClearLS::LSP
       finder = references_finder
       ctx = IDE::References::Context.new(state, bodies(state), typing(state))
       target = finder.target_at(ctx, off) || return nil
-      finder.find(target, state.id)
+      Job.read(state.id)
+      begin
+        finder.find(target, state.id)
+      rescue ex : IDE::CandidateLimit
+        raise ResponseError.new(ErrorCode::RequestFailed, ex.message || "too many candidate files")
+      end
     end
 
     private def references_finder : IDE::References
@@ -264,7 +269,16 @@ module ClearLS::LSP
         path = VFS.path_for(@vfs.uri(r.file)) || @vfs.uri(r.file)
         line = @vfs.line_index_for(r.file).try { |li| li.position(r.range.start, PositionEncoding::UTF8).line + 1 }
         "#{Path[path].relative_to(root)}:#{line}"
-      end)
+      end, ->(progress : String, file : FileId?) do
+        if job = Job.current
+          job.progress = progress unless progress.empty?
+          file.try { |f| job.read(f) }
+          job.checkpoint
+        end
+        nil
+      end).tap do |f|
+        @budget_options["maxCandidates"]?.try(&.as_i?).try { |n| f.max_candidates = n }
+      end
     end
 
     private def prepare_rename(params : JSON::Any)
@@ -312,7 +326,10 @@ module ClearLS::LSP
 
     private def rename_plan(state : FileState, off : UInt32, new_name : String?, search = true) : IDE::References::RenamePlan
       ctx = IDE::References::Context.new(state, bodies(state), typing(state))
+      Job.read(state.id)
       references_finder.rename_plan(ctx, off, new_name, search)
+    rescue ex : IDE::CandidateLimit
+      raise ResponseError.new(ErrorCode::RequestFailed, ex.message || "too many candidate files")
     end
 
     private def semantic_tokens(params : JSON::Any, range : JSON::Any?)
@@ -396,7 +413,13 @@ module ClearLS::LSP
       finder = references_finder
       target = IDE::MethodTarget.new(item.site.item.name, [item.site], item.owner)
       groups = {} of {FileId, UInt32} => {IDE::CallItem?, FileState, Array(TextRange)}
-      finder.find(target, state.id).each do |r|
+      Job.read(state.id)
+      refs = begin
+        finder.find(target, state.id)
+      rescue ex : IDE::CandidateLimit
+        raise ResponseError.new(ErrorCode::RequestFailed, ex.message || "too many candidate files")
+      end
+      refs.each do |r|
         next if r.declaration || !r.exact
         st = @vfs.file?(@vfs.uri(r.file)) || @vfs.load(@vfs.uri(r.file)) || next
         caller = navigation(st).call_item_at(r.range.start)
