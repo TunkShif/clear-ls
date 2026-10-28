@@ -17,9 +17,12 @@ stops mid-phase). History and per-phase details are in
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
 - **Also done:** fix round after Phase 10 — top-level `include` and the
   file-body namespace ([roadmap.md](roadmap.md#fix-round-after-phase-10-top-level-include-done)).
-- **Next:** Phase 12 — multi-root
-  ([roadmap.md](roadmap.md#phase-12--multi-root-deferred)), deferred
-  until asked for; otherwise usage feedback.
+- **Next:** Phase 12 — editing UX and feature gaps from usage feedback
+  (accessor references/rename, completion shapes and block snippets,
+  settings schema, alias names in hints, `{}` ↔ `do end`, CLI errors)
+  ([roadmap.md](roadmap.md#phase-12--editing-ux-and-feature-gaps)).
+  Design decisions there need confirming before steps 3–7. Multi-root
+  moved to Phase 13.
 - **In progress:** nothing.
 
 ## Resume
@@ -45,6 +48,6 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
 - Language parity: `tools/book_diff.py` must stay free of mismatches;
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - Diagnostics describe saved files only (compiler limitation).
-- Single root (Phase 12). Requires are resolved on every start; cached
+- Single root (Phase 13). Requires are resolved on every start; cached
   compiler facts may be stale until the first check (see
   [architecture.md](architecture.md#known-limitations)).
