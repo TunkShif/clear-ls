@@ -21,8 +21,9 @@ stops mid-phase). History and per-phase details are in
   (accessor references/rename, completion shapes and block snippets,
   settings schema, alias names in hints, `{}` ↔ `do end`, CLI errors)
   ([roadmap.md](roadmap.md#phase-12--editing-ux-and-feature-gaps)).
-  Design decisions there need confirming before steps 3–7. Multi-root
-  moved to Phase 13.
+  Design reviewed (brackets: Neovim docs, not server; block-param
+  placeholders; aliases survive tagged joins). Start at step 1.
+  Multi-root moved to Phase 13.
 - **In progress:** nothing.
 
 ## Resume
