@@ -33,7 +33,9 @@ module ClearLS::IDE
     # matched def). `resolved` is false when inference never evaluated
     # the call.
     record CallFact, name_range : TextRange, resolved : Bool, kind : Types::ResolutionKind,
-      targets : Array({Int32, UInt32}), has_receiver : Bool
+      targets : Array({Int32, UInt32}), has_receiver : Bool,
+      named_args : Array({String, TextRange}) = [] of {String, TextRange},
+      init_targets : Array({Int32, UInt32}) = [] of {Int32, UInt32}
 
     alias BodyCalls = Hash(String, Array(CallFact))
 
@@ -60,11 +62,29 @@ module ClearLS::IDE
         nr = e.name_range || next
         res = inf.resolutions[e.id]?
         targets = res ? res.matches.map { |m| {m.site.file.value.to_i32, m.site.item.name_range.start} } : [] of {Int32, UInt32}
+        # `Foo.new(...)` reaching `initialize`: its named arguments name
+        # initialize's params (record fields).
+        inits = inf.initialize_resolution(e).try &.matches.map { |m| {m.site.file.value.to_i32, m.site.item.name_range.start} }
         kind = res.try(&.kind) || Types::ResolutionKind::Unresolved
-        (calls[name] ||= [] of CallFact) << CallFact.new(nr, !res.nil?, kind, targets, !e.receiver.nil?)
+        named = e.named_args.compact_map { |(n, v)| named_key_range(state, body.expr(v), n) }
+        (calls[name] ||= [] of CallFact) << CallFact.new(nr, !res.nil?, kind, targets, !e.receiver.nil?, named, inits || [] of {Int32, UInt32})
       end
       per_body[body.range.start] = calls
       {body, calls}
+    end
+
+    # The `k` of `k: v` written before the value *v* (named argument).
+    private def named_key_range(state : FileState, v : HIR::Expr, name : String) : {String, TextRange}?
+      text = state.text
+      i = v.range.start.to_i
+      while i > 0 && text.byte_at(i - 1).unsafe_chr.whitespace?
+        i -= 1
+      end
+      return nil unless i > 0 && text.byte_at(i - 1) == ':'.ord
+      stop = i - 1
+      start = stop - name.bytesize
+      return nil unless start >= 0 && text.byte_slice(start, name.bytesize) == name
+      {name, TextRange.new(start.to_u32, stop.to_u32)}
     end
 
     # Inference for the body containing *offset* in *state*.

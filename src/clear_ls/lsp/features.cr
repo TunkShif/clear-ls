@@ -176,12 +176,18 @@ module ClearLS::LSP
       state = document(params)
       off = offset(state, params["position"])
       ti = type_info(state)
+      # The name in `property name = "x"` lowers to a class-body local:
+      # the accessor wins.
+      if hit = ti.accessor_macro_hover(off)
+        md, r = hit
+        return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
+      end
       if hit = ti.local_hover(off)
         md, r = hit
         md = add_compiler_type(state, off, md)
         return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
       end
-      if hit = ti.var_hover(off) || ti.self_hover(off) || ti.accessor_macro_hover(off) || ti.def_hover(off) || ti.decl_param_hover(off) || ti.literal_hover(off) || ti.key_or_op_hover(off) || ti.method_hover(off)
+      if hit = ti.var_hover(off) || ti.self_hover(off) || ti.def_hover(off) || ti.decl_param_hover(off) || ti.literal_hover(off) || ti.key_or_op_hover(off) || ti.method_hover(off)
         md, r = hit
         return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
       end

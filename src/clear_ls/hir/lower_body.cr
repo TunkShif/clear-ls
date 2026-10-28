@@ -394,6 +394,12 @@ module ClearLS::HIR
         name += "=" if node.parent.try { |pp| pp.kind.assign? && pp.field(Syntax::Field::Lhs) == node }
       elsif node.kind.assign_call? && name
         name += "="
+      elsif node.kind.implicit_object_call? && name && (err = node.named_children.find(&.kind.error?)) &&
+            err.text.strip.ends_with?('=') && !err.text.strip.in?("==", "!=", "<=", ">=", "===", "=~")
+        # `&.name = v`, `&.name += v`: the grammar has no short-block
+        # assignment and leaves the operator as an ERROR node. The compiler
+        # calls the setter (`name=(v)`, `name=(name + v)`).
+        name += "="
       end
       args = [] of ExprId
       named = [] of {String, ExprId}

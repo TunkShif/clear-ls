@@ -1266,6 +1266,21 @@ the exporter or the cache):
    calls (`x.name = v`, `x.name += v`, `&.name = v`) resolve to the
    setter. Specs for `getter`, `setter`, `property`, `property?`,
    `property!`, `class_property`, `record` and a hand-written `name=`.
+   *Done:* `IDE::AccessorTarget`: macro-generated members sharing one
+   name token (getters, `?` getter, setter, ivar; `record`'s
+   `initialize` for named `new` arguments). `target_at` lifts a member
+   target into it; references search each member (setters by their base
+   word), rename edits the base name inside each reference
+   (`name?`, `name=`, `@name`). Fixes found on the way: `x.name = v` /
+   `x.name += v` resolved `name=` with no argument (NameOnly) — the
+   setter now gets the value (`Infer#setter_value`); `&.name = v` parses
+   with an ERROR node (grammar notes) and lowers to `name=`; `Foo.new`
+   without `self.new` records its resolution and `initialize_resolution`
+   (named args → record fields). Hover on the declared name shows the
+   generated defs. Types regression diff (repo, stdlib, Marten):
+   0 regressed, 0 improved (1 union reordered); book diff 0 mismatches.
+   A hand-written `def name=` beside a `getter` stays a separate
+   method. 0.11.1.
 4. **Setter and operator completion (F2-2).** Setter and operator text
    edits, `filterText`; capability checks (`snippetSupport`). Verified
    in a headless Neovim check with the built-in completion.

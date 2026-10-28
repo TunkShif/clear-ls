@@ -1793,7 +1793,10 @@ module ClearLS::Types
         # generic args bound from the `initialize` it calls
         # (`MyBox.new(1)` → MyBox(Int32)).
         rt = @table[receiver_type]
-        return instance_from_initialize(e, rt.args[0]) if rt.kind.metaclass?
+        if rt.kind.metaclass?
+          @resolutions[e.id] = res
+          return instance_from_initialize(e, rt.args[0])
+        end
       end
       @resolutions[e.id] = res
       if res.candidates.empty? && (prim = primitive_op(receiver_type, name, args))
@@ -1821,6 +1824,18 @@ module ClearLS::Types
         return c
       end
       declared
+    end
+
+    # The `initialize` overloads a `Foo.new(...)` without an explicit
+    # `self.new` reaches (nil for other calls).
+    def initialize_resolution(call : HIR::Expr) : CallResolution?
+      return nil unless call.name == "new" && (r = call.receiver)
+      rt = @table[@types[r]? || return nil]
+      return nil unless rt.kind.metaclass?
+      return nil unless (res = @resolutions[call.id]?) && res.candidates.empty?
+      inst = @table[rt.args[0]]
+      return nil unless inst.kind.named?
+      resolver.resolve(method_groups(rt.args[0], "initialize"), call_site(call))
     end
 
     private def instance_from_initialize(call : HIR::Expr, inst : TyId) : TyId
@@ -2242,7 +2257,26 @@ module ClearLS::Types
         a = @body.expr(v)
         named << {n, CallArg.new(operand(v), literal: a.kind.literal? ? a.syntax : nil)}
       end
+      # `x.name = v` / `x.name += v`: the setter's argument is the value
+      # (`x.name=(v)`). Operator assignments pass the operation's result,
+      # unknown while the target itself is being evaluated.
+      if (setter = setter_value(call))
+        args << setter
+      end
       CallSite.new(args, named, dsplat, !call.block.nil?)
+    end
+
+    private def setter_value(call : HIR::Expr) : CallArg?
+      return nil unless call.syntax.assign_call? && call.children.empty?
+      parent = @parent[call.id]? || return nil
+      p = @body.expr(parent)
+      return nil unless (p.kind.assign? || p.kind.op_assign?) && p.children[0]? == call.id
+      if p.kind.assign? && (v = p.children[1]?)
+        a = @body.expr(v)
+        CallArg.new(@types[v]? || @table.unknown, literal: a.kind.literal? ? a.syntax : nil)
+      else
+        CallArg.new(@table.unknown)
+      end
     end
 
     # Methods named *name* per receiver member type: instance methods for

@@ -247,7 +247,7 @@ describe "workspace rename" do
     }
     with_client(files, PRELUDE_FILES) do |c|
       rename_error(c, "src/app.cr", "def +", 4).should contain("operators")
-      rename_error(c, "src/app.cr", "property x", 9).should contain("macro")
+      # Accessors are renamable since Phase 12 (F1): spec/features_phase12_spec.cr.
       rename_error(c, "src/app.cr", "def run", 4).should contain("can't be confirmed") # v.run
       # prepareRename only runs the static checks (no reference search):
       # it accepts `run`, and `rename` refuses.

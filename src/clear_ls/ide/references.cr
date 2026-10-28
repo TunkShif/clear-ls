@@ -53,6 +53,29 @@ module ClearLS::IDE
     end
   end
 
+  # Everything one accessor macro argument generates (`property name`):
+  # its getters (`name`, `name?`), setter (`name=`) and ivar (`@name`),
+  # searched and renamed as one symbol. *base* is the written name
+  # (`name`), *name_range* its token in the declaration.
+  class AccessorTarget < RefTarget
+    getter methods : Array(Semantics::Site)
+    getter ivar : IvarTarget?
+    getter decl_file : FileId
+    getter name_range : TextRange
+    # `record` fields: the generated `initialize`, whose named arguments
+    # (`Point.new(x: 1)`) name the field.
+    getter initializer : Semantics::Site?
+
+    def initialize(name, @methods, @ivar, @decl_file, @name_range, @initializer = nil)
+      super(name)
+    end
+
+    # `name` → `title`: each member's new name (`name?` → `title?`).
+    def renamed(member : String, new_base : String) : String
+      member.sub(name, new_base)
+    end
+  end
+
   # Too many candidate files for one search (`References#max_candidates`).
   class CandidateLimit < Exception
   end
@@ -88,16 +111,74 @@ module ClearLS::IDE
     property max_candidates = 2000
 
     def target_at(ctx : Context, offset : UInt32) : RefTarget?
-      ivar_target(ctx, offset) || method_target(ctx, offset) || path_target(ctx, offset)
+      t = ivar_target(ctx, offset) || method_target(ctx, offset) || path_target(ctx, offset)
+      accessor_target(ctx, offset, t) || t
+    end
+
+    # The accessor declaration whose name is at *offset*, or whose member
+    # *t* is (a call of a generated getter/setter, or its `@ivar`).
+    private def accessor_target(ctx : Context, offset : UInt32, t : RefTarget?) : AccessorTarget?
+      map = ctx.typing.def_map
+      seed = case t
+             when MethodTarget
+               t.sites.find { |s| s.item.origin.macro? && s.item.kind.def? }
+             when IvarTarget
+               owner = map.lookup_path("::" + t.owner_name)
+               owner.try { |o| map[o].members[t.name]?.try &.find(&.item.origin.macro?) }
+             else
+               # On the name in `property name = "x"` (a class-body local
+               # for the body lowering, nothing for the targets above).
+               ns = map.namespace_at(ctx.state.id, offset)
+               found = nil.as(Semantics::Site?)
+               map[ns].each_member_site do |s|
+                 if s.file == ctx.state.id && s.item.origin.macro? && s.item.name_range.touches?(offset) &&
+                    (s.item.kind.def? || s.item.kind.instance_var? || s.item.kind.class_var?)
+                   found = s
+                 end
+               end
+               found
+             end
+      seed = seed || return nil
+      accessor_group(map, seed)
+    end
+
+    # Members generated from the same macro argument as *seed* (same file
+    # and name token), in the type that declares it.
+    private def accessor_group(map : Semantics::DefMap, seed : Semantics::Site) : AccessorTarget?
+      owner = map.namespace_at(seed.file, seed.item.range.start)
+      methods = [] of Semantics::Site
+      ivar = nil.as(IvarTarget?)
+      map[owner].each_member_site do |s|
+        next unless s.file == seed.file && s.item.origin.macro? && s.item.name_range == seed.item.name_range
+        if s.item.kind.def?
+          methods << s
+        elsif s.item.kind.instance_var? || s.item.kind.class_var?
+          ivar = IvarTarget.new(s.item.name, map[owner].full_name, s.item.kind.class_var?)
+        end
+      end
+      return nil if methods.empty?
+      # `record` fields and accessors: the written name is the getter's
+      # name without `?`, or the setter's without `=`.
+      base = methods.map { |m| m.item.name.rchop('=').rchop('?') }.min_by(&.size)
+      # Generated members share the name token: `site_key` alone would
+      # merge the getter and the setter.
+      init = nil.as(Semantics::Site?)
+      if map[owner].sites.any? { |s| s.item.origin.macro? && s.item.kind.struct? }
+        init = map[owner].members["initialize"]?.try &.find { |s| s.file == seed.file && s.item.origin.macro? }
+      end
+      AccessorTarget.new(base, methods.uniq { |m| {site_key(m), m.item.name} }, ivar, seed.file, seed.item.name_range, init)
     end
 
     # References of *target* in every candidate file.
     def find(target : RefTarget, from : FileId) : Array(Reference)
       found = [] of Reference
+      if target.is_a?(AccessorTarget)
+        return accessor_refs(target, from)
+      end
       word = case target
              when PathTarget then target.name.split("::").last
              when IvarTarget then target.name.lchop('@').lchop('@')
-             else                 target.name
+             else                 References.setter?(target.name) ? target.name.rchop('=') : target.name
              end
       candidates = @index.files_with_word(word)
       # Ivars: files of the requesting file's program.
@@ -122,6 +203,49 @@ module ClearLS::IDE
       dedupe(found)
     end
 
+    # Uses of every member, then the declaration's name token once.
+    # Member methods are searched with their override families (a `def
+    # name` in a subclass overrides the generated getter).
+    private def accessor_refs(target : AccessorTarget, from : FileId) : Array(Reference)
+      found = [] of Reference
+      target.methods.group_by(&.item.name).each do |name, sites|
+        found.concat(find(MethodTarget.new(name, sites, Semantics::DefMap::PROGRAM), from))
+      end
+      target.ivar.try { |iv| found.concat(find(iv, from)) }
+      target.initializer.try { |init| found.concat(named_arg_refs(target, init, from)) }
+      # Generated members all point at the declaration's name; report it
+      # once, as the declaration.
+      found.reject! { |r| r.file == target.decl_file && r.range == target.name_range }
+      found << Reference.new(target.decl_file, target.name_range, true, true)
+      dedupe(found)
+    end
+
+    # `Point.new(x: 1)` for record field `x`: named arguments of calls
+    # resolving to the record's `initialize` (through `new`).
+    private def named_arg_refs(target : AccessorTarget, init : Semantics::Site, from : FileId) : Array(Reference)
+      found = [] of Reference
+      key = site_key(init)
+      @index.files_with_word(target.name).each do |file|
+        next unless @index.visible_files(file).includes?(target.decl_file)
+        ctx = @context_for.call(file) || next
+        word = /(?<![\w@$])#{Regex.escape(target.name)}(?=\s*:[^:])/
+        seen = Set(UInt32).new
+        ctx.state.text.scan(word) do |m|
+          off = m.byte_begin(0).to_u32
+          body = ctx.bodies.at(off) || next
+          next unless seen.add?(body.range.start)
+          _, calls = ctx.typing.call_facts(ctx.state, ctx.bodies, off) || next
+          calls.each_value do |cs|
+            cs.each do |c|
+              next unless c.targets.includes?(key) || c.init_targets.includes?(key)
+              c.named_args.each { |(n, r)| found << Reference.new(file, r, true, false) if n == target.name }
+            end
+          end
+        end
+      end
+      found
+    end
+
     # -- rename -----------------------------------------------------------------------
 
     record RenamePlan, edits : Array(Reference)?, error : String?, range : TextRange?
@@ -140,6 +264,7 @@ module ClearLS::IDE
     # and `rename` repeats every check with the search.
     def rename_plan(ctx : Context, offset : UInt32, new_name : String?, search = true) : RenamePlan
       target = target_at(ctx, offset) || return refuse("nothing to rename here")
+      return accessor_rename(ctx, target, offset, new_name, search) if target.is_a?(AccessorTarget)
       sites = target_sites(target)
       case target
       when MethodTarget
@@ -193,6 +318,54 @@ module ClearLS::IDE
       RenamePlan.new(refs, nil, range)
     end
 
+    ACCESSOR_NAME = /\A[a-z_][A-Za-z0-9_]*\z/
+
+    # `name=` (not `==`, `[]=`, `<=`).
+    def self.setter?(name : String) : Bool
+      name.ends_with?('=') && name.rchop('=').matches?(ACCESSOR_NAME)
+    end
+
+    # Renames every member: `name` → `title` gives `title`, `title?`,
+    # `title=`, `@title` and the declaration. Each edit's text depends on
+    # what it covers (`RenamePlan#texts`).
+    private def accessor_rename(ctx : Context, target : AccessorTarget, offset : UInt32, new_name : String?, search : Bool) : RenamePlan
+      if new_name && !new_name.matches?(ACCESSOR_NAME)
+        return refuse("#{new_name.inspect} is not a valid accessor name (write it without `?`, `=` or `@`)")
+      end
+      if @index.library_file?(target.decl_file)
+        return refuse("`#{target.name}` is declared outside the workspace")
+      end
+      unless search
+        r = cursor_range(ctx, target, offset) || return refuse("nothing to rename here")
+        return RenamePlan.new(nil, nil, r)
+      end
+      refs = find(target, ctx.state.id)
+      unsure = refs.reject(&.exact)
+      unless unsure.empty?
+        where = unsure.first(3).map { |r| @describe.call(r) }.join(", ")
+        more = unsure.size > 3 ? " and #{unsure.size - 3} more" : ""
+        return refuse("#{unsure.size} use(s) of `#{target.name}` can't be confirmed (unknown receiver type): #{where}#{more}")
+      end
+      if refs.any? { |r| @index.library_file?(r.file) }
+        return refuse("`#{target.name}` is used outside the workspace")
+      end
+      # Each reference covers the base name only (`name` in `x.name=`,
+      # `@name`'s `name`, `name` in `name?`): one replacement text.
+      edits = refs.compact_map { |r| base_range(r, target.name) }
+      range = edits.find { |r| r.file == ctx.state.id && r.range.touches?(offset) }.try(&.range)
+      RenamePlan.new(edits, nil, range)
+    end
+
+    # The part of *r* that spells *base*: references cover `name`,
+    # `name?`, `name=`, `@name` or `.name`.
+    private def base_range(r : Reference, base : String) : Reference?
+      text = @context_for.call(r.file).try(&.state.text) || return nil
+      t = text.byte_slice(r.range.start, r.range.size)
+      i = t.byte_index(base) || return nil
+      start = r.range.start + i.to_u32
+      r.copy_with(range: TextRange.new(start, start + base.bytesize.to_u32))
+    end
+
     # Every def with the same name in the targets' hierarchy: from the
     # topmost ancestor that declares it, all descendants that do.
     def family(ctx : Context, target : MethodTarget) : MethodTarget
@@ -228,6 +401,12 @@ module ClearLS::IDE
     # The name token under the cursor: the identifier/constant segment or
     # ivar, for the static prepareRename answer.
     private def cursor_range(ctx : Context, target : RefTarget, offset : UInt32) : TextRange?
+      if target.is_a?(AccessorTarget)
+        node = ctx.state.tree.root.descendant(offset, offset, named: true) || return nil
+        i = node.text.byte_index(target.name) || return nil
+        start = node.start_byte + i.to_u32
+        return TextRange.new(start, start + target.name.bytesize.to_u32)
+      end
       if target.is_a?(PathTarget)
         hit = Analysis.new(ctx.state, @index, ctx.typing.def_map).resolve_path_at(offset).first?
         return hit.try(&.[:range])
@@ -335,7 +514,10 @@ module ClearLS::IDE
     private def method_refs(ctx : Context, target : MethodTarget, found : Array(Reference)) : Nil
       keys = target.sites.map { |s| site_key(s) }.to_set
       text = ctx.state.text
-      word = /(?<![\w@$])#{Regex.escape(target.name)}(?![\w?!])/
+      # Setters are spelled `x.name = v` / `x.name += v`: find the base
+      # word (call facts then pick the `name=` calls).
+      spelled = References.setter?(target.name) ? target.name.rchop('=') : target.name
+      word = /(?<![\w@$])#{Regex.escape(spelled)}(?![\w?!])/
       seen_bodies = Set(UInt32).new
       text.scan(word) do |m|
         off = m.byte_begin(0).to_u32

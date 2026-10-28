@@ -68,3 +68,8 @@ Fixes belong upstream in the grammar; clear-ls does not patch it locally.
 - In `x || return` and `x || return 1`, `return` parses as an `identifier`
   or a `call` named `return` (statement-level `return` is fine). Body
   lowering maps these back to `return`/`next`/`break`.
+
+- `&.name = v` and `&.name += v` (short-block assignment, valid Crystal)
+  parse as `implicit_object_call` with the operator in an `ERROR` node and
+  the value as its `arguments`. Body lowering turns them into the setter
+  call `name=`.
