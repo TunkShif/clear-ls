@@ -133,6 +133,17 @@ changing it. Grammar quirks are in
   `CLEAR_LS_ARGS` to measure parsing.
 - Don't keep `Infer` objects for many bodies (~100 KB each): keep
   `Typing#call_facts` or summaries (the warm-up's 772 MB lesson).
+- **LSP JSON: omit optional fields, never send `null`.** Neovim's
+  built-in completion indexes `item.textEdit` and fails on
+  `vim.NIL`. Build optional fields conditionally
+  (`completion_item_json`).
+- **Settings:** add keys to `Settings::KEYS` and regenerate
+  `docs/settings.md` (`bin/clear-ls settings-doc`); the spec fails
+  otherwise. Rebuild `bin/clear-ls` first: the spec compares against
+  the source, the command prints from the binary.
+- **Setters are `name=` calls with no HIR argument**: the value is the
+  parent assignment's (`Infer#setter_value`). Code that looks for `name=`
+  by word must search `name` (`References.setter?`).
 - `VFS#id_for` costs ~9 µs (URI normalisation): cache it in loops.
 - The real compiler rejects some fixtures that the fake spec prelude
   accepts (a class named `Box` collides with stdlib `Box(T)`).

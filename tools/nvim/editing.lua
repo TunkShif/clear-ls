@@ -49,4 +49,25 @@ for _, c in ipairs({
 }) do
   print(("%-18s accept %-6s -> %s"):format(c[1], c[2], vim.inspect(accept(c[1], c[2]))))
 end
+-- F1: references and rename from the setter use (line 17)
+local function locs(r) local o = {} for _, l in ipairs(r or {}) do o[#o + 1] = (l.range.start.line + 1) .. ":" .. l.range.start.character end table.sort(o) return table.concat(o, " ") end
+print("references name (from item.name =): " .. locs(H.req("textDocument/references", { textDocument = H.td(), position = { line = 16, character = 6 }, context = { includeDeclaration = true } })))
+local edit = H.req("textDocument/rename", { textDocument = H.td(), position = { line = 16, character = 6 }, newName = "title" })
+vim.lsp.util.apply_workspace_edit(edit, "utf-16")
+vim.wait(400) -- didChange debounce
+print("after rename -> title: " .. table.concat(vim.api.nvim_buf_get_lines(0, 3, 4, false), "") .. " | " .. table.concat(vim.api.nvim_buf_get_lines(0, 16, 17, false), "") .. " | " .. table.concat(vim.api.nvim_buf_get_lines(0, 18, 19, false), ""))
+-- F6: alias in the inlay hint of `t = item.tags` (line 18)
+local hints = H.req("textDocument/inlayHint", { textDocument = H.td(), range = { start = { line = 0, character = 0 }, ["end"] = { line = 30, character = 0 } } })
+local hs = {} for _, h in ipairs(hints or {}) do hs[#hs + 1] = (h.position.line + 1) .. h.label end
+print("inlay hints: " .. table.concat(hs, "  "))
+-- F5: block form code action on line 19
+vim.wait(400)
+local acts = H.req("textDocument/codeAction", { textDocument = H.td(), range = { start = { line = 18, character = 20 }, ["end"] = { line = 18, character = 20 } }, context = { diagnostics = {}, only = { "refactor" } } })
+local a = acts and acts[1]
+if a and a.edit then
+  vim.lsp.util.apply_workspace_edit(a.edit, "utf-16")
+  print(a.title .. ": " .. table.concat(vim.api.nvim_buf_get_lines(0, 18, 21, false), " / "))
+else
+  print("block action: " .. vim.inspect(a))
+end
 H.finish()

@@ -1,7 +1,16 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 11 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 12 —
+
+- editing UX: `property`/`getter`/`setter`/`record` accessors are one
+  symbol for references and rename (getter, `name=`, `@name`, `name?`,
+  named `new` arguments); completion writes setters as `x.name = `,
+  operators as `x + `, and blocks for block-only methods
+  (`xs.map { |x| }`); alias names in inlay hints and hover; `{ }` ↔
+  `do ... end` code action; every setting in one documented schema
+  ([docs/settings.md](docs/settings.md)), live through
+  `didChangeConfiguration`, including per-kind inlay hint switches;
 
 - fast starts: a persistent index cache (stdlib and shard declarations
   shared across projects, the rest in the project's `.clear-ls/`)
@@ -49,7 +58,7 @@ Tree-sitter with an editor-oriented semantic model. Status: Phase 11 —
 - implementation (overrides, abstract def implementers, subtypes) and
   call hierarchy (incoming and outgoing);
 - hover with inferred types for locals and resolved method signatures;
-- inlay type hints for locals and block arguments;
+- inlay type hints for locals, block arguments and inferred return types;
 - document and workspace symbols, folding, selection ranges;
 - goto-definition for types, constants, locals, ivars, and method calls;
 - highlights, and references/rename for locals and parameters;

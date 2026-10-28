@@ -1343,6 +1343,9 @@ the exporter or the cache):
    0.11.5.
 8. **Verification and docs.** Neovim checks for F1–F6, README feature
    list, settings doc linked from README, status.
+   *Done:* Neovim `editing` check covers F1 (references and rename from
+   `item.name =`), F2 (accepted completions), F5 (code action applied)
+   and F6 (`18: Names`); F3 via `didChangeConfiguration` specs. 0.12.0.
 
 Exit criteria: references/rename from any accessor member give the
 same set (spec over the accessor macros); the documented blink.cmp
@@ -1355,6 +1358,40 @@ return type shows its name in hints; `{}` ↔ `do end` round-trips.
 Decided after review: no server-side bracket handling (F2-1, Neovim
 docs instead); placeholders for unnamed block parameters; aliases
 survive joins of tagged values only.
+
+Status: done; every exit criterion met.
+
+- F1: one reference set from the declaration, a getter use, a setter
+  use, `&.name =` and `@name` (spec over `property`, `getter?`,
+  `getter!`, `class_property`, `record`); rename rewrites all members.
+  On 150 sampled Marten defs, references only gained (664 → 679: setter
+  calls such as `conf.root = "files"` were missed before).
+- F2: Neovim `editing` check (built-in completion's conversion):
+  `item.name`, `item.name = `, `items.each &.name = `, `item + `,
+  `puts`, `items.map { |x|  }`, `items.select`; stdlib spec for the
+  block rule (>150 methods). blink.cmp setup documented.
+- F3: `docs/settings.md` generated and checked by a spec;
+  `didChangeConfiguration` applies everything not marked *restart*.
+- F4: CLI errors are one line (spec runs the binary).
+- F5: 5109 of 5195 stdlib blocks convert and round-trip, 86 refused
+  with a reason.
+- F6: the decided alias examples are a spec; types regression diff 0
+  changed.
+
+Also measured: Marten soak unchanged (hover p99 during a search 39 ms,
+RSS after 100 specs + 10 searches 255 MB), sweep 0 errors / 0 over
+300 ms, `warm.py` warm start 231 ms and first search after warm-up
+89 ms; `make spec` 287 examples (~40 s; the block round trip samples
+120 stdlib files); book diff 0 mismatches.
+
+Found and fixed on the way: setter calls (`x.name = v`) resolved to
+nothing; `Foo.new` without `self.new` recorded no resolution; completion
+items carried `null` fields that crash Neovim's built-in completion.
+
+Not yet: aliases nested in generic args (`Array(Names)`) print
+expanded; block parameter names come from plain `yield` arguments only;
+other code actions (`&.x` ↔ `{ |x| x.x }`, suffix `if`) are for a
+code-action phase.
 
 ### Phase 13 — multi-root (deferred)
 

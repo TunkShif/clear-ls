@@ -4,7 +4,10 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–11 (through startup and warm caches: a two-layer
+- **Done:** Phases 0–12 (through editing UX: accessor symbols for
+  references/rename, setter/operator/block completion, alias names in
+  hints, block form code action, one settings schema; before that,
+  startup and warm caches: a two-layer
   persistent index cache, warm start on Marten ~240 ms, compiler facts
   from the last session, a background warm-up that makes the first
   references search warm; before that, responsiveness: long requests are
@@ -17,13 +20,9 @@ stops mid-phase). History and per-phase details are in
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
 - **Also done:** fix round after Phase 10 — top-level `include` and the
   file-body namespace ([roadmap.md](roadmap.md#fix-round-after-phase-10-top-level-include-done)).
-- **Next:** Phase 12 — editing UX and feature gaps from usage feedback
-  (accessor references/rename, completion shapes and block snippets,
-  settings schema, alias names in hints, `{}` ↔ `do end`, CLI errors)
-  ([roadmap.md](roadmap.md#phase-12--editing-ux-and-feature-gaps)).
-  Design reviewed (brackets: Neovim docs, not server; block-param
-  placeholders; aliases survive tagged joins). Start at step 1.
-  Multi-root moved to Phase 13.
+- **Next:** Phase 13 — multi-root
+  ([roadmap.md](roadmap.md#phase-13--multi-root-deferred)), deferred
+  until asked for; otherwise usage feedback.
 - **In progress:** nothing.
 
 ## Resume
@@ -36,6 +35,7 @@ make && make spec             # all green
 make verify-static
 make release && make nvim-check
 python3 tools/warm.py         # Phase 11 criteria on Marten
+bin/clear-ls settings-doc > docs/settings.md   # after changing settings.cr
 ```
 
 Then read [architecture.md](architecture.md) for the code map and
