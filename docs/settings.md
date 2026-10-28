@@ -49,6 +49,12 @@ and wrong types are logged and ignored. Settings marked *restart* are read once,
 | `inlayHints.blockParams` | bool | `true` | Types of block parameters (`each { |x| }` → `x : String`). |
 | `inlayHints.returnTypes` | bool | `true` | Inferred return type after the parameter list of defs written without one. |
 
+## `completion`
+
+| Key | Type | Default | |
+|---|---|---|---|
+| `completion.setterSnippets` | bool | `true` | Completing `name=` after `x.` writes `x.name = ` (the setter as it is called); binary operators write `x + `, index operators `x[]`. False keeps the method names (`x.name=`, `x.+`). |
+
 ## `warmup`
 
 | Key | Type | Default | |

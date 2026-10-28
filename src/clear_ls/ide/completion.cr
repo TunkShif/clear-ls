@@ -1,6 +1,7 @@
 require "./typing"
 require "./analysis"
 require "./signature_help"
+require "./references"
 
 module ClearLS::IDE
   enum CompletionKind
@@ -26,7 +27,19 @@ module ClearLS::IDE
     documentation : String? = nil,
     sort_text : String? = nil,
     insert_text : String? = nil,
-    overloads : Int32 = 1
+    overloads : Int32 = 1,
+    # Some overload takes no argument (`a.-` is unary minus).
+    nullary : Bool = false,
+    # Replaces *edit_range* (instead of the word before the cursor) with
+    # *insert_text*; for setters and operators, which rewrite `.`.
+    edit_range : TextRange? = nil,
+    filter_text : String? = nil,
+    # *insert_text* is an LSP snippet (`$1`, `$0`).
+    snippet : Bool = false
+
+  # What the client can take (`textDocument.completion.completionItem`)
+  # and the settings that shape items.
+  record CompletionOptions, snippets : Bool = false, setter_snippets : Bool = true
 
   # Completion at a cursor.
   #
@@ -40,7 +53,7 @@ module ClearLS::IDE
     CONST_PLACEHOLDER = "CL__"
     MAX_ITEMS = 400
 
-    def initialize(@state : FileState, @index : Workspace::Index, @typing : Typing)
+    def initialize(@state : FileState, @index : Workspace::Index, @typing : Typing, @options = CompletionOptions.new)
     end
 
     def complete(offset : UInt32) : Array(CompletionItem)
@@ -74,7 +87,44 @@ module ClearLS::IDE
                  # `&.|` / `when .|`: the block argument or case subject.
                  implicit_receiver_type(state, call_node)
                end
-      recv_t ? method_items(recv_t, prefix) : [] of CompletionItem
+      return [] of CompletionItem unless recv_t
+      items = method_items(recv_t, prefix)
+      return items unless @options.setter_snippets
+      # The `.` before the word, and whether this is `&.` (short block).
+      dot = start - 1
+      short_block = dot > 0 && text.byte_at(dot - 1) == '&'.ord
+      items.map { |i| shape_member(i, dot, offset, short_block) }
+    end
+
+    UNARY = %w(- + ! ~)
+
+    # Setter and operator items as they are written: `x.name = `,
+    # `x + `, `x[]`. *dot* is the `.` before the word; edits replace from
+    # there (operators) or from the word (setters) up to *offset*.
+    private def shape_member(i : CompletionItem, dot : UInt32, offset : UInt32, short_block : Bool) : CompletionItem
+      name = i.label
+      if References.setter?(name)
+        base = name.rchop('=')
+        # `filterText` keeps the item visible while typing the base name.
+        return i.copy_with(insert_text: "#{base} = ", edit_range: TextRange.new(dot + 1, offset), filter_text: base)
+      end
+      return i if name[0].letter? || name[0] == '_'
+      # Operators. `&.+ 1` is a valid short block: keep `.`.
+      return i if short_block
+      case name
+      when "[]", "[]?"
+        text = @options.snippets ? "[$1]#{name == "[]?" ? "?" : ""}" : "[]#{name == "[]?" ? "?" : ""}"
+        i.copy_with(insert_text: text, edit_range: TextRange.new(dot, offset), filter_text: name, snippet: @options.snippets)
+      when "[]="
+        text = @options.snippets ? "[$1] = " : "[] = "
+        i.copy_with(insert_text: text, edit_range: TextRange.new(dot, offset), filter_text: name, snippet: @options.snippets)
+      else
+        # Binary operators: `a.` + `+` → `a + `. An operator that is only
+        # unary (`!`, `~`) keeps the call form; `-`/`+` with a binary
+        # overload become binary.
+        return i if UNARY.includes?(name) && i.nullary && i.overloads == 1
+        i.copy_with(insert_text: " #{name} ", edit_range: TextRange.new(dot, offset), filter_text: name)
+      end
     end
 
     private def implicit_receiver_type(state : FileState, call : Syntax::Node) : Types::TyId?
@@ -159,7 +209,8 @@ module ClearLS::IDE
         tier = member_tier(name, sites)
         CompletionItem.new(name, first.try(&.item.kind.macro?) ? CompletionKind::Macro : CompletionKind::Method,
           detail: detail, documentation: first.try(&.item.doc),
-          sort_text: "#{tier}#{depth.to_s.rjust(2, '0')}#{name}", overloads: sites.size)
+          sort_text: "#{tier}#{depth.to_s.rjust(2, '0')}#{name}", overloads: sites.size,
+          nullary: sites.any? { |s| s.item.signature.try(&.params.none? { |p| p.kind.positional? || p.kind.splat? }) || false })
       end.sort_by!(&.sort_text.not_nil!).first(MAX_ITEMS)
     end
 

@@ -359,15 +359,33 @@ module ClearLS::LSP
     private def completion(params : JSON::Any)
       state = document(params)
       off = offset(state, params["position"])
-      items = IDE::Completion.new(state, index, typing(state)).complete(off)
+      opts = IDE::CompletionOptions.new(snippets: snippet_support?, setter_snippets: @settings.bool("completion.setterSnippets"))
+      items = IDE::Completion.new(state, index, typing(state), opts).complete(off)
       {
         isIncomplete: items.size >= IDE::Completion::MAX_ITEMS,
-        items:        items.map do |i|
-          doc = i.documentation.try { |d| {kind: "markdown", value: d} }
-          {label: i.label, kind: COMPLETION_KINDS[i.kind], detail: i.detail, documentation: doc,
-           sortText: i.sort_text, insertText: i.insert_text}
-        end,
+        items:        items.map { |i| completion_item_json(state, i) },
       }
+    end
+
+    # Optional fields are omitted, not `null`: clients index them
+    # (Neovim's `vim.lsp.completion` fails on `"textEdit": null`).
+    private def completion_item_json(state : FileState, i : IDE::CompletionItem) : JSON::Any
+      h = {"label" => JSON::Any.new(i.label), "kind" => JSON::Any.new(COMPLETION_KINDS[i.kind].to_i64)} of String => JSON::Any
+      i.detail.try { |d| h["detail"] = JSON::Any.new(d) }
+      i.documentation.try { |d| h["documentation"] = JSON.parse({kind: "markdown", value: d}.to_json) }
+      i.sort_text.try { |t| h["sortText"] = JSON::Any.new(t) }
+      i.filter_text.try { |t| h["filterText"] = JSON::Any.new(t) }
+      if r = i.edit_range
+        h["textEdit"] = JSON.parse({range: range_json(state, r), newText: i.insert_text || i.label}.to_json)
+      elsif t = i.insert_text
+        h["insertText"] = JSON::Any.new(t)
+      end
+      h["insertTextFormat"] = JSON::Any.new(2_i64) if i.snippet
+      JSON::Any.new(h)
+    end
+
+    private def snippet_support? : Bool
+      @client_capabilities.dig?("textDocument", "completion", "completionItem", "snippetSupport").try(&.as_bool?) || false
     end
 
     private def navigation(state : FileState) : IDE::Navigation

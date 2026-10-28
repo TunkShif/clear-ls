@@ -1,0 +1,4 @@
+name: editing
+targets:
+  editing:
+    main: src/demo.cr

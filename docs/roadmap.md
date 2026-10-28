@@ -1284,6 +1284,14 @@ the exporter or the cache):
 4. **Setter and operator completion (F2-2).** Setter and operator text
    edits, `filterText`; capability checks (`snippetSupport`). Verified
    in a headless Neovim check with the built-in completion.
+   *Done:* `Completion#shape_member`, `CompletionOptions`; setting
+   `completion.setterSnippets` (default on). Unary-only operators (`!`,
+   `~`) and `&.` short blocks keep the call form; `[]` becomes `[$1]`
+   with snippet support. Neovim check `editing` runs each response
+   through `vim.lsp.completion._convert_results` and applies the item.
+   Found on the way: items sent optional fields as `null`
+   (`"textEdit": null`), which crashes Neovim's built-in completion
+   (`adjust_start_col` indexes it); fields are now omitted. 0.11.2.
 5. **Block snippets (F2-3).** Every-overload rule, parameter names from
    the block type (`&block : T, Int32 ->` → 2 params; names from the
    def's `yield` call arguments when they are locals with names, else

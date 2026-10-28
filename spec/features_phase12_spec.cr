@@ -128,3 +128,69 @@ describe "accessor references and rename (F1)" do
     end
   end
 end
+
+describe "setter and operator completion (F2-2)" do
+  files = {
+    "src/a.cr" => <<-CR,
+      class Item
+        property name = "foo"
+        def +(other : Item) : Item; self; end
+        def [](i : Int32) : Int32; i; end
+      end
+      item = Item.new
+      item.nam
+      [item].each &.nam
+      item.
+      CR
+  }
+
+  it "inserts `name = ` for the setter, keeps both visible" do
+    c = FeatureClient.new(files, PRELUDE_FILES)
+    begin
+      u = c.open("src/a.cr")
+      r = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 6, character: 8}})
+      items = r["items"].as_a.to_h { |i| {i["label"].as_s, i} }
+      items["name"]["textEdit"]?.should be_nil
+      # Optional fields are omitted, never null (Neovim indexes them).
+      r["items"].as_a.each { |i| i.as_h.values.none?(&.raw.nil?).should be_true }
+      setter = items["name="]
+      setter["filterText"].should eq "name"
+      setter["textEdit"]["newText"].should eq "name = "
+      setter["textEdit"]["range"].should eq JSON.parse(%({"start":{"line":6,"character":5},"end":{"line":6,"character":8}}))
+      # `&.name = v` is valid Crystal: same form.
+      r = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 7, character: 17}})
+      r["items"].as_a.find(&.["label"].==("name=")).not_nil!["textEdit"]["newText"].should eq "name = "
+    ensure
+      c.cleanup
+    end
+  end
+
+  it "writes binary and index operators in operator form" do
+    c = FeatureClient.new(files, PRELUDE_FILES)
+    begin
+      u = c.open("src/a.cr")
+      r = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 8, character: 5}})
+      items = r["items"].as_a.to_h { |i| {i["label"].as_s, i} }
+      plus = items["+"]
+      plus["textEdit"]["newText"].should eq " + "
+      # Replaces the dot: `item.` → `item + `.
+      plus["textEdit"]["range"]["start"].should eq JSON.parse(%({"line":8,"character":4}))
+      items["[]"]["textEdit"]["newText"].should eq "[]"
+      items["[]"]["insertTextFormat"]?.should be_nil # no snippet support advertised
+    ensure
+      c.cleanup
+    end
+  end
+
+  it "keeps method names when setterSnippets is off" do
+    c = FeatureClient.new(files, PRELUDE_FILES)
+    begin
+      c.notify("workspace/didChangeConfiguration", {settings: {clearLs: {completion: {setterSnippets: false}}}})
+      u = c.open("src/a.cr")
+      r = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 6, character: 8}})
+      r["items"].as_a.find(&.["label"].==("name=")).not_nil!["textEdit"]?.should be_nil
+    ensure
+      c.cleanup
+    end
+  end
+end
