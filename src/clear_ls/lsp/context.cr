@@ -28,7 +28,7 @@ module ClearLS::LSP
     # Types the compiler reported for *name* in *body* of *state*, or nil
     # (not available yet; a run may have started).
     private def compiler_types(state : FileState, body : HIR::Body, name : String) : Array(String)?
-      return unless compiler_enabled? && @compiler_options["contextHover"]?.try(&.as_bool?) != false
+      return unless compiler_enabled? && @settings.bool("compiler.contextHover")
       path = VFS.path_for(state.uri) || return
       return unless File.file?(path)
       saved = File.read(path)

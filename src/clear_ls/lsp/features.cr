@@ -242,10 +242,8 @@ module ClearLS::LSP
       end
     end
 
-    @references_options = JSON::Any.new({} of String => JSON::Any)
-
     private def include_possible? : Bool
-      @references_options["includePossible"]?.try(&.as_bool?) == true
+      @settings.bool("references.includePossible")
     end
 
     private def workspace_references(state : FileState, off : UInt32) : Array(IDE::Reference)?
@@ -278,7 +276,7 @@ module ClearLS::LSP
         end
         nil
       end).tap do |f|
-        @budget_options["maxCandidates"]?.try(&.as_i?).try { |n| f.max_candidates = n }
+        f.max_candidates = @settings.int("budgets.maxCandidates").to_i
       end
     end
 

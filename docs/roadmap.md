@@ -1245,6 +1245,15 @@ the exporter or the cache):
    `vim.lsp.config` and blink.cmp `auto_brackets` setup, F2-1). CLI: unreadable files, bad numbers and
    unknown options print `clear-ls: <message>` and exit 2, no trace
    (`--log-level debug` keeps the trace).
+   *Done:* `LSP::Settings` (`src/clear_ls/lsp/settings.cr`): one key
+   table for defaults, type checks, change tracking and the generated
+   `docs/settings.md` (`clear-ls settings-doc`; spec fails when stale).
+   `Server#settings`; `cache_allowed`/`warmup_allowed` say what the host
+   permits (`clear-ls lsp` both). Keys of later steps join the table in
+   their step. CLI: `CLI.main` turns `UsageError`, file errors and option
+   errors into `clear-ls: message` (exit 2; I/O failures exit 1, trace
+   only with `--log-level debug`); LINE range checked. `spec/cli_spec.cr`
+   runs the binary (`make spec` builds it).
 2. **Inlay hint switches (F3).** `inlayHints.enabled`, `.locals`,
    `.blockParams`, `.returnTypes`; refresh hints on change when the
    client supports `workspace/inlayHint/refresh`.

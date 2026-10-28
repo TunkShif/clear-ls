@@ -11,16 +11,8 @@ module ClearLS::LSP
   # from disk, so results describe saved contents; positions are converted
   # with the saved text.
   #
-  # `initializationOptions.compiler`:
-  # - `enabled` (default true): background checks; explicit requests such
-  #   as formatting use the compiler regardless
-  # - `path`: crystal executable (default `$CRYSTAL` or `crystal`)
-  # - `entries`: main files to check instead of the shard targets
-  # - `debounceMs` (default 150)
-  # - `facts` (default true): add the facts exporter to each check and
-  #   merge generated methods and ivar types into the index
+  # Settings `compiler.*` (settings.cr).
   class Server
-    @compiler_options = JSON::Any.new({} of String => JSON::Any)
     @checker : Compiler::Checker? = nil
     @toolchain : Compiler::Toolchain? = nil
     @entry_points : Compiler::EntryPoints? = nil
@@ -29,18 +21,14 @@ module ClearLS::LSP
 
     getter checker
 
-    private def read_compiler_options(params : JSON::Any) : Nil
-      @compiler_options = params.dig?("initializationOptions", "compiler") || @compiler_options
-    end
-
     private def compiler_enabled? : Bool
-      @compiler_options["enabled"]?.try(&.as_bool?) != false
+      @settings.bool("compiler.enabled")
     end
 
     # The `crystal` executable for the workspace.
     def toolchain : Compiler::Toolchain
       @toolchain ||= begin
-        crystal = @compiler_options["path"]?.try(&.as_s?) || ENV["CRYSTAL"]? || "crystal"
+        crystal = @settings.string?("compiler.path") || ENV["CRYSTAL"]? || "crystal"
         Compiler::Toolchain.new(crystal, @index.try(&.project.root) || @root)
       end
     end
@@ -48,7 +36,7 @@ module ClearLS::LSP
     private def entry_points : Compiler::EntryPoints
       @entry_points ||= begin
         root = index.project.root
-        entries = @compiler_options["entries"]?.try(&.as_a?).try &.compact_map { |e| e.as_s?.try { |s| File.expand_path(s, root) } }
+        entries = @settings.strings?("compiler.entries").try &.map { |e| File.expand_path(e, root) }
         Compiler::EntryPoints.new(root, entries)
       end
     end
@@ -57,8 +45,8 @@ module ClearLS::LSP
       return unless compiler_enabled?
       checker = Compiler::Checker.new(toolchain,
         ->(file : String, problems : Array(Compiler::Problem)) { publish_problems(file, problems) })
-      @compiler_options["debounceMs"]?.try(&.as_i?).try { |ms| checker.debounce = ms.milliseconds }
-      if @compiler_options["facts"]?.try(&.as_bool?) != false
+      checker.debounce = @settings.int("compiler.debounceMs").milliseconds
+      if @settings.bool("compiler.facts")
         exporter = File.join(Dir.tempdir, "clear-ls-facts-#{Process.pid}.cr")
         File.write(exporter, Compiler::Exporter.source(index.project.root))
         @exporter_file = exporter
@@ -94,7 +82,7 @@ module ClearLS::LSP
     # first check; each file's facts apply only while its text matches
     # the digest taken with them. The first check replaces them.
     private def restore_facts : Nil
-      return unless compiler_enabled? && @compiler_options["facts"]?.try(&.as_bool?) != false
+      return unless compiler_enabled? && @settings.bool("compiler.facts")
       local = @index.try(&.local) || return
       saved = local.read_facts
       return if saved.empty?

@@ -63,7 +63,7 @@ release: deps
 	@mkdir -p bin
 	$(CRYSTAL) build --release $(CRYSTAL_FLAGS) src/main.cr -o $(BIN)
 
-spec: deps
+spec: deps $(BIN)
 	$(CRYSTAL) spec $(CRYSTAL_FLAGS)
 
 lib/tree_sitter: shard.yml

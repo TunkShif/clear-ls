@@ -36,6 +36,9 @@ class FeatureClient
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
     @server.project_factory = ->(root : String) { Workspace::Project.new(root, paths, std_dir, crystal_version, "x86_64-unknown-linux-gnu") }
     @server.index_workers = 1
+    # Specs opt in per session (`cache:` / `warmup:` options).
+    @server.cache_allowed = true
+    @server.warmup_allowed = true
     request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets, cache: cache, warmup: warmup}})
     notify("initialized", {} of String => String)
   end

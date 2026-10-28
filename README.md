@@ -85,6 +85,7 @@ After a grammar bump, run `make syntax-gen` to regenerate
 ```sh
 bin/clear-ls lsp [--log-level debug] [--log-file PATH] [--no-cache]   # stdio server
 bin/clear-ls cache info|clear [ROOT]                     # persistent cache locations / delete
+bin/clear-ls settings-doc                                # settings reference (docs/settings.md)
 bin/clear-ls dump-cst [--ranges] FILE                    # print the CST
 bin/clear-ls dump-items FILE                             # print declarations
 bin/clear-ls dump-hir FILE LINE                          # print a def's body HIR
@@ -95,6 +96,10 @@ The server reads `CRYSTAL_PATH`, version, and target from `crystal env` /
 `crystal --version` (override the executable with `CRYSTAL=...`) and indexes
 the prelude's require closure, required shards, and all `.cr` files under
 the workspace root.
+
+Every setting, and a recommended Neovim setup (including blink.cmp without
+automatic `()`), is in [docs/settings.md](docs/settings.md)
+(`initializationOptions` or `workspace/didChangeConfiguration`).
 
 Neovim (0.11+):
 
@@ -126,13 +131,7 @@ damaged file is ignored and rewritten. After indexing, the server infers
 workspace bodies while idle (no messages for 300 ms) so references
 searches start warm. Settings:
 
-```lua
-init_options = {
-  cache = { enabled = true, dir = "/path/to/global/cache" },
-  warmup = { enabled = true },
-},
-```
-
+Settings: `cache.*`, `warmup.enabled` ([docs/settings.md](docs/settings.md)).
 `clearLs/clearCache` (no params) deletes the project's cache and the global
 packs it uses, then re-indexes.
 
@@ -143,17 +142,8 @@ Diagnostics come only from the compiler. In the background, clear-ls runs
 `shard.yml` targets that require it, or the file itself. These checks run at
 startup, when a file is opened, and when a file is saved. The compiler reads
 files from disk, so diagnostics describe the saved text. Formatting runs
-`crystal tool format` on the buffer text. Settings go under
-`initializationOptions.compiler`:
-
-```lua
-init_options = { compiler = {
-  enabled = true,          -- background checks (formatting/expansion always available)
-  path = "crystal",        -- executable (default $CRYSTAL or crystal)
-  entries = { "src/app.cr" }, -- programs to check instead of shard targets
-  debounceMs = 150,
-} },
-```
+`crystal tool format` on the buffer text. Settings (`compiler.*`) are in
+[docs/settings.md](docs/settings.md).
 
 Macro expansion preview: `clearLs/expandMacro {textDocument, position}` runs
 `crystal tool expand` on the saved file and returns

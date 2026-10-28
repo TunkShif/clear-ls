@@ -12,12 +12,13 @@ module ClearLS::LSP
   # pushes the next step back. A declaration change (new DefMaps, so the
   # typings it filled are gone) restarts it from the first file.
   #
-  # `initializationOptions.warmup`: `enabled` (default true for
-  # `clear-ls lsp`, `Server#warmup_enabled`).
+  # Setting `warmup.enabled` (and `Server#warmup_allowed`).
   class Server
     IDLE = 300.milliseconds
 
-    property warmup_enabled = false
+    private def warmup_enabled? : Bool
+      @warmup_allowed && @settings.bool("warmup.enabled")
+    end
     getter warmup_done = false
     getter warmup_bodies = 0
     @last_activity = Time.instant
@@ -29,14 +30,14 @@ module ClearLS::LSP
     end
 
     private def warmup_restart : Nil
-      return unless @warmup_enabled && @index
+      return unless warmup_enabled? && @index
       @warmup_generation += 1
       @warmup_done = false
       start_warmup
     end
 
     private def start_warmup : Nil
-      return unless @warmup_enabled
+      return unless warmup_enabled?
       gen = @warmup_generation
       spawn(name: "clear-ls-warmup") do
         begin

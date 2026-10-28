@@ -2,6 +2,7 @@ require "log"
 require "./transport"
 require "./json_rpc"
 require "./job"
+require "./settings"
 require "../vfs"
 require "../version"
 require "../workspace/index"
@@ -45,11 +46,12 @@ module ClearLS::LSP
     # Overridable for tests: builds the project for a workspace root.
     property project_factory : Proc(String, Workspace::Project) = ->(root : String) { Workspace::Project.detect(root) }
     property index_workers : Int32? = nil
-    # Persistent cache (`--no-cache` / `initializationOptions.cache`).
-    # Off by default for embedders and specs; `clear-ls lsp` turns it on.
-    property cache_enabled = false
-    # Global cache directory override (else `Cache::Store.default_dir`).
-    property cache_dir : String? = nil
+    getter settings = Settings.new
+    # What the host allows, on top of the settings: embedders and specs
+    # get neither the persistent cache nor the warm-up unless they ask;
+    # `clear-ls lsp` allows both (`--no-cache` disallows the cache).
+    property cache_allowed = false
+    property warmup_allowed = false
 
     def initialize(@transport : Transport)
     end
@@ -114,16 +116,9 @@ module ClearLS::LSP
       @transport.write(JsonRpc.error(id, ErrorCode::InternalError, ex.message || ex.class.name))
     end
 
-    # `initializationOptions.budgets`: seconds per request kind
-    # (`references`, `rename`, `incomingCalls`; 0 disables; default 5 s),
-    # and `maxCandidates` (files per search, default 2000).
-    @budget_options = JSON::Any.new({} of String => JSON::Any)
-    DEFAULT_BUDGET = 5.seconds
-
+    # Seconds per request kind (`budgets.*`; 0 disables).
     private def budget_for(method : String) : Time::Span?
-      key = method.split('/').last
-      secs = @budget_options[key]?.try { |v| v.as_f? || v.as_i?.try(&.to_f) }
-      return DEFAULT_BUDGET if secs.nil?
+      secs = @settings.float("budgets.#{method.split('/').last}")
       secs <= 0 ? nil : secs.seconds
     end
 
@@ -237,6 +232,7 @@ module ClearLS::LSP
       when "textDocument/didClose"           then did_close(params)
       when "textDocument/didSave"            then compiler_saved(params.dig("textDocument", "uri").as_s)
       when "workspace/didChangeWatchedFiles" then did_change_watched(params)
+      when "workspace/didChangeConfiguration" then did_change_configuration(params)
       when "$/cancelRequest"                 then cancel_request(params)
       when "$/setTrace"                      then nil
       else
@@ -257,14 +253,7 @@ module ClearLS::LSP
       @encoding = [PositionEncoding::UTF8, PositionEncoding::UTF32].find { |e| encodings.includes?(e) } || PositionEncoding::UTF16
       @root = workspace_root(params)
       @client_capabilities = params["capabilities"]? || @client_capabilities
-      @references_options = params.dig?("initializationOptions", "references") || @references_options
-      @budget_options = params.dig?("initializationOptions", "budgets") || @budget_options
-      read_compiler_options(params)
-      params.dig?("initializationOptions", "warmup", "enabled").try(&.as_bool?).try { |v| @warmup_enabled = v }
-      if opts = params.dig?("initializationOptions", "cache")
-        opts["enabled"]?.try(&.as_bool?).try { |v| @cache_enabled = v }
-        opts["dir"]?.try(&.as_s?).try { |v| @cache_dir = v }
-      end
+      @settings.apply(params["initializationOptions"]?)
       @state = State::Initialized
 
       {
@@ -307,7 +296,7 @@ module ClearLS::LSP
       elapsed = Time.measure do
         project = @project_factory.call(@root)
         idx = Workspace::Index.new(project, @vfs)
-        attach_cache(idx, project) if @cache_enabled
+        attach_cache(idx, project) if cache_enabled?
         workers = @index_workers
         workers ? idx.load(workers) : idx.load
         # Open buffers may have arrived before indexing; they win.
@@ -320,7 +309,7 @@ module ClearLS::LSP
     end
 
     private def attach_cache(idx : Workspace::Index, project : Workspace::Project) : Nil
-      idx.store = Cache::Store.new(@cache_dir || Cache::Store.default_dir, project.stdlib_dir, project.crystal_version, project.root)
+      idx.store = Cache::Store.new(@settings.string?("cache.dir") || Cache::Store.default_dir, project.stdlib_dir, project.crystal_version, project.root)
       idx.local = Cache::Local.new(project.root, local_cache_key(project))
     rescue ex
       Log.warn { "cache disabled: #{ex.message}" }
@@ -361,6 +350,30 @@ module ClearLS::LSP
         apply_entry_facts
       end
       {cleared: true, files: index.size}
+    end
+
+    private def cache_enabled? : Bool
+      @cache_allowed && @settings.bool("cache.enabled")
+    end
+
+    # `settings.clearLs` (or `settings` itself). Settings read once at
+    # startup take effect on restart; the rest apply now.
+    private def did_change_configuration(params : JSON::Any) : Nil
+      raw = params["settings"]?
+      section = raw.try { |r| r["clearLs"]? || r["clear-ls"]? || r }
+      changed = @settings.apply(section)
+      return if changed.empty?
+      Log.info { "settings changed: #{changed.join(", ")}" }
+      later = changed.select { |c| Settings::KEYS.find(&.path.==(c)).try(&.restart) }
+      Log.info { "restart to apply: #{later.join(", ")}" } unless later.empty?
+      settings_changed(changed)
+    end
+
+    # Hook for settings that apply immediately (inlay hints, warm-up).
+    private def settings_changed(changed : Array(String)) : Nil
+      if changed.includes?("warmup.enabled")
+        @settings.bool("warmup.enabled") ? warmup_restart : (@warmup_generation += 1)
+      end
     end
 
     # -- text sync ----------------------------------------------------------
