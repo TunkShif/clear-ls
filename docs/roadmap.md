@@ -1410,6 +1410,79 @@ tag covers every occurrence of its node in one value. Assignments and
 blocks are indexed once per body (warm hints over 4 large files 28 ms,
 23 ms with aliases off). Types diff 0 changed. 0.12.1.
 
+### Next small item: hover and definition on type parameters (planned)
+
+Researched on 0.12.1; not implemented.
+
+**Today:** for `class Box(T)`, `def map(& : T -> U) : Box(U) forall U`,
+`def first_of(xs : Array(E)) : E forall E`, `struct Pair(K, *V)`, all
+15 positions tried return no hover and no definition (declaration,
+`@value : T`, param and return restrictions, proc types, `T.class`, `T`
+as a value in a body, `forall` lists, splat params). Semantic tokens
+already mark the declaration in `class Box(T)` as `typeParameter`, not
+the uses. Worse: a parameter that shadows a type (`class Key; end` +
+`class Store(Key)`) resolves `k : Key` to the outer `class Key`; the
+compiler uses the parameter. Stdlib: 115 generic types, 473 uses of
+`forall` variables.
+
+**Scoping rules** (checked with Crystal 1.22):
+
+- A type's params are visible in its body, defs and class methods
+  (`def self.k : T.class`), including reopenings without params
+  (`class Box` after `class Box(T)`); a reopening must use the same
+  names (`class Box(U)` is an error).
+- Nested types don't see them (`Outer(T)::Inner` → undefined `T`).
+- `forall T` on a def shadows a type param `T`.
+- A param shadows a constant of the same name (`class T; end` +
+  `class Box(T)`: `T` inside is the param).
+- Module params are the module's (`module M(T)` with `include M(Int32)`
+  is bound per includer: not knowable at the declaration).
+
+**Plan (low cost, one step).** A resolver
+`Analysis#type_param_at(offset)` before `resolve_path_at`, for a
+`constant` node with a single segment:
+
+1. The enclosing def's `forall` list (CST: `method_def.forall`) → that
+   def's declaration token.
+2. Else the type params of the innermost enclosing type
+   (`namespace_at` → `DefMap` info `type_params`) → the token in the
+   header of the reopening that declares them (`class_def` name's
+   `generic_type` params; the first site with params, else the
+   reopening the cursor is in).
+3. Else nothing (fall through to constants, as today).
+
+What each feature gets:
+
+- **definition:** the declaring token (`T` in `class Box(T)` or `U` in
+  `forall U`).
+- **hover:** `T` with its role: ``type parameter of `Box(T)` `` or
+  ``free variable of `map` (`forall U`)``, plus what it's bound to
+  where known: in a body under inference, hover the def's `self`
+  instantiation (`Box(Int32)`: `T = Int32`) when the receiver of the
+  enclosing call fixes it — only when cheap (the def's `Infer` context
+  already has `self_type`); otherwise just the role.
+- **semantic tokens:** uses also get `typeParameter` (same resolver), so
+  they stop looking like class names.
+- **document highlight:** every use of the same param in its scope
+  (walk the scope's `constant` nodes with that text: same resolver).
+- **references/rename:** local to the type or def (like locals),
+  cheap through the same walk. Rename must cover every reopening's
+  header for type params (the compiler requires equal names), so do
+  references/highlight first and leave rename for when asked.
+- **Fix:** `resolve_path_at` and `Infer` already parse restrictions
+  with the type params known (`DefContext` type params), so inference
+  is right; only the IDE path resolution has the shadowing bug, and the
+  resolver order above fixes it.
+
+Out of scope (higher cost): the per-call bound value at an arbitrary
+use site (`T = Int32` inside `Box(Int32)#get` when reached from a
+specific call needs call-site context); module params per includer.
+
+Specs: every position above for hover and definition, the shadowing
+case, nested type (no param), `forall` shadowing, reopening without
+params, splat param `*V`, and highlight. Estimated size: one resolver
+(~80 lines) plus four small call sites.
+
 ### Phase 13 — multi-root (deferred)
 
 - One index per workspace folder sharing stdlib/shard entries (cheap

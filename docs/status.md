@@ -20,6 +20,10 @@ stops mid-phase). History and per-phase details are in
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
 - **Also done:** fix round after Phase 10 — top-level `include` and the
   file-body namespace ([roadmap.md](roadmap.md#fix-round-after-phase-10-top-level-include-done)).
+- **Planned small item:** hover/definition/highlight on type
+  parameters, and a shadowing bug (`class Store(Key)` resolves `Key`
+  to an outer `class Key`)
+  ([roadmap.md](roadmap.md#next-small-item-hover-and-definition-on-type-parameters-planned)).
 - **Next:** Phase 13 — multi-root
   ([roadmap.md](roadmap.md#phase-13--multi-root-deferred)), deferred
   until asked for; otherwise usage feedback.
