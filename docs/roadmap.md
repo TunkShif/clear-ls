@@ -1388,10 +1388,27 @@ Found and fixed on the way: setter calls (`x.name = v`) resolved to
 nothing; `Foo.new` without `self.new` recorded no resolution; completion
 items carried `null` fields that crash Neovim's built-in completion.
 
-Not yet: aliases nested in generic args (`Array(Names)`) print
-expanded; block parameter names come from plain `yield` arguments only;
+Not yet: block parameter names come from plain `yield` arguments only;
 other code actions (`&.x` ↔ `{ |x| x.x }`, suffix `if`) are for a
 code-action phase.
+
+### Fix round after Phase 12: aliases inside generics (done)
+
+From usage: with `alias Id = Int32 | String`, `id = foo.id` hinted `Id`
+but `xs = [] of Id` hinted `Array(Int32 | String)` and `x = xs.first`
+`Int32 | String`. Phase 12 tagged only whole union parts and only
+written return types. Now a tag names any type node at any depth
+(`Array(Id)`, `Hash(String, Id)`, `{String, Id}`), comes also from
+`[] of T` / `{} of K => V` and element values, and flows from a call's
+receiver and arguments into its result and into block parameters
+(their *inner* spellings: `names.map { }` builds a plain
+`Array(String)`, not a `Names`). The feedback's snippet now hints
+`Id`, `Array(Id)`, `Id`; `h["a"]?` → `Id?`, `h.to_a` →
+`Array({String, Id})`, `group_by` → `Hash(Bool, Array(Id))`, an
+untagged `[1, "a"]` stays `Array(Int32 | String)`. Approximation: a
+tag covers every occurrence of its node in one value. Assignments and
+blocks are indexed once per body (warm hints over 4 large files 28 ms,
+23 ms with aliases off). Types diff 0 changed. 0.12.1.
 
 ### Phase 13 — multi-root (deferred)
 

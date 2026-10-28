@@ -429,7 +429,9 @@ class method: `self` is `" << owner << ".class`"
           t = decl_e.try { |e| inf.types[e.id]? } || inf.binding_type(b.id)
           next if table.unknown?(t)
           next if b.kind.local? && obvious?(body, b)
-          label = decl_e.try { |e| ad.try(&.target(e.id)) } || table.to_s(t)
+          # Assignments: the assigned value's spelling; block args: what
+          # their call's receiver carries.
+          label = (decl_e ? ad.try(&.target(decl_e.id)) : ad.try(&.binding(b.id, t))) || table.to_s(t)
           hints << InlayHint.new(decl.end, ": #{label}", :type)
         end
       end

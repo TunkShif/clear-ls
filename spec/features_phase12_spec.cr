@@ -357,3 +357,45 @@ describe "block form code action (F5)" do
     end
   end
 end
+
+describe "alias names inside generics (F6 feedback)" do
+  files = {
+    "src/a.cr" => <<-CR,
+      alias Id = Int32 | String
+
+      class Foo
+        getter id : Id = 233
+      end
+
+      def go(h : Hash(String, Id))
+        foo = Foo.new
+        id = foo.id
+        xs = [] of Id
+        x = xs.first
+        ys = [x]
+        v = h["a"]
+        xs.each { |e| p e }
+        n = xs.size
+        m = xs.map { |e| e.to_s }
+        maybe = xs.first?
+      end
+      CR
+  }
+
+  it "spells the alias at any depth and through generic results" do
+    with_client(files, PRELUDE_FILES) do |c|
+      u = c.open("src/a.cr")
+      hints = c.request("textDocument/inlayHint", {textDocument: {uri: u}, range: {start: {line: 0, character: 0}, end: {line: 30, character: 0}}})
+      got = hints.as_a.map { |h| "#{h["position"]["line"].as_i + 1}#{h["label"].as_s}" }
+      got.should contain "9: Id"
+      got.should contain "10: Array(Id)"
+      got.should contain "11: Id"
+      got.should contain "12: Array(Id)"
+      got.should contain "13: Id"
+      got.should contain "14: Id"          # block param
+      got.should contain "15: Int32"       # unrelated result stays plain
+      got.should contain "16: Array(String)"
+      got.should contain "17: Id?"
+    end
+  end
+end
