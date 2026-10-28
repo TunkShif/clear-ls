@@ -30,6 +30,9 @@ module ClearLS::IDE
     overloads : Int32 = 1,
     # Some overload takes no argument (`a.-` is unary minus).
     nullary : Bool = false,
+    # Every overload takes a block; the first one's site (for parameter
+    # names).
+    block_site : Semantics::Site? = nil,
     # Replaces *edit_range* (instead of the word before the cursor) with
     # *insert_text*; for setters and operators, which rewrite `.`.
     edit_range : TextRange? = nil,
@@ -39,7 +42,8 @@ module ClearLS::IDE
 
   # What the client can take (`textDocument.completion.completionItem`)
   # and the settings that shape items.
-  record CompletionOptions, snippets : Bool = false, setter_snippets : Bool = true
+  record CompletionOptions, snippets : Bool = false, setter_snippets : Bool = true,
+    block_snippets : Bool = true, block_style : String = "braces"
 
   # Completion at a cursor.
   #
@@ -89,11 +93,37 @@ module ClearLS::IDE
                end
       return [] of CompletionItem unless recv_t
       items = method_items(recv_t, prefix)
-      return items unless @options.setter_snippets
       # The `.` before the word, and whether this is `&.` (short block).
       dot = start - 1
       short_block = dot > 0 && text.byte_at(dot - 1) == '&'.ord
-      items.map { |i| shape_member(i, dot, offset, short_block) }
+      items = items.map { |i| shape_member(i, dot, offset, short_block) } if @options.setter_snippets
+      # A block is never written after `&.x` (it is the block), nor when
+      # the call already continues (`xs.map(` / `xs.map {` after the word).
+      rest = text.byte_slice(offset, Math.min(2, text.bytesize - offset)).lstrip
+      if @options.snippets && @options.block_snippets && !short_block && !rest.starts_with?('{') && !rest.starts_with?('(') && !rest.starts_with?("do")
+        items = items.map { |i| with_block(i, start, offset) }
+      end
+      items
+    end
+
+    # `map` → `map { |${1:x}| $0 }` for methods whose every overload
+    # takes a block. Parameter names from the def (`yield elem, i`), else
+    # placeholders `x`, `y`, ...
+    private def with_block(i : CompletionItem, start : UInt32, offset : UInt32) : CompletionItem
+      site = i.block_site || return i
+      return i unless i.edit_range.nil? && i.label[0].letter?
+      names = @typing.block_param_names(site) || return i
+      fallback = %w(x y z w)
+      params = names.map_with_index do |n, k|
+        "${#{k + 1}:#{n || fallback[k]? || "x#{k}"}}"
+      end
+      bar = params.empty? ? "" : "|#{params.join(", ")}| "
+      text = if @options.block_style == "do"
+               "#{i.label} do #{bar.rstrip}\n\t$0\nend"
+             else
+               "#{i.label} { #{bar}$0 }"
+             end
+      i.copy_with(insert_text: text, edit_range: TextRange.new(start, offset), filter_text: i.label, snippet: true)
     end
 
     UNARY = %w(- + ! ~)
@@ -210,7 +240,8 @@ module ClearLS::IDE
         CompletionItem.new(name, first.try(&.item.kind.macro?) ? CompletionKind::Macro : CompletionKind::Method,
           detail: detail, documentation: first.try(&.item.doc),
           sort_text: "#{tier}#{depth.to_s.rjust(2, '0')}#{name}", overloads: sites.size,
-          nullary: sites.any? { |s| s.item.signature.try(&.params.none? { |p| p.kind.positional? || p.kind.splat? }) || false })
+          nullary: sites.any? { |s| s.item.signature.try(&.params.none? { |p| p.kind.positional? || p.kind.splat? }) || false },
+          block_site: sites.all? { |s| s.item.signature.try(&.params.any?(&.kind.block?)) || false } ? first : nil)
       end.sort_by!(&.sort_text.not_nil!).first(MAX_ITEMS)
     end
 

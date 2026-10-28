@@ -1297,6 +1297,16 @@ the exporter or the cache):
    def's `yield` call arguments when they are locals with names, else
    `x`/`i` style placeholders), `blockStyle`. Spec over the stdlib:
    no snippet for a method with a non-block overload.
+   *Done:* `Completion#with_block`, `Typing#block_param_names` (arity from
+   `& : T, U ->` / `(T, U) ->`, else the first `yield`; names from plain
+   identifier `yield` arguments, else `x`, `y`, ... placeholders).
+   Settings `completion.blockSnippets`, `completion.blockStyle`
+   (`braces` | `do`). Not after `&.`, nor before an existing `{`, `(`,
+   `do`; only with client `snippetSupport`. Stdlib spec: every
+   completed `Array`/`Hash`/`String` method (>150) gets a block exactly
+   when every public overload takes one. In Neovim (`editing` check, via
+   `vim.snippet`): `items.ma` → `items.map { |x|  }` with `x` selected;
+   `items.selec` → `items.select`. 0.11.3.
 6. **Aliases in hints and hover (F6).** Alias-tagged types, printing,
    `hover`/inlay rules above; regression diff (`types_diff.py`) must
    show only display changes (identity unchanged: `book_diff.py` 0

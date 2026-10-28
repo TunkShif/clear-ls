@@ -8,7 +8,9 @@ local t0 = vim.uv.hrtime()
 function M.elapsed() return (vim.uv.hrtime() - t0) / 1e6 end
 
 function M.start(file)
+  local caps = vim.lsp.protocol.make_client_capabilities()
   vim.lsp.config("clear_ls", {
+    capabilities = caps,
     cmd = { M.root .. "/bin/clear-ls", "lsp", "--log-file", M.log, "--log-level", "debug" },
     filetypes = { "crystal" }, root_markers = { "shard.yml" },
   })

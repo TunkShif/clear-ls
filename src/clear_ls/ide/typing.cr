@@ -197,6 +197,54 @@ module ClearLS::IDE
       nil
     end
 
+    # Block parameter names for a completion snippet of the def at
+    # *site*: the arity from its block restriction (`& : T, U ->`), else
+    # from its first `yield`; names from `yield` arguments that are plain
+    # identifiers (`yield elem, i`), else nil (the snippet uses a
+    # placeholder). Nil when the def has no block or the arity is unknown.
+    def block_param_names(site : Semantics::Site) : Array(String?)?
+      sig = site.item.signature || return nil
+      blk = sig.params.find(&.kind.block?) || return nil
+      arity = blk.restriction.try { |r| restriction_arity(r) }
+      names = [] of String?
+      if node = def_node(site)
+        node.walk do |n|
+          next false if n.kind.method_def? && n != node
+          if n.kind.yield? && names.empty?
+            args = n.named_children.find(&.kind.argument_list?).try(&.named_children) || [] of Syntax::Node
+            names = args.map { |a| a.kind.identifier? && a.text.matches?(/\A[a-z_][a-z0-9_]*\z/) ? a.text.as(String?) : nil }
+            # `yield({k, v})`: one tuple argument.
+            false
+          else
+            names.empty?
+          end
+        end
+      end
+      arity ||= names.size if node
+      return nil unless arity
+      (0...arity).map { |i| names[i]? }
+    end
+
+    # Number of inputs of a block restriction: `T ->` 1, `T, U -> V` 2,
+    # `-> T` 0. Nil when it isn't a proc notation.
+    private def restriction_arity(r : String) : Int32?
+      i = r.index("->") || return nil
+      inputs = r[0, i].strip
+      # `(T, U) ->` is the same as `T, U ->`.
+      inputs = inputs[1..-2].strip if inputs.starts_with?('(') && inputs.ends_with?(')')
+      return 0 if inputs.empty?
+      depth = 0
+      count = 1
+      inputs.each_char do |c|
+        case c
+        when '(', '{', '[' then depth += 1
+        when ')', '}', ']' then depth -= 1
+        when ','           then count += 1 if depth == 0
+        end
+      end
+      count
+    end
+
     @texts = {} of FileId => String
 
     private def file_text(file : FileId) : String?

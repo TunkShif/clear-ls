@@ -26,17 +26,26 @@ local function accept(text, label)
   local m = matches[idx]
   local from = server_start or start
   local item = m.user_data.nvim.lsp.completion_item
-  local word = m.word
   if item.insertTextFormat == 2 then
-    word = vim.lsp._snippet_grammar and tostring(vim.lsp._snippet_grammar.parse(item.textEdit and item.textEdit.newText or item.insertText)) or word
+    -- Snippets: Neovim clears the word and expands with vim.snippet.
+    vim.api.nvim_buf_set_lines(0, last, last + 1, false, { text:sub(1, from) })
+    vim.api.nvim_win_set_cursor(0, { last + 1, from })
+    vim.cmd("startinsert!")
+    vim.snippet.expand(item.textEdit and item.textEdit.newText or item.insertText)
+    local cur = vim.api.nvim_win_get_cursor(0)
+    vim.snippet.stop()
+    vim.cmd("stopinsert")
+    local line = vim.api.nvim_buf_get_lines(0, last, last + 1, false)[1]
+    return line .. ("  [cursor at col %d]"):format(cur[2])
   end
-  local line = text:sub(1, from) .. word
+  local line = text:sub(1, from) .. m.word
   vim.api.nvim_buf_set_lines(0, last, last + 1, false, { line })
   return vim.api.nvim_buf_get_lines(0, last, last + 1, false)[1]
 end
 for _, c in ipairs({
   { "item.nam", "name" }, { "item.nam", "name=" }, { "items.each &.nam", "name=" },
   { "item.", "+" }, { "item.na", "name" }, { "pu", "puts" },
+  { "items.ma", "map" }, { "items.selec", "select" },
 }) do
   print(("%-18s accept %-6s -> %s"):format(c[1], c[2], vim.inspect(accept(c[1], c[2]))))
 end

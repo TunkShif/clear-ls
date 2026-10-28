@@ -194,3 +194,84 @@ describe "setter and operator completion (F2-2)" do
     end
   end
 end
+
+describe "block snippets (F2-3)" do
+  files = {"src/a.cr" => "xs = [1, 2]\nh = {\"a\" => 1}\nxs.ma\nxs.sort_b\nxs.index_b\nxs.selec\nxs.each_with_ind\n[xs].each &.ma\nxs.ma { }\n"}
+  snippets = {completion: {completionItem: {snippetSupport: true}}}
+
+  it "inserts a block only when every overload takes one" do
+    c = FeatureClient.new(files, text_document_caps: snippets, real_stdlib: true)
+    begin
+      u = c.open("src/a.cr")
+      item = ->(line : Int32, ch : Int32, label : String) do
+        r = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: line, character: ch}})
+        r["items"].as_a.find(&.["label"].==(label))
+      end
+      m = item.call(2, 5, "map").not_nil!
+      m["insertTextFormat"].should eq 2
+      m["textEdit"]["newText"].should eq "map { |${1:x}| $0 }" # `yield @buffer[i]`: no usable name
+      # `sort_by { |e| yield(e) }` names the parameter.
+      item.call(3, 9, "sort_by").not_nil!["textEdit"]["newText"].should eq "sort_by { |${1:e}| $0 }"
+      # `index_by(& : T -> U)`: one parameter; `yield elem` names it.
+      item.call(4, 10, "index_by").not_nil!["textEdit"]["newText"].should eq "index_by { |${1:elem}| $0 }"
+      # A non-block overload exists (`select(pattern)`, the iterator
+      # `each_with_index`): the plain name.
+      item.call(5, 8, "select").not_nil!["textEdit"]?.should be_nil
+      item.call(6, 16, "each_with_index").not_nil!["textEdit"]?.should be_nil
+      # `&.map` is itself a block; `xs.map { }` already has one.
+      item.call(7, 14, "map").not_nil!["textEdit"]?.should be_nil
+      item.call(8, 5, "map").not_nil!["textEdit"]?.should be_nil
+    ensure
+      c.cleanup
+    end
+  end
+
+  it "uses do ... end with blockStyle, nothing without snippet support" do
+    c = FeatureClient.new(files, text_document_caps: snippets, real_stdlib: true)
+    begin
+      c.notify("workspace/didChangeConfiguration", {settings: {clearLs: {completion: {blockStyle: "do"}}}})
+      u = c.open("src/a.cr")
+      r = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 2, character: 5}})
+      r["items"].as_a.find(&.["label"].==("map")).not_nil!["textEdit"]["newText"].should eq "map do |${1:x}|\n\t$0\nend"
+    ensure
+      c.cleanup
+    end
+    c = FeatureClient.new(files, real_stdlib: true)
+    begin
+      u = c.open("src/a.cr")
+      r = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 2, character: 5}})
+      r["items"].as_a.find(&.["label"].==("map")).not_nil!["textEdit"]?.should be_nil
+    ensure
+      c.cleanup
+    end
+  end
+end
+
+describe "block snippet rule over the stdlib" do
+  it "never offers a block for a method with a non-block overload" do
+    c = FeatureClient.new({"src/a.cr" => "xs = [1]\nh = {1 => 2}\ns = \"a\"\nxs.\nh.\ns.\n"},
+      text_document_caps: {completion: {completionItem: {snippetSupport: true}}}, real_stdlib: true)
+    begin
+      u = c.open("src/a.cr")
+      map = c.server.index.def_map
+      checked = 0
+      {3 => "Array", 4 => "Hash", 5 => "String"}.each do |line, type|
+        r = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: line, character: line == 3 ? 3 : 2}})
+        owner = map.lookup_path(type).not_nil!
+        r["items"].as_a.each do |i|
+          label = i["label"].as_s
+          next unless label[0].letter?
+          sites = map.lookup_member(owner, label).select(&.item.kind.def?).reject(&.item.visibility.private?)
+          next if sites.empty?
+          snippet = i["textEdit"]?.try(&.["newText"].as_s.includes?("{ |")) || i["textEdit"]?.try(&.["newText"].as_s.includes?("{ $0")) || false
+          every = sites.all? { |s| s.item.signature.try(&.params.any?(&.kind.block?)) || false }
+          snippet.should eq(every), "#{type}##{label}: snippet=#{snippet}, every overload takes a block=#{every}"
+          checked += 1
+        end
+      end
+      checked.should be > 150
+    ensure
+      c.cleanup
+    end
+  end
+end

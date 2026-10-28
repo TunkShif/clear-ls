@@ -359,7 +359,8 @@ module ClearLS::LSP
     private def completion(params : JSON::Any)
       state = document(params)
       off = offset(state, params["position"])
-      opts = IDE::CompletionOptions.new(snippets: snippet_support?, setter_snippets: @settings.bool("completion.setterSnippets"))
+      opts = IDE::CompletionOptions.new(snippets: snippet_support?, setter_snippets: @settings.bool("completion.setterSnippets"),
+        block_snippets: @settings.bool("completion.blockSnippets"), block_style: @settings.string?("completion.blockStyle") || "braces")
       items = IDE::Completion.new(state, index, typing(state), opts).complete(off)
       {
         isIncomplete: items.size >= IDE::Completion::MAX_ITEMS,

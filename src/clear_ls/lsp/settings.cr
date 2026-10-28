@@ -48,6 +48,8 @@ module ClearLS::LSP
       k("inlayHints.locals", Bool, true, "Type after a local's first assignment (`x = foo` → `x : Int32`), unless obvious from the value (a literal, `T.new`)."),
       k("inlayHints.blockParams", Bool, true, "Types of block parameters (`each { |x| }` → `x : String`)."),
       k("inlayHints.returnTypes", Bool, true, "Inferred return type after the parameter list of defs written without one."),
+      k("completion.blockSnippets", Bool, true, "Completing a method whose every overload takes a block inserts one (`xs.ma` → `xs.map { |x| }`, parameter names from the method's `yield` when they are plain names, else placeholders). Methods with a non-block overload (`select`, `count`) complete as names. Needs client snippet support."),
+      k("completion.blockStyle", Enum, "braces", "Form of block snippets: `{ |x| }` or `do |x| ... end` on new lines.", ["braces", "do"]),
       k("completion.setterSnippets", Bool, true, "Completing `name=` after `x.` writes `x.name = ` (the setter as it is called); binary operators write `x + `, index operators `x[]`. False keeps the method names (`x.name=`, `x.+`)."),
       k("warmup.enabled", Bool, true, "Infer workspace bodies in the background while idle, so the first references search is fast."),
     ]

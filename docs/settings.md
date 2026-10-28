@@ -53,6 +53,8 @@ and wrong types are logged and ignored. Settings marked *restart* are read once,
 
 | Key | Type | Default | |
 |---|---|---|---|
+| `completion.blockSnippets` | bool | `true` | Completing a method whose every overload takes a block inserts one (`xs.ma` → `xs.map { |x| }`, parameter names from the method's `yield` when they are plain names, else placeholders). Methods with a non-block overload (`select`, `count`) complete as names. Needs client snippet support. |
+| `completion.blockStyle` | `"braces"` \| `"do"` | `"braces"` | Form of block snippets: `{ |x| }` or `do |x| ... end` on new lines. |
 | `completion.setterSnippets` | bool | `true` | Completing `name=` after `x.` writes `x.name = ` (the setter as it is called); binary operators write `x + `, index operators `x[]`. False keeps the method names (`x.name=`, `x.+`). |
 
 ## `warmup`
