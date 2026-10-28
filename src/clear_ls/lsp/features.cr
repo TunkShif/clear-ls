@@ -566,7 +566,7 @@ module ClearLS::LSP
       range = TextRange.new(offset(state, r["start"]), offset(state, r["end"]))
       return [] of Nil unless @settings.bool("inlayHints.enabled")
       kinds = IDE::InlayHintKinds.new(@settings.bool("inlayHints.locals"), @settings.bool("inlayHints.blockParams"),
-        @settings.bool("inlayHints.returnTypes"))
+        @settings.bool("inlayHints.returnTypes"), @settings.bool("inlayHints.aliases"))
       type_info(state).inlay_hints(range, kinds).map do |h|
         p = state.line_index.position(h.offset, @encoding)
         {position: {line: p.line, character: p.column}, label: h.label, kind: 1, paddingLeft: false}
@@ -598,7 +598,7 @@ module ClearLS::LSP
     end
 
     private def type_info(state : FileState) : IDE::TypeInfo
-      IDE::TypeInfo.new(state, bodies(state), typing(state))
+      IDE::TypeInfo.new(state, bodies(state), typing(state)).tap { |t| t.aliases = @settings.bool("inlayHints.aliases") }
     end
 
     @body_cache = IDE::BodyCache.new

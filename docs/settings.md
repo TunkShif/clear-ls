@@ -47,6 +47,7 @@ and wrong types are logged and ignored. Settings marked *restart* are read once,
 | `inlayHints.enabled` | bool | `true` | All inlay hints. |
 | `inlayHints.locals` | bool | `true` | Type after a local's first assignment (`x = foo` → `x : Int32`), unless obvious from the value (a literal, `T.new`). |
 | `inlayHints.blockParams` | bool | `true` | Types of block parameters (`each { |x| }` → `x : String`). |
+| `inlayHints.aliases` | bool | `true` | Spell types written as an alias with its name (`alias Names = Array(String)`: `x : Names`), in hints and hover; hover adds the expansion. A value that mixes the alias with the plain type shows the expansion. False always shows the expansion (as the compiler does). |
 | `inlayHints.returnTypes` | bool | `true` | Inferred return type after the parameter list of defs written without one. |
 
 ## `completion`

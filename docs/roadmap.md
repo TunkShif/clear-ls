@@ -1205,9 +1205,9 @@ first.
    Documented in one place (`docs/settings.md`) generated from the
    schema in code (`LSP::Settings`), so docs and defaults cannot drift;
    a spec checks the doc is current.
-4. **Aliases in hints (F6).** The type table interns an alias as an
-   alias-tagged view of its target (same identity for compatibility and
-   overloads, a display name for printing). The tag comes from written
+4. **Aliases in hints (F6).** The display remembers where a type was
+   written as an alias (same identity for compatibility and overloads,
+   a display name for printing). The tag comes from written
    restrictions and return types and survives inference joins when
    every joined value carries it (decided):
 
@@ -1311,6 +1311,18 @@ the exporter or the cache):
    `hover`/inlay rules above; regression diff (`types_diff.py`) must
    show only display changes (identity unchanged: `book_diff.py` 0
    mismatches).
+   *Done:* as a display layer, not in the type table:
+   `IDE::AliasDisplay` derives per-member alias spellings from written
+   types (call return types, param restrictions, `x : T`) and carries
+   them through assignments, reads, `if`/`unless`/`||`/`&&` joins and
+   narrowing, dropping a spelling when a joined value lacks it. Inference
+   and type identity are untouched (types regression diff 0 changed;
+   book diff 0 mismatches), so no interning change was needed. The
+   decided examples are a spec. Only whole union parts are spelled
+   (`Names`, `Names?`, `Names | Int32`), not aliases inside generic
+   args. Setting `inlayHints.aliases` (hints and hover). Warm inlay
+   hints over 4 large repo files: 24 ms vs 23 ms without; the repo
+   now hints `: Env` in `infer.cr`. 0.11.4.
 7. **Block form code action (F5).** `{}` ↔ `do end` with the binding
    check; round-trip spec (convert twice = original, modulo
    whitespace) over every block of the stdlib that converts.

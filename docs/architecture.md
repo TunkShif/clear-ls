@@ -159,6 +159,21 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
   body (cancel, budget, `Fiber.yield`). Cancelled by `$/cancelRequest`,
   by edits of files the job read, and by any declaration edit.
 
+### Editing UX (Phase 12)
+
+- `LSP::Settings` (`lsp/settings.cr`): one key table → defaults, type
+  checks, `didChangeConfiguration`, `docs/settings.md`.
+- `IDE::AccessorTarget` (`references.cr`): members one accessor macro
+  argument generates, searched/renamed as one symbol. Setter calls
+  resolve through `Infer#setter_value`; `&.name = v` is lowered to a
+  `name=` call; `Infer#initialize_resolution` links `Foo.new(k: v)` to
+  `initialize` (record fields).
+- Completion shapes (`completion.cr`): `shape_member` (setters,
+  operators), `with_block` (`Typing#block_param_names`). Items omit
+  optional fields rather than sending `null`.
+- `IDE::AliasDisplay`: alias spellings for hints/hover, from written
+  types through flow; never part of inference.
+
 ### Startup and caches (Phase 11)
 
 - `Index#load` → `index_files`: a work queue over a parallel execution

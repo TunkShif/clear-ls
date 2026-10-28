@@ -275,3 +275,64 @@ describe "block snippet rule over the stdlib" do
     end
   end
 end
+
+describe "alias names in hints and hover (F6)" do
+  files = {
+    "src/a.cr" => <<-CR,
+      alias Names = Array(String)
+
+      def find_names(ok : Bool) : Names?
+        ok ? ["a"] : nil
+      end
+
+      def names : Names
+        ["a"]
+      end
+
+      def go(ok : Bool, n : Names)
+        a = find_names(ok)
+        b = ok ? names : nil
+        c = ok ? names : ["b"]
+        d = ok ? names : 1
+        e = n
+        f = a
+        g = names.map { |s| s }
+        if a
+          h = a
+        end
+      end
+      CR
+  }
+
+  it "keeps the alias where every joined value carries it" do
+    with_client(files, PRELUDE_FILES) do |c|
+      u = c.open("src/a.cr")
+      hints = c.request("textDocument/inlayHint", {textDocument: {uri: u}, range: {start: {line: 0, character: 0}, end: {line: 30, character: 0}}})
+      # First hint per line (the local's; `g = names.map { |s| }` also hints `s`).
+      by_line = {} of Int32 => String
+      hints.as_a.each { |h| by_line[h["position"]["line"].as_i + 1] ||= h["label"].as_s }
+      by_line[12].should eq ": Names?"
+      by_line[13].should eq ": Names?"
+      by_line[14].should eq ": Array(String)"
+      by_line[15].should eq ": Names | Int32"
+      by_line[16].should eq ": Names"
+      by_line[17].should eq ": Names?"
+      by_line[18].should eq ": Array(String)" # map: inferred, not written
+      by_line[20].should eq ": Names"          # narrowed by `if a`
+    end
+  end
+
+  it "hovers with the expansion and turns off with inlayHints.aliases" do
+    with_client(files, PRELUDE_FILES) do |c|
+      u = c.open("src/a.cr")
+      md = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/a.cr", "a = find")})["contents"]["value"].as_s
+      md.should contain "a : Names?"
+      md.should contain "= `Array(String)?`"
+      c.notify("workspace/didChangeConfiguration", {settings: {clearLs: {inlayHints: {aliases: false}}}})
+      md = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/a.cr", "a = find")})["contents"]["value"].as_s
+      md.should contain "a : Array(String)?"
+      hints = c.request("textDocument/inlayHint", {textDocument: {uri: u}, range: {start: {line: 0, character: 0}, end: {line: 30, character: 0}}})
+      hints.as_a.none?(&.["label"].as_s.includes?("Names")).should be_true
+    end
+  end
+end

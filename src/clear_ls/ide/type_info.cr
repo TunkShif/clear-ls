@@ -1,14 +1,25 @@
 require "./typing"
+require "./alias_display"
 
 module ClearLS::IDE
   record InlayHint, offset : UInt32, label : String, kind : Symbol
 
   # Which inlay hints to compute (settings `inlayHints.*`).
-  record InlayHintKinds, locals : Bool = true, block_params : Bool = true, return_types : Bool = true
+  record InlayHintKinds, locals : Bool = true, block_params : Bool = true, return_types : Bool = true,
+    aliases : Bool = true
 
   # Type-aware hover, method navigation, and inlay hints.
   class TypeInfo
+    # Show alias names where the type was written as one (`inlayHints.aliases`).
+    property aliases = true
+
     def initialize(@state : FileState, @bodies : Bodies, @typing : Typing)
+    end
+
+    private def alias_display(body : HIR::Body, inf : Types::Infer) : AliasDisplay?
+      return nil unless @aliases
+      ns = @typing.def_map.namespace_at(@state.id, body.range.start)
+      AliasDisplay.new(body, inf, @typing, ns)
     end
 
     private def table : Types::TypeTable
@@ -27,7 +38,15 @@ module ClearLS::IDE
       t = expr.try { |e| inf.types[e.id]? } || inf.binding_type(b.id)
       t = inf.binding_type(b.id) if table.unknown?(t) && !(ref.kind.read? && expr)
       ty = table.unknown?(t) ? b.restriction : table.to_s(t)
-      md = "```crystal\n#{b.name}#{ty ? " : #{ty}" : ""}\n```\n\n#{KIND_NAMES[b.kind]}"
+      aliased = table.unknown?(t) ? nil : alias_display(body, inf).try do |ad|
+        if expr && (body.exprs.any? { |x| (x.kind.assign? || x.kind.type_decl?) && x.children.first? == expr.id })
+          ad.target(expr.id)
+        else
+          ad.binding(b.id, t)
+        end
+      end
+      md = "```crystal\n#{b.name}#{(aliased || ty) ? " : #{aliased || ty}" : ""}\n```\n\n#{KIND_NAMES[b.kind]}"
+      md += "\n\n= `#{ty}`" if aliased && aliased != ty
       # `x : T = v`: the flow type above, the declaration as a note when it
       # differs (decision 3).
       if b.kind.type_decl? && (r = b.restriction) && ty && ty != r
@@ -396,6 +415,7 @@ class method: `self` is `" << owner << ".class`"
       return_hints(range, hints) if kinds.return_types
       return hints unless kinds.locals || kinds.block_params
       each_body_in(range) do |body, inf|
+        ad = kinds.aliases ? alias_display(body, inf) : nil
         body.bindings.each do |b|
           next unless (b.kind.local? && kinds.locals) || (b.kind.block_arg? && kinds.block_params)
           # Class/module bodies: `getter x = ...` arguments look like locals.
@@ -409,7 +429,8 @@ class method: `self` is `" << owner << ".class`"
           t = decl_e.try { |e| inf.types[e.id]? } || inf.binding_type(b.id)
           next if table.unknown?(t)
           next if b.kind.local? && obvious?(body, b)
-          hints << InlayHint.new(decl.end, ": #{table.to_s(t)}", :type)
+          label = decl_e.try { |e| ad.try(&.target(e.id)) } || table.to_s(t)
+          hints << InlayHint.new(decl.end, ": #{label}", :type)
         end
       end
       hints.sort_by!(&.offset)

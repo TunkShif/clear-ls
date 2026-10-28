@@ -47,6 +47,7 @@ module ClearLS::LSP
       k("inlayHints.enabled", Bool, true, "All inlay hints."),
       k("inlayHints.locals", Bool, true, "Type after a local's first assignment (`x = foo` → `x : Int32`), unless obvious from the value (a literal, `T.new`)."),
       k("inlayHints.blockParams", Bool, true, "Types of block parameters (`each { |x| }` → `x : String`)."),
+      k("inlayHints.aliases", Bool, true, "Spell types written as an alias with its name (`alias Names = Array(String)`: `x : Names`), in hints and hover; hover adds the expansion. A value that mixes the alias with the plain type shows the expansion. False always shows the expansion (as the compiler does)."),
       k("inlayHints.returnTypes", Bool, true, "Inferred return type after the parameter list of defs written without one."),
       k("completion.blockSnippets", Bool, true, "Completing a method whose every overload takes a block inserts one (`xs.ma` → `xs.map { |x| }`, parameter names from the method's `yield` when they are plain names, else placeholders). Methods with a non-block overload (`select`, `count`) complete as names. Needs client snippet support."),
       k("completion.blockStyle", Enum, "braces", "Form of block snippets: `{ |x| }` or `do |x| ... end` on new lines.", ["braces", "do"]),
