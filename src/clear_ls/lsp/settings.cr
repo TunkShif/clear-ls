@@ -44,6 +44,10 @@ module ClearLS::LSP
       k("budgets.maxCandidates", Int, 2000_i64, "Most candidate files one search reads; over it the search fails with a message."),
       k("cache.enabled", Bool, true, "Persistent index cache (global stdlib/shard packs, project `.clear-ls/cache/`). `--no-cache` turns it off.", restart: true),
       k("cache.dir", String, nil, "Global cache directory (default `$CLEAR_LS_CACHE_DIR`, else the platform cache dir + `clear-ls`).", restart: true),
+      k("inlayHints.enabled", Bool, true, "All inlay hints."),
+      k("inlayHints.locals", Bool, true, "Type after a local's first assignment (`x = foo` → `x : Int32`), unless obvious from the value (a literal, `T.new`)."),
+      k("inlayHints.blockParams", Bool, true, "Types of block parameters (`each { |x| }` → `x : String`)."),
+      k("inlayHints.returnTypes", Bool, true, "Inferred return type after the parameter list of defs written without one."),
       k("warmup.enabled", Bool, true, "Infer workspace bodies in the background while idle, so the first references search is fast."),
     ]
 

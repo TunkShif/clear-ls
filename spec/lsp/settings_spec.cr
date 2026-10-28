@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/feature_client"
+require "../support/prelude"
 
 include ClearLS::LSP
 
@@ -37,6 +38,26 @@ describe Settings do
       # Clients that send the section unwrapped.
       c.notify("workspace/didChangeConfiguration", {settings: {references: {includePossible: false}}})
       c.server.settings.bool("references.includePossible").should be_false
+    ensure
+      c.cleanup
+    end
+  end
+end
+
+describe "inlay hint settings" do
+  files = {"src/a.cr" => "def twice(x : Int32)\n  x * 2\nend\n\ndef go\n  v = twice(1)\n  [\"a\"].each { |s| puts s }\nend\n"}
+
+  it "switches kinds and refreshes" do
+    c = FeatureClient.new(files, PRELUDE_FILES, workspace_caps: {inlayHint: {refreshSupport: true}})
+    begin
+      u = c.open("src/a.cr")
+      hints = -> { c.request("textDocument/inlayHint", {textDocument: {uri: u}, range: {start: {line: 0, character: 0}, end: {line: 9, character: 0}}}).as_a.map(&.["label"].as_s) }
+      hints.call.sort.should eq [" : Int32", " : Nil", ": Int32", ": String"]
+      c.notify("workspace/didChangeConfiguration", {settings: {clearLs: {inlayHints: {returnTypes: false, blockParams: false}}}})
+      hints.call.should eq [": Int32"]
+      c.server_messages("workspace/inlayHint/refresh").size.should eq 1
+      c.notify("workspace/didChangeConfiguration", {settings: {clearLs: {inlayHints: {enabled: false}}}})
+      hints.call.should be_empty
     ensure
       c.cleanup
     end

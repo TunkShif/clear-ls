@@ -40,6 +40,15 @@ and wrong types are logged and ignored. Settings marked *restart* are read once,
 | `cache.enabled` | bool | `true` | Persistent index cache (global stdlib/shard packs, project `.clear-ls/cache/`). `--no-cache` turns it off. *restart* |
 | `cache.dir` | string | — | Global cache directory (default `$CLEAR_LS_CACHE_DIR`, else the platform cache dir + `clear-ls`). *restart* |
 
+## `inlayHints`
+
+| Key | Type | Default | |
+|---|---|---|---|
+| `inlayHints.enabled` | bool | `true` | All inlay hints. |
+| `inlayHints.locals` | bool | `true` | Type after a local's first assignment (`x = foo` → `x : Int32`), unless obvious from the value (a literal, `T.new`). |
+| `inlayHints.blockParams` | bool | `true` | Types of block parameters (`each { |x| }` → `x : String`). |
+| `inlayHints.returnTypes` | bool | `true` | Inferred return type after the parameter list of defs written without one. |
+
 ## `warmup`
 
 | Key | Type | Default | |

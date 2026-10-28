@@ -3,6 +3,9 @@ require "./typing"
 module ClearLS::IDE
   record InlayHint, offset : UInt32, label : String, kind : Symbol
 
+  # Which inlay hints to compute (settings `inlayHints.*`).
+  record InlayHintKinds, locals : Bool = true, block_params : Bool = true, return_types : Bool = true
+
   # Type-aware hover, method navigation, and inlay hints.
   class TypeInfo
     def initialize(@state : FileState, @bodies : Bodies, @typing : Typing)
@@ -373,13 +376,14 @@ class method: `self` is `" << owner << ".class`"
       table.to_s(t)
     end
 
-    def inlay_hints(range : TextRange) : Array(InlayHint)
+    def inlay_hints(range : TextRange, kinds = InlayHintKinds.new) : Array(InlayHint)
       hints = [] of InlayHint
       seen = Set(UInt32).new
-      return_hints(range, hints)
+      return_hints(range, hints) if kinds.return_types
+      return hints unless kinds.locals || kinds.block_params
       each_body_in(range) do |body, inf|
         body.bindings.each do |b|
-          next unless b.kind.local? || b.kind.block_arg?
+          next unless (b.kind.local? && kinds.locals) || (b.kind.block_arg? && kinds.block_params)
           # Class/module bodies: `getter x = ...` arguments look like locals.
           next if body.scope(b.scope).kind.def? && b.scope.value != 0
           next if in_type_body?(b.name_range.start)

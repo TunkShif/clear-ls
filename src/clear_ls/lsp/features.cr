@@ -539,7 +539,10 @@ module ClearLS::LSP
       state = document(params)
       r = params["range"]
       range = TextRange.new(offset(state, r["start"]), offset(state, r["end"]))
-      type_info(state).inlay_hints(range).map do |h|
+      return [] of Nil unless @settings.bool("inlayHints.enabled")
+      kinds = IDE::InlayHintKinds.new(@settings.bool("inlayHints.locals"), @settings.bool("inlayHints.blockParams"),
+        @settings.bool("inlayHints.returnTypes"))
+      type_info(state).inlay_hints(range, kinds).map do |h|
         p = state.line_index.position(h.offset, @encoding)
         {position: {line: p.line, character: p.column}, label: h.label, kind: 1, paddingLeft: false}
       end

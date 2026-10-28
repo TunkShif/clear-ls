@@ -371,6 +371,7 @@ module ClearLS::LSP
 
     # Hook for settings that apply immediately (inlay hints, warm-up).
     private def settings_changed(changed : Array(String)) : Nil
+      refresh_views(["inlayHint"]) if changed.any?(&.starts_with?("inlayHints."))
       if changed.includes?("warmup.enabled")
         @settings.bool("warmup.enabled") ? warmup_restart : (@warmup_generation += 1)
       end

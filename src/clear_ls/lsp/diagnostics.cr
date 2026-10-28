@@ -108,8 +108,9 @@ module ClearLS::LSP
 
     # Asks the client to re-request inlay hints and semantic tokens
     # (when it advertised support); their answers depend on the index.
-    private def refresh_views : Nil
+    private def refresh_views(only : Array(String)? = nil) : Nil
       {"inlayHint" => "workspace/inlayHint/refresh", "semanticTokens" => "workspace/semanticTokens/refresh"}.each do |cap, method|
+        next if only && !only.includes?(cap)
         next unless @client_capabilities.dig?("workspace", cap, "refreshSupport").try(&.as_bool?)
         @refresh_id += 1
         @transport.write(JsonRpc.request("clear-ls-refresh-#{@refresh_id}", method))
