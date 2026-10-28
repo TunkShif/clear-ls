@@ -1,3 +1,4 @@
+require "./type_params"
 require "../hir"
 require "../semantics/def_map"
 require "./locals"
@@ -59,9 +60,20 @@ module ClearLS::IDE
         end
       end
 
+      # Type params in scope, maintained while walking down (parent
+      # lookups are O(depth) in Tree-sitter): {end, names, is_type}.
+      scopes = [] of {UInt32, Set(String), Bool}
       tree.root.walk do |node|
         if range && (node.end_byte <= range.start || node.start_byte >= range.end)
           next false
+        end
+        while (top = scopes.last?) && node.start_byte >= top[0]
+          scopes.pop
+        end
+        if node.kind.class_def? || node.kind.struct_def? || node.kind.module_def?
+          scopes << {node.end_byte, own_params(node), true}
+        elsif (node.kind.method_def? || node.kind.abstract_method_def?) && (f = node.field(Syntax::Field::Forall))
+          scopes << {node.end_byte, f.named_children.map(&.text).to_set, false}
         end
         case node.kind
         when .instance_var?
@@ -77,7 +89,11 @@ module ClearLS::IDE
             emit.call(name.range, type, mods)
           end
         when .constant?
-          constant_tokens(node, emit)
+          if param_in_scope?(node, scopes)
+            emit.call(node.range, TokenType::TypeParameter, TokenModifier::None)
+          else
+            constant_tokens(node, emit)
+          end
           next false
         when .generic_type?
           # `class Foo(T)`: T is a type parameter.
@@ -95,6 +111,33 @@ module ClearLS::IDE
 
     # Splits `Foo::Bar::Baz` into segments and classifies each resolved
     # prefix (namespace / class / struct / enum / constant).
+    # Params of a type declaration (any of its reopenings).
+    private def own_params(decl : Syntax::Node) : Set(String)
+      map = @def_map || return Set(String).new
+      map[map.namespace_at(@state.id, decl.start_byte + 1)].type_params.to_set
+    end
+
+    # A single-segment constant naming a `forall` variable of an enclosing
+    # def, or a param of the innermost enclosing type (outer types' params
+    # aren't visible: the stack stops at the first type), not the type's
+    # own name in its header. Mirrors `TypeParams.resolve`.
+    private def param_in_scope?(node : Syntax::Node, scopes : Array({UInt32, Set(String), Bool})) : Bool
+      name = node.text
+      return false if name.includes?("::")
+      scopes.reverse_each do |(_, names, is_type)|
+        return true if names.includes?(name) && !(is_type && header_name?(node))
+        return false if is_type
+      end
+      false
+    end
+
+    # `Box` in `class Box(T)` (the declared name, not a param).
+    private def header_name?(node : Syntax::Node) : Bool
+      p = node.parent || return false
+      (p.kind.generic_type? && p.field(Syntax::Field::Params).try(&.range.touches?(node.start_byte)) != true) ||
+        p.kind.class_def? || p.kind.struct_def? || p.kind.module_def?
+    end
+
     private def constant_tokens(node : Syntax::Node, emit) : Nil
       text = node.text
       start = node.start_byte

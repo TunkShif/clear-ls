@@ -1,6 +1,7 @@
 require "../workspace/index"
 require "./locals"
 require "./typing"
+require "./type_params"
 
 module ClearLS::IDE
   # A location in a file, as byte ranges. The LSP layer converts to
@@ -28,6 +29,18 @@ module ClearLS::IDE
   # Phase 1 features use only declarations: no body analysis.
   class Analysis
     def initialize(@state : FileState, @index : Workspace::Index, @def_map : Semantics::DefMap = index.def_map)
+    end
+
+    # Type parameter or `forall` variable at *offset* (TypeParams).
+    def type_param_at(offset : UInt32) : TypeParams::Hit?
+      TypeParams.at(@state, offset, def_map, ->(f : FileId) { file_text(f) })
+    end
+
+    private def file_text(file : FileId) : String?
+      path = @index.entry?(file).try(&.path) || return nil
+      File.read(path)
+    rescue File::Error
+      nil
     end
 
     private def tree : Syntax::Tree
@@ -180,6 +193,9 @@ module ClearLS::IDE
     # Type and constant targets at *offset*. Require targets are files and
     # come from `#require_definitions`.
     def definition(offset : UInt32) : Array(Location)
+      if tp = type_param_at(offset)
+        return [Location.new(tp.decl_file, tp.decl)]
+      end
       resolve_path_at(offset).flat_map { |r| r[:sites] }.map { |s| Location.new(s.file, s.item.name_range) }
     end
 
@@ -190,6 +206,10 @@ module ClearLS::IDE
         return nil if targets.empty?
         return HoverInfo.new("```\n#{targets[0]}\n```", node.range) unless glob?(path)
         return HoverInfo.new(glob_hover(targets), node.range)
+      end
+      if tp = type_param_at(offset)
+        role = tp.role.free_var? ? "free variable of `#{tp.owner}` (`forall #{tp.name}`)" : "type parameter of `#{tp.owner}`"
+        return HoverInfo.new("```crystal\n#{tp.name}\n```\n\n#{role}", tp.range)
       end
       results = resolve_path_at(offset)
       first = results.first? || return nil
@@ -233,6 +253,8 @@ module ClearLS::IDE
       node = tree.root.descendant(offset, offset, named: true) || return empty
       node = node.parent.not_nil! if !node.kind.constant? && node.parent.try(&.kind.constant?)
       return empty unless node.kind.constant?
+      # A type parameter shadows a constant of the same name: not a path.
+      return empty if !node.text.includes?("::") && type_param_at(node.start_byte)
 
       text = node.text
       rel = (offset - node.start_byte).to_i.clamp(0, text.bytesize)

@@ -223,7 +223,11 @@ module ClearLS::LSP
     # DocumentHighlightKind: 2 read, 3 write.
     private def document_highlight(params : JSON::Any)
       state = document(params)
-      locals(state).highlights(offset(state, params["position"])).map do |r|
+      off = offset(state, params["position"])
+      if tp = analysis(state).type_param_at(off)
+        return IDE::TypeParams.uses(state, tp, index.def_map_for(state.id)).map { |r| {range: range_json(state, r), kind: 2} }
+      end
+      locals(state).highlights(off).map do |r|
         {range: range_json(state, r.range), kind: r.kind.read? ? 2 : 3}
       end
     end

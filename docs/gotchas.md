@@ -144,6 +144,9 @@ changing it. Grammar quirks are in
 - **Setters are `name=` calls with no HIR argument**: the value is the
   parent assignment's (`Infer#setter_value`). Code that looks for `name=`
   by word must search `name` (`References.setter?`).
+- **`Node#parent` is O(depth)** (Tree-sitter walks down from the root).
+  Per-node ancestor walks inside a whole-file walk are quadratic; keep a
+  scope stack during the walk instead (`SemanticTokens#tokens`).
 - `VFS#id_for` costs ~9 µs (URI normalisation): cache it in loops.
 - The real compiler rejects some fixtures that the fake spec prelude
   accepts (a class named `Box` collides with stdlib `Box(T)`).

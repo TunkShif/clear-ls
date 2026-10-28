@@ -171,6 +171,8 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
 - Completion shapes (`completion.cr`): `shape_member` (setters,
   operators), `with_block` (`Typing#block_param_names`). Items omit
   optional fields rather than sending `null`.
+- `IDE::TypeParams`: type params and `forall` variables at a constant
+  (CST scoping like the compiler), checked before constant resolution.
 - `IDE::AliasDisplay`: alias spellings for hints/hover, from written
   types through flow; never part of inference.
 

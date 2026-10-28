@@ -1410,9 +1410,9 @@ tag covers every occurrence of its node in one value. Assignments and
 blocks are indexed once per body (warm hints over 4 large files 28 ms,
 23 ms with aliases off). Types diff 0 changed. 0.12.1.
 
-### Next small item: hover and definition on type parameters (planned)
+### Hover and definition on type parameters (done)
 
-Researched on 0.12.1; not implemented.
+Researched on 0.12.1, implemented in 0.12.2 (results at the end).
 
 **Today:** for `class Box(T)`, `def map(& : T -> U) : Box(U) forall U`,
 `def first_of(xs : Array(E)) : E forall E`, `struct Pair(K, *V)`, all
@@ -1482,6 +1482,23 @@ Specs: every position above for hover and definition, the shadowing
 case, nested type (no param), `forall` shadowing, reopening without
 params, splat param `*V`, and highlight. Estimated size: one resolver
 (~80 lines) plus four small call sites.
+
+*Done:* `IDE::TypeParams` (`ide/type_params.cr`): a CST walk up from
+the constant (enclosing def's `forall`, then the innermost type decl's
+header, then the type's other declarations for reopenings). Used by
+`Analysis#definition`/`#hover` (before constant resolution, so
+`class Store(Key)` no longer resolves to `class Key`: references of the
+class skip the param's uses), document highlight (uses in the file,
+read kind), and semantic tokens (uses now `typeParameter`). Hover says
+``type parameter of `Box(T)` `` or ``free variable of `map` (`forall
+U`)``. Semantic tokens keep a scope stack during their walk instead of
+asking each constant for its ancestors (Tree-sitter `parent` is
+O(depth): the first version made tokens 1.6× slower); stdlib
+`array.cr`/`hash.cr`/`enumerable.cr` 6.4/5.3/5.8 ms vs 6.7/5.5/6.3 ms
+before. Stdlib checks: `Enumerable#first : T`, `Hash#merge`'s `K`,
+`L`, `W`. Spec `features_type_params_spec.cr`. Not done: references and
+rename of a param (rename must change every reopening's header),
+bound values per call site, module params per includer. 0.12.2.
 
 ### Phase 13 — multi-root (deferred)
 
