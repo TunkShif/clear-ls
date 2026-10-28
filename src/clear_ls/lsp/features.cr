@@ -56,7 +56,7 @@ module ClearLS::LSP
         documentFormattingProvider: true,
         callHierarchyProvider:   true,
         typeHierarchyProvider:   true,
-        codeActionProvider:      {codeActionKinds: ["quickfix"]},
+        codeActionProvider:      {codeActionKinds: ["quickfix", "refactor.rewrite"]},
         signatureHelpProvider:   {triggerCharacters: ["(", ","], retriggerCharacters: [" "]},
         semanticTokensProvider:  {
           legend: {

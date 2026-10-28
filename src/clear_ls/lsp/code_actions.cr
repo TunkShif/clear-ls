@@ -1,7 +1,9 @@
 require "./features"
+require "../ide/block_form"
 
 module ClearLS::LSP
-  # `textDocument/codeAction` (quick fixes for compiler diagnostics).
+  # `textDocument/codeAction`: quick fixes for compiler diagnostics, and
+  # `refactor.rewrite` actions at the cursor (block form).
   #
   # Works from the diagnostics the client sends back (`context.diagnostics`,
   # published by `diagnostics.cr`), so every action answers an actual
@@ -17,6 +19,21 @@ module ClearLS::LSP
       state = document(params)
       diags = params.dig?("context", "diagnostics").try(&.as_a?) || [] of JSON::Any
       actions = [] of JSON::Any
+      only = params.dig?("context", "only").try(&.as_a?).try &.map(&.as_s)
+      if only.nil? || only.any? { |k| "refactor.rewrite".starts_with?(k) }
+        start = offset(state, params["range"]["start"])
+        case r = IDE::BlockForm.convert(state, start)
+        when IDE::BlockForm::Edit
+          actions << JSON.parse({
+            title: r.title,
+            kind:  "refactor.rewrite",
+            edit:  {changes: {state.uri => [{range: range_json(state, r.range), newText: r.text}]}},
+          }.to_json)
+        when String
+          actions << JSON.parse({title: "Convert block form", kind: "refactor.rewrite", disabled: {reason: r}}.to_json)
+        end
+      end
+      return actions if only && only.none? { |k| "quickfix".starts_with?(k) }
       diags.each do |d|
         next unless d["source"]?.try(&.as_s?) == "crystal"
         message = d["message"]?.try(&.as_s?) || next

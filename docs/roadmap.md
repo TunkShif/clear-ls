@@ -1326,6 +1326,21 @@ the exporter or the cache):
 7. **Block form code action (F5).** `{}` ↔ `do end` with the binding
    check; round-trip spec (convert twice = original, modulo
    whitespace) over every block of the stdlib that converts.
+   *Done:* `IDE::BlockForm` (`ide/block_form.cr`), served as a
+   `refactor.rewrite` code action (a `disabled` action with the reason
+   when refused). Binding rules checked with the compiler: braces → do
+   refused inside an unparenthesized argument list (`foo bar { }`),
+   except operator calls (`xs << ys.map do ... end` binds the same) and
+   short blocks (`x.try &.each { }`); do → braces refused when the
+   unparenthesized last argument (or a named argument's value) is a
+   call, a bare name or a constant (`record Foo {` is a `Foo{}`
+   literal). Also refused: `rescue`/`else`/`ensure` in a `do` block,
+   and `do` bodies that declare defs/types (macro bodies). Comments keep
+   the block multi-line. Proc literals (`-> do end`) convert freely.
+   Full stdlib run (`BLOCK_FILES=9999 BLOCKS_PER_FILE=9999`): 5195
+   blocks, 5109 converted and round-tripped (each result re-parses
+   without errors), 86 refused; the default spec samples 120 files.
+   0.11.5.
 8. **Verification and docs.** Neovim checks for F1–F6, README feature
    list, settings doc linked from README, status.
 

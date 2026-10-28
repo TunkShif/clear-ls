@@ -336,3 +336,24 @@ describe "alias names in hints and hover (F6)" do
     end
   end
 end
+
+describe "block form code action (F5)" do
+  it "offers the conversion, and a disabled action with the reason" do
+    c = FeatureClient.new({"src/a.cr" => "def go(xs)\n  xs.each { |x| puts x }\n  foo bar { 1 }\nend\n"})
+    begin
+      u = c.open("src/a.cr")
+      act = ->(line : Int32, ch : Int32, only : Array(String)?) do
+        ctx = only ? {diagnostics: [] of String, only: only} : {diagnostics: [] of String}
+        c.request("textDocument/codeAction", {textDocument: {uri: u}, range: {start: {line: line, character: ch}, end: {line: line, character: ch}}, context: ctx}).as_a
+      end
+      a = act.call(1, 18, nil).find(&.["kind"].==("refactor.rewrite")).not_nil!
+      a["title"].should eq "Convert to do ... end"
+      a["edit"]["changes"][u][0]["newText"].should eq "do |x|\n    puts x\n  end"
+      d = act.call(2, 12, ["refactor"]).first
+      d["disabled"]["reason"].as_s.should contain "`foo`"
+      act.call(1, 18, ["quickfix"]).should be_empty
+    ensure
+      c.cleanup
+    end
+  end
+end
