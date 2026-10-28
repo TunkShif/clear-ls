@@ -46,16 +46,16 @@ and wrong types are logged and ignored. Settings marked *restart* are read once,
 |---|---|---|---|
 | `inlayHints.enabled` | bool | `true` | All inlay hints. |
 | `inlayHints.locals` | bool | `true` | Type after a local's first assignment (`x = foo` → `x : Int32`), unless obvious from the value (a literal, `T.new`). |
-| `inlayHints.blockParams` | bool | `true` | Types of block parameters (`each { |x| }` → `x : String`). |
-| `inlayHints.aliases` | bool | `true` | Spell types written as an alias with its name (`alias Id = Int32 | String`: `x : Id`, `xs : Array(Id)`, `xs.first : Id`), in hints and hover; hover adds the expansion. A value that mixes the alias with the plain type shows the expansion. False always shows the expansion (as the compiler does). |
+| `inlayHints.blockParams` | bool | `true` | Types of block parameters (`each { \|x\| }` → `x : String`). |
+| `inlayHints.aliases` | bool | `true` | Spell types written as an alias with its name (`alias Id = Int32 \| String`: `x : Id`, `xs : Array(Id)`, `xs.first : Id`), in hints and hover; hover adds the expansion. A value that mixes the alias with the plain type shows the expansion. False always shows the expansion (as the compiler does). |
 | `inlayHints.returnTypes` | bool | `true` | Inferred return type after the parameter list of defs written without one. |
 
 ## `completion`
 
 | Key | Type | Default | |
 |---|---|---|---|
-| `completion.blockSnippets` | bool | `true` | Completing a method whose every overload takes a block inserts one (`xs.ma` → `xs.map { |x| }`, parameter names from the method's `yield` when they are plain names, else placeholders). Methods with a non-block overload (`select`, `count`) complete as names. Needs client snippet support. |
-| `completion.blockStyle` | `"braces"` \| `"do"` | `"braces"` | Form of block snippets: `{ |x| }` or `do |x| ... end` on new lines. |
+| `completion.blockSnippets` | bool | `true` | Completing a method whose every overload takes a block inserts one (`xs.ma` → `xs.map { \|x\| }`, parameter names from the method's `yield` when they are plain names, else placeholders). Methods with a non-block overload (`select`, `count`) complete as names. Needs client snippet support. |
+| `completion.blockStyle` | `"braces"` \| `"do"` | `"braces"` | Form of block snippets: `{ \|x\| }` or `do \|x\| ... end` on new lines. |
 | `completion.setterSnippets` | bool | `true` | Completing `name=` after `x.` writes `x.name = ` (the setter as it is called); binary operators write `x + `, index operators `x[]`. False keeps the method names (`x.name=`, `x.+`). |
 
 ## `warmup`

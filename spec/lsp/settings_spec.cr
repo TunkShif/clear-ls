@@ -30,6 +30,14 @@ describe Settings do
     File.read(path).should eq(Settings.markdown), "docs/settings.md is stale: run `bin/clear-ls settings-doc > docs/settings.md`"
   end
 
+  it "escapes pipes in table cells (also inside code spans)" do
+    Settings.markdown.each_line do |line|
+      next unless line.starts_with?("| `")
+      # A row of the 4-column table has exactly 5 unescaped pipes.
+      line.scan(/(?<!\\)\|/).size.should eq(5), "unescaped `|` in: #{line}"
+    end
+  end
+
   it "applies workspace/didChangeConfiguration" do
     c = FeatureClient.new({"src/a.cr" => "x = 1\n"}, references: {includePossible: false})
     begin

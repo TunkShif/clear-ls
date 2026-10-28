@@ -152,9 +152,9 @@ module ClearLS::LSP
           io << "## `" << section << "`\n\n"
           io << "| Key | Type | Default | |\n|---|---|---|---|\n"
           keys.each do |key|
-            type = key.kind.enum? ? key.choices.map { |c| "`#{c.inspect}`" }.join(" \\| ") : key.kind.to_s.underscore.gsub('_', ' ')
+            type = key.kind.enum? ? key.choices.map { |c| "`#{c.inspect}`" }.join(" | ") : key.kind.to_s.underscore.gsub('_', ' ')
             default = key.default.raw.nil? ? "—" : "`#{key.default.to_json}`"
-            io << "| `" << key.path << "` | " << type << " | " << default << " | " << key.doc
+            io << "| " << cell("`#{key.path}`") << " | " << cell(type) << " | " << cell(default) << " | " << cell(key.doc)
             io << " *restart*" if key.restart
             io << " |\n"
           end
@@ -162,6 +162,13 @@ module ClearLS::LSP
         end
         io << NEOVIM
       end
+    end
+
+    # A table cell: GFM splits rows at `|` before parsing code spans, so a
+    # `|` must be escaped even inside backticks (`{ \|x\| }` renders as
+    # `{ |x| }`).
+    private def self.cell(text : String) : String
+      text.gsub('|', "\\|")
     end
 
     NEOVIM = <<-MD
