@@ -1510,6 +1510,161 @@ bound values per call site, module params per includer. 0.12.2.
 Exit criterion: two folders open in one client, each with correct
 definitions and diagnostics.
 
+### Phase 14 — keyword snippets and require completion
+
+From usage feedback on 0.12.2: built-in snippets for common structures
+(definitions, control flow, `do ... end`) and completion inside
+`require "..."`. Phase 13 stays deferred, so this phase comes first.
+
+**Today (0.12.2):** keywords complete as bare labels (`KEYWORDS` in
+`ide/completion.cr`, sort tier `3`). The only snippets are block
+snippets after `x.` (`completion.blockSnippets`, `blockStyle`) and
+setter/index shapes, sent only with client `snippetSupport`. Inside a
+`require` string nothing is offered (trigger characters are `.`, `:`,
+`@`); require strings have hover, definition and document links only.
+
+**Checked with Crystal 1.22** (exhaustive `case ... in`):
+
+- Plain enum: `in .red?` per member is exhaustive.
+- `@[Flags]` enum: never exhaustive by members ("can't be proved to be
+  exhaustive", also with `.none?`).
+- Nilable enum `C?`: `in .red?` fails (`undefined method 'red?' for
+  Nil`); `in C::Red` ... `in nil` works.
+- Union `Int32 | String | Nil`: `in Int32` / `in String` / `in Nil`;
+  `C | String`: `in String` / `in C`.
+- `Bool`: `in true` / `in false`.
+- Abstract class: `in B` per subclass; the compiler checks against the
+  *instantiated* subtypes only (one `in B` passed when only `B` was
+  created), so listing every concrete subclass is always enough.
+- Tuple patterns (`in {Int32, true}`) are rejected for `in`.
+
+**Design decisions** (decided: snippet kinds are separately switchable;
+only `do ... end` and exhaustive case are on by default; R4 is not a
+goal):
+
+1. **Snippet settings.** One switch per kind, all needing client
+   `snippetSupport`; the bare keyword item is always offered too, so
+   turning a snippet off never loses a completion:
+   - `completion.doSnippet` (default **on**): `do ... end`.
+   - `completion.caseSnippets` (default **on**): exhaustive branches.
+   - `completion.definitionSnippets` (default off): `class`, `module`,
+     `struct`, `enum`, `def`, `macro`, `lib`, `annotation`.
+   - `completion.controlFlowSnippets` (default off): `if`, `unless`,
+     `while`, `until`, `case`, `begin`.
+   Off by default for definitions/control flow because clients that
+   already insert `end` (nvim-endwise, treesitter-endwise, editor
+   snippet packs) would get a double `end`.
+2. **Indentation.** Snippet bodies use `\t` and newlines; items send
+   `insertTextMode: adjustIndentation` (LSP 3.16) so the client applies
+   the line's indent and tab/space style. Clients without it get the
+   text as is (documented).
+3. **Context gating.** A structural snippet is offered only where it is
+   valid as a statement: at the start of a statement (only whitespace
+   before the word on its line, or after `;`), never in modifier
+   position (`x if y`, `return unless z`) nor as an argument. Definition
+   snippets by place: `def`/`macro` in a type body or at top level, not
+   inside a def; types not inside a def; `lib` at top level or in a
+   module. Detection is on text plus the parsed enclosing node (the
+   partial word may leave an ERROR node: fall back to the line text, as
+   member completion's placeholder patch does). Sort tier `3` next to
+   keywords, after locals and methods.
+4. **`do ... end`.** Offered when the word being typed is `do`/`d`
+   right after a call on the same line (`xs.each d|`, `foo arg d|`,
+   `spawn d|`). The call is resolved like member completion; when it
+   resolves and some overload takes a block, the parameters come from
+   `Typing#block_param_names` (`do |${1:x}|\n\t$0\nend`); when no
+   overload takes a block, nothing is offered; when unresolved, a plain
+   `do\n\t$0\nend`. Not after a `{` block or inside parentheses of the
+   call's own arguments.
+5. **Exhaustive case.** Offered when typing `in` or `when` at the start
+   of a branch line of a `case` with a subject. The subject's type at
+   the `case` (inference on the patched text) gives the branches, as
+   checked above: plain enum → `.member?`; enum inside a union → `E::Member`
+   paths; union members → type names (`Nil` as `nil`); `Bool` →
+   `true`/`false`; abstract or virtual class → its concrete subclasses
+   in the DefMap (types of the view). Only branches not already written
+   in this `case` are inserted, so the item also fills in the rest of a
+   partial `case`. The keyword typed is kept (`in` is compiler-checked;
+   `when` gives the same branches without the check). Each branch body
+   is a tab stop (`$1`, `$2`, ..., `$0` after the last). Not offered for
+   `@[Flags]` enums (cannot be exhaustive), unknown types, or more than
+   30 branches. Label `in … (3 missing)`, detail lists them.
+6. **Require completion (R1–R3).** Inside the string of a top-level
+   `require` (also unterminated: `require "./fo|`):
+   - R1 paths: `./`/`../` relative to the file's directory; bare paths
+     in each `CRYSTAL_PATH` entry (project `lib/`, stdlib). Files
+     without `.cr`, directories as `name/` (re-triggers), plus `dir/*`
+     and `dir/**` for directories with `.cr` files. The edit replaces
+     the segment after the last `/`.
+   - R2 names: for shards, the shortest string that reaches the file
+     (`kemal`, not `kemal/src/kemal`; `kemal/router` for
+     `lib/kemal/src/kemal/router.cr`). Every candidate is checked with
+     `RequireResolver#resolve` and kept only when it resolves to the
+     listed file, so no suggestion fails to resolve. The file itself
+     and paths already required in it sort last.
+   - R3 details: the file's top-level declarations as detail
+     (`http/client` → `HTTP::Client`) when the file is indexed; its
+     leading comment as documentation.
+   - Trigger characters gain `"` and `/`; outside a require string they
+     return an empty list immediately (no parse beyond the line).
+   Directory listings are cached per directory for the request burst
+   (invalidated by the file watcher / next didChangeWatchedFiles).
+
+**Not goals:** auto-adding `require` when completing a constant from
+an unrequired file (R4): requires are global to a program, so
+"missing" depends on the view; reopened types have no single owner;
+unrequired stdlib files are not indexed. The existing quick fix for
+`undefined constant` stays the only require insertion. Generic static
+snippets (`puts`, `p!`, `pp`, `spawn`) belong to the client's snippet
+engine.
+
+Steps (one commit each; pause at the end of each):
+
+1. **Settings and snippet plumbing.** The four keys in
+   `LSP::Settings` (regenerate `docs/settings.md`), `CompletionOptions`
+   fields, `insertTextMode` on snippet items (only when the client
+   lists `adjustIndentation` in `insertTextModeSupport`), and the
+   statement-start / modifier-position detector with specs (start of
+   line, after `;`, after `x if`, inside call args, inside a def vs a
+   class body, partial input with ERROR nodes).
+2. **`do ... end`.** Decision 4. Specs: block method with named
+   `yield` args, block method with placeholders, non-block method (no
+   item), unresolved call (plain form), `foo arg d|`, after `{` (no
+   item), setting off.
+3. **Exhaustive case.** Decision 5, each subject kind from the checks
+   above, partial `case` (missing branches only), `when` vs `in`,
+   Flags enum and unknown type (no item). A spec compiles each
+   generated `case ... in` with the compiler (fixtures for enum,
+   nilable enum, union, Bool, abstract class) and expects no
+   exhaustiveness error.
+4. **Definition and control-flow snippets.** Decision 3 forms
+   (`class ${1:Name}\n\t$0\nend`, `def ${1:name}\n\t$0\nend`,
+   `if ${1:cond}\n\t$0\nend`, `begin\n\t$1\nrescue ${2:ex}\n\t$0\nend`,
+   ...), off by default; gating specs (no `if` snippet in modifier
+   position, no `class` inside a def).
+5. **Require paths (R1, R2).** Context detection (including
+   unterminated strings), listing, shard name inversion with the
+   resolver round trip, trigger characters. Specs over a fixture with
+   `lib/` shards (single-file shard, nested `src/<name>/`), stdlib
+   names (`http`, `http/`, `json`), relative paths, globs, and a round
+   trip over every stdlib file: each suggested string resolves to its
+   file.
+6. **Require details (R3).** Top-level declarations and leading doc;
+   skip files outside the index (no detail rather than a parse per
+   item).
+7. **Verification and docs.** Neovim `editing` check: accept
+   `xs.each do` (block params selected), an exhaustive `in` on an enum
+   and a union, `require "./` → a file, `require "js` → `json`; with
+   endwise-style auto `end` documented. README features, settings doc,
+   status, architecture (Editing UX).
+
+Exit criteria: with default settings only `do ... end` and case
+snippets appear; every generated `case ... in` compiles without an
+exhaustiveness error on the fixtures; no structural snippet in
+modifier position; every require suggestion resolves to the file it
+names (stdlib round trip); completion outside require strings is
+unchanged (existing specs, Neovim check).
+
 ## Testing approach
 
 - Snapshot tests for representations (`dump-cst`, later items and HIR).

@@ -23,9 +23,11 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 13 — multi-root
-  ([roadmap.md](roadmap.md#phase-13--multi-root-deferred)), deferred
-  until asked for; otherwise usage feedback.
+- **Next:** Phase 14 — keyword snippets and require completion
+  ([roadmap.md](roadmap.md#phase-14--keyword-snippets-and-require-completion)).
+  Phase 13 — multi-root
+  ([roadmap.md](roadmap.md#phase-13--multi-root-deferred)) stays
+  deferred until asked for.
 - **In progress:** nothing.
 
 ## Resume
