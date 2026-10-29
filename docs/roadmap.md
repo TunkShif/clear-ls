@@ -1644,6 +1644,23 @@ Steps (one commit each; pause at the end of each):
    statement-start / modifier-position detector with specs (start of
    line, after `;`, after `x if`, inside call args, inside a def vs a
    class body, partial input with ERROR nodes).
+   *Done:* settings `completion.{doSnippet, caseSnippets,
+   definitionSnippets, controlFlowSnippets}` (defaults on, on, off,
+   off), `CompletionOptions` fields, `CompletionItem#adjust_indent` →
+   `insertTextMode: 2` only when the client lists it.
+   `IDE::StatementSite.at` (`ide/statement_site.cr`): the word replaced
+   by a placeholder must parse as a direct child of a statement list,
+   with only a comment after it on the line. Scopes: top level, type
+   body, enum body, def (def/macro/fun, also blocks inside a def), and
+   dynamic (`if`/`while`/`case`/blocks outside a def, where the
+   compiler refuses `def` and types: "can't declare def dynamically";
+   `begin` is transparent). Found on the way: any parse error *before*
+   the word makes the scope unknown (nil): recovery reparents what
+   follows (a word in a `lib` body lands at the top level, an
+   unterminated `class A` is one ERROR), so structural snippets need a
+   parse without earlier errors; an identifier in an enum body is its
+   own one-child ERROR and is accepted. Macro bodies are raw text: no
+   site.
 2. **`do ... end`.** Decision 4. Specs: block method with named
    `yield` args, block method with placeholders, non-block method (no
    item), unresolved call (plain form), `foo arg d|`, after `{` (no

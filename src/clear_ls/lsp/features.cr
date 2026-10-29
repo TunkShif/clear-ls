@@ -364,7 +364,10 @@ module ClearLS::LSP
       state = document(params)
       off = offset(state, params["position"])
       opts = IDE::CompletionOptions.new(snippets: snippet_support?, setter_snippets: @settings.bool("completion.setterSnippets"),
-        block_snippets: @settings.bool("completion.blockSnippets"), block_style: @settings.string?("completion.blockStyle") || "braces")
+        block_snippets: @settings.bool("completion.blockSnippets"), block_style: @settings.string?("completion.blockStyle") || "braces",
+        do_snippet: @settings.bool("completion.doSnippet"), case_snippets: @settings.bool("completion.caseSnippets"),
+        definition_snippets: @settings.bool("completion.definitionSnippets"),
+        control_flow_snippets: @settings.bool("completion.controlFlowSnippets"))
       items = IDE::Completion.new(state, index, typing(state), opts).complete(off)
       {
         isIncomplete: items.size >= IDE::Completion::MAX_ITEMS,
@@ -386,7 +389,15 @@ module ClearLS::LSP
         h["insertText"] = JSON::Any.new(t)
       end
       h["insertTextFormat"] = JSON::Any.new(2_i64) if i.snippet
+      h["insertTextMode"] = JSON::Any.new(2_i64) if i.adjust_indent && adjust_indentation_support?
       JSON::Any.new(h)
+    end
+
+    # `insertTextMode: adjustIndentation` (2) is the LSP default for
+    # clients that don't list modes; send it only to those that list it.
+    private def adjust_indentation_support? : Bool
+      modes = @client_capabilities.dig?("textDocument", "completion", "completionItem", "insertTextModeSupport", "valueSet").try(&.as_a?)
+      !!modes.try(&.any? { |m| m.as_i64? == 2 })
     end
 
     private def snippet_support? : Bool

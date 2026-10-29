@@ -25,6 +25,14 @@ describe Settings do
     s.strings?("compiler.entries").should be_nil
   end
 
+  it "enables only the do and case snippets by default" do
+    s = Settings.new
+    s.bool("completion.doSnippet").should be_true
+    s.bool("completion.caseSnippets").should be_true
+    s.bool("completion.definitionSnippets").should be_false
+    s.bool("completion.controlFlowSnippets").should be_false
+  end
+
   it "keeps docs/settings.md current" do
     path = File.expand_path("../../docs/settings.md", __DIR__)
     File.read(path).should eq(Settings.markdown), "docs/settings.md is stale: run `bin/clear-ls settings-doc > docs/settings.md`"

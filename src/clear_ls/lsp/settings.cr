@@ -52,6 +52,10 @@ module ClearLS::LSP
       k("completion.blockSnippets", Bool, true, "Completing a method whose every overload takes a block inserts one (`xs.ma` → `xs.map { |x| }`, parameter names from the method's `yield` when they are plain names, else placeholders). Methods with a non-block overload (`select`, `count`) complete as names. Needs client snippet support."),
       k("completion.blockStyle", Enum, "braces", "Form of block snippets: `{ |x| }` or `do |x| ... end` on new lines.", ["braces", "do"]),
       k("completion.setterSnippets", Bool, true, "Completing `name=` after `x.` writes `x.name = ` (the setter as it is called); binary operators write `x + `, index operators `x[]`. False keeps the method names (`x.name=`, `x.+`)."),
+      k("completion.doSnippet", Bool, true, "Typing `do` after a call that takes a block offers `do |x| ... end` (parameter names as for block snippets; a plain `do ... end` when the call is unknown). Needs client snippet support."),
+      k("completion.caseSnippets", Bool, true, "Typing `in` or `when` in a `case` whose subject type is known offers every missing branch (enum members, union members, `true`/`false`, concrete subclasses). Not for `@[Flags]` enums. Needs client snippet support."),
+      k("completion.definitionSnippets", Bool, false, "`class`, `module`, `struct`, `enum`, `def`, `macro`, `lib`, `annotation` complete to a skeleton with `end`, where that definition is allowed. Off by default: editors that insert `end` themselves (endwise plugins) would add a second one."),
+      k("completion.controlFlowSnippets", Bool, false, "`if`, `unless`, `while`, `until`, `case`, `begin` complete to a skeleton with `end` at the start of a statement (never as a suffix: `x if y`). Off by default, as definition snippets."),
       k("warmup.enabled", Bool, true, "Infer workspace bodies in the background while idle, so the first references search is fast."),
     ]
 

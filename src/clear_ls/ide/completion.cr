@@ -2,6 +2,7 @@ require "./typing"
 require "./analysis"
 require "./signature_help"
 require "./references"
+require "./statement_site"
 
 module ClearLS::IDE
   enum CompletionKind
@@ -38,12 +39,17 @@ module ClearLS::IDE
     edit_range : TextRange? = nil,
     filter_text : String? = nil,
     # *insert_text* is an LSP snippet (`$1`, `$0`).
-    snippet : Bool = false
+    snippet : Bool = false,
+    # Multi-line *insert_text* written with `\t` and newlines: the client
+    # re-indents it to the line (`insertTextMode: adjustIndentation`).
+    adjust_indent : Bool = false
 
   # What the client can take (`textDocument.completion.completionItem`)
   # and the settings that shape items.
   record CompletionOptions, snippets : Bool = false, setter_snippets : Bool = true,
-    block_snippets : Bool = true, block_style : String = "braces"
+    block_snippets : Bool = true, block_style : String = "braces",
+    do_snippet : Bool = true, case_snippets : Bool = true,
+    definition_snippets : Bool = false, control_flow_snippets : Bool = false
 
   # Completion at a cursor.
   #
