@@ -1665,6 +1665,18 @@ Steps (one commit each; pause at the end of each):
    `yield` args, block method with placeholders, non-block method (no
    item), unresolved call (plain form), `foo arg d|`, after `{` (no
    item), setting off.
+   *Done:* `Completion#do_snippet`: for the word `d`/`do` after
+   something on the same line (rest of the line blank), the word is
+   replaced by `do\nend` in a copy and the parser decides which call
+   takes the block (`each_pair plain(1) do` → `each_pair`); a call that
+   already has a block (`{ }`) gets none. Parameters from the resolved
+   defs (candidates, else the name's family) via
+   `Typing#block_param_names(site, implicit: true)`: a def without a
+   block parameter whose body yields also counts (the compiler adds the
+   block). Unknown call or a macro: plain `do\n\t$0\nend`; every def
+   without a block: nothing. A `Snippet` item next to the keyword, sort
+   `00do`, `insertTextMode: 2` when the client lists it. Specs
+   `features_phase13_spec.cr`.
 3. **Exhaustive case.** Decision 5, each subject kind from the checks
    above, partial `case` (missing branches only), `when` vs `in`,
    Flags enum and unknown type (no item). A spec compiles each

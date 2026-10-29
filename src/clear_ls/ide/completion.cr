@@ -424,7 +424,70 @@ module ClearLS::IDE
       KEYWORDS.each do |kw|
         items << CompletionItem.new(kw, CompletionKind::Keyword, sort_text: "3#{kw}") if kw.starts_with?(prefix) && seen.add?(kw)
       end
+      do_snippet(text, start, offset, prefix).try { |i| items.unshift(i) }
       items.first(MAX_ITEMS)
+    end
+
+    # -- `xs.each do|` ----------------------------------------------------------------
+
+    # `do |${1:x}|\n\t$0\nend` for the word `d`/`do` after a call on the
+    # same line that takes a block. The block parameters come from the
+    # called def (as block snippets); a call that resolves to defs none of
+    # which takes a block gets nothing, an unknown call a plain
+    # `do ... end`. The word is replaced by `do\nend` in a copy, so the
+    # parser attaches the block to the call it would bind to (`foo bar do`
+    # binds to `foo`).
+    private def do_snippet(text : String, start : UInt32, offset : UInt32, prefix : String) : CompletionItem?
+      return nil unless @options.snippets && @options.do_snippet
+      return nil if prefix.empty? || !"do".starts_with?(prefix)
+      return nil unless StatementSite.rest_blank?(text, offset)
+      # Something before the word on its line, separated by a space.
+      return nil unless start > 0 && text.byte_at(start - 1).chr.in?(' ', '\t')
+      line_start = start
+      while line_start > 0 && text.byte_at(line_start - 1) != '\n'.ord
+        line_start -= 1
+      end
+      return nil if text.byte_slice(line_start, start - line_start).strip.empty?
+      patched = Syntax::TextEdit.new(TextRange.new(start, offset), "do\nend").apply(text)
+      tree = Syntax::Parser.new.parse(patched)
+      state = FileState.new(@state.id, @state.uri, @state.revision ^ 0x2000_0000_0000_0000_u64, @state.version, tree)
+      block = tree.root.descendant(start, start + 2)
+      while (b = block) && !(b.kind.block? && b.start_byte == start)
+        block = b.parent
+      end
+      call_node = block.try(&.parent)
+      Syntax.keep_alive(tree)
+      return nil unless call_node && (call_node.kind.call? || call_node.kind.implicit_object_call?)
+      return nil unless call_node.field(Syntax::Field::Block).try(&.start_byte) == start
+      names = do_block_params(state, call_node)
+      return nil if names.nil?
+      fallback = %w(x y z w)
+      params = names.map_with_index { |n, k| "${#{k + 1}:#{n || fallback[k]? || "x#{k}"}}" }
+      bar = params.empty? ? "" : " |#{params.join(", ")}|"
+      CompletionItem.new("do", CompletionKind::Snippet, detail: "do#{bar.gsub(/\$\{\d+:([^}]*)\}/, "\\1")} ... end",
+        sort_text: "00do", insert_text: "do#{bar}\n\t$0\nend", edit_range: TextRange.new(start, offset),
+        filter_text: "do", snippet: true, adjust_indent: true)
+    end
+
+    # Block parameter names for the call's resolved defs: those of the
+    # first def that takes a block (`[] of String?` when it takes one of
+    # unknown arity); `[]` (plain `do`) when the call is unknown; nil when
+    # every resolved def has no block.
+    private def do_block_params(state : FileState, call_node : Syntax::Node) : Array(String?)?
+      bodies = Bodies.new(state)
+      _, inf = @typing.infer_at(state, bodies, call_node.start_byte, cache: false) || return [] of String?
+      body = bodies.at(call_node.start_byte) || return [] of String?
+      call = body.exprs.find { |e| e.kind.call? && e.range == call_node.range } || return [] of String?
+      res = inf.resolutions[call.id]? || inf.resolve_call(call)
+      sites = res.candidates.empty? ? res.family.map(&.site) : res.matches.map(&.site)
+      return [] of String? if sites.empty?
+      # Macros may take `&block`: not knowable from the signature alone.
+      return [] of String? if sites.any?(&.item.kind.macro?)
+      sites.each do |s|
+        names = @typing.block_param_names(s, implicit: true)
+        return names if names
+      end
+      nil
     end
 
     # `name:` for parameters of the enclosing call's viable overloads that

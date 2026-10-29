@@ -202,15 +202,21 @@ module ClearLS::IDE
     # from its first `yield`; names from `yield` arguments that are plain
     # identifiers (`yield elem, i`), else nil (the snippet uses a
     # placeholder). Nil when the def has no block or the arity is unknown.
-    def block_param_names(site : Semantics::Site) : Array(String?)?
+    #
+    # *implicit*: also for a def without a block parameter whose body
+    # yields (`def each; yield 1; end`: the compiler adds the block).
+    def block_param_names(site : Semantics::Site, implicit = false) : Array(String?)?
       sig = site.item.signature || return nil
-      blk = sig.params.find(&.kind.block?) || return nil
-      arity = blk.restriction.try { |r| restriction_arity(r) }
+      blk = sig.params.find(&.kind.block?)
+      return nil unless blk || implicit
+      arity = blk.try(&.restriction).try { |r| restriction_arity(r) }
       names = [] of String?
+      yielded = false
       if node = def_node(site)
         node.walk do |n|
           next false if n.kind.method_def? && n != node
           if n.kind.yield? && names.empty?
+            yielded = true
             args = n.named_children.find(&.kind.argument_list?).try(&.named_children) || [] of Syntax::Node
             names = args.map { |a| a.kind.identifier? && a.text.matches?(/\A[a-z_][a-z0-9_]*\z/) ? a.text.as(String?) : nil }
             # `yield({k, v})`: one tuple argument.
@@ -220,6 +226,7 @@ module ClearLS::IDE
           end
         end
       end
+      return nil unless blk || yielded
       arity ||= names.size if node
       return nil unless arity
       (0...arity).map { |i| names[i]? }
