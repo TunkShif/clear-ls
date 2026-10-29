@@ -1580,25 +1580,52 @@ goal):
    `@[Flags]` enums (cannot be exhaustive), unknown types, or more than
    30 branches. Label `in … (3 missing)`, detail lists them.
 6. **Require completion (R1–R3).** Inside the string of a top-level
-   `require` (also unterminated: `require "./fo|`):
-   - R1 paths: `./`/`../` relative to the file's directory; bare paths
-     in each `CRYSTAL_PATH` entry (project `lib/`, stdlib). Files
-     without `.cr`, directories as `name/` (re-triggers), plus `dir/*`
-     and `dir/**` for directories with `.cr` files. The edit replaces
-     the segment after the last `/`.
-   - R2 names: for shards, the shortest string that reaches the file
-     (`kemal`, not `kemal/src/kemal`; `kemal/router` for
-     `lib/kemal/src/kemal/router.cr`). Every candidate is checked with
-     `RequireResolver#resolve` and kept only when it resolves to the
-     listed file, so no suggestion fails to resolve. The file itself
-     and paths already required in it sort last.
+   `require` (also unterminated: `require "./fo|`). Rules from
+   resolving each form with Crystal 1.22 in a Marten project
+   (`/tmp/dorp`) and from `CrystalPath#each_file_expansion` (decided:
+   shards by name only, stdlib internals hidden, no globs):
+   - **Local** (`./`, `../`): `.cr` files of the directory without the
+     extension, subdirectories as `dir/` (completion continues inside).
+     A bare directory is never offered (`./src/migrations` fails to
+     resolve) unless it holds `dir/dir.cr`. The file itself and paths
+     already required in it are left out.
+   - **Stdlib**: names under the stdlib `CRYSTAL_PATH` entry, one
+     directory level per request (`http` → `http/` → `http/client`).
+     A name that is both a file and a directory (`http.cr` + `http/`)
+     is one item `http`; typing `/` continues into the directory.
+     Hidden (internals): the prelude's own requires (`array`, `string`,
+     ...: always loaded), `prelude`, `empty`, `docs_*`, `compiler`,
+     `crystal`, `llvm`, and every `lib_*` segment at any depth
+     (`lib_c`, `openssl/lib_ssl`). They still resolve when written.
+   - **Shards**: only the names of direct dependencies in `shard.yml`
+     (`dependencies` and `development_dependencies`) that are installed
+     in `lib/` (`marten`, `sqlite3`), each checked to resolve. No
+     subpaths (`marten/cli` is left to the shard's documentation), no
+     transitive shards (`db`, `msgpack`). A shard name shadows a stdlib
+     name (`lib` comes first in `CRYSTAL_PATH`): one item, the shard.
+   - **No globs** (`dir/*`, `dir/**`) as items anywhere.
+   - Every item is checked with `RequireResolver#resolve` and kept only
+     when it resolves to the file it names, so no suggestion fails.
+   - **Unchanged for written requires:** hover, definition and
+     document links keep resolving everything the compiler accepts
+     (`marten/cli`, `marten/marten/cli`, `msgpack/message_pack/any`,
+     globs, transitive shards); completion just doesn't list them.
    - R3 details: the file's top-level declarations as detail
      (`http/client` → `HTTP::Client`) when the file is indexed; its
-     leading comment as documentation.
+     leading comment as documentation; shards show their `shard.yml`
+     version and description.
    - Trigger characters gain `"` and `/`; outside a require string they
      return an empty list immediately (no parse beyond the line).
-   Directory listings are cached per directory for the request burst
-   (invalidated by the file watcher / next didChangeWatchedFiles).
+   Directory listings are cached per directory until the file watcher
+   reports a change; listing never follows symlinks
+   (`lib/marten/lib` → `..`).
+
+   Checked forms (Crystal 1.22): `marten`, `marten/cli`,
+   `marten/marten_cli`, `db/spec`, `http`, `http/client`, `http/*`,
+   `./src/project`, `./src/project.cr`, `./config/settings/*` resolve;
+   `marten_cli`, `message_pack/any`, `marten/db/*`, `http/`,
+   `./src/migrations` don't; `marten/*` resolves to no files (globs
+   ignore the shard layout).
 
 **Not goals:** auto-adding `require` when completing a constant from
 an unrequired file (R4): requires are global to a program, so
@@ -1633,14 +1660,17 @@ Steps (one commit each; pause at the end of each):
    ...), off by default; gating specs (no `if` snippet in modifier
    position, no `class` inside a def).
 5. **Require paths (R1, R2).** Context detection (including
-   unterminated strings), listing, shard name inversion with the
-   resolver round trip, trigger characters. Specs over a fixture with
-   `lib/` shards (single-file shard, nested `src/<name>/`), stdlib
-   names (`http`, `http/`, `json`), relative paths, globs, and a round
-   trip over every stdlib file: each suggested string resolves to its
-   file.
+   unterminated strings), local/stdlib/shard listing per the rules
+   above, trigger characters. Specs over a fixture with `lib/` shards
+   (direct and transitive, a `lib/x/lib` symlink loop, a shard named
+   like a stdlib file): only direct names offered, no subpaths, no
+   globs, internals hidden, bare directories not offered. A round trip
+   over every stdlib directory: each offered string resolves to its
+   file. A regression spec that hover/definition still resolve
+   `marten/cli`-style subpaths, transitive shards and globs.
 6. **Require details (R3).** Top-level declarations and leading doc;
-   skip files outside the index (no detail rather than a parse per
+   shard version/description from its `shard.yml`; skip files outside
+   the index (no detail rather than a parse per
    item).
 7. **Verification and docs.** Neovim `editing` check: accept
    `xs.each do` (block params selected), an exhaustive `in` on an enum
@@ -1652,7 +1682,8 @@ Exit criteria: with default settings only `do ... end` and case
 snippets appear; every generated `case ... in` compiles without an
 exhaustiveness error on the fixtures; no structural snippet in
 modifier position; every require suggestion resolves to the file it
-names (stdlib round trip); completion outside require strings is
+names (stdlib round trip), shards appear by direct name only and no
+glob is offered; completion outside require strings is
 unchanged (existing specs, Neovim check).
 
 ### Phase 13 — multi-root (deferred, last)
