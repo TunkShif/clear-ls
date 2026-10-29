@@ -743,7 +743,7 @@ diff vs Phase 8: repo 0 regressed / 22 improved, stdlib 0 / 16 (the
 `def f(@x)` ivar items); book diff 527 + 25 accepted, 0 mismatches.
 `make spec`: 231 examples.
 
-Not yet: references search one root (Phase 13 multi-root); reference
+Not yet: references search one root (Phase 14 multi-root); reference
 search is on demand (no persistent index; first search over a large
 program infers its candidate bodies); method references inside macro
 bodies and `{{...}}` are not found; rename of a method reached through a
@@ -752,7 +752,7 @@ bodies and `{{...}}` are not found; rename of a method reached through a
 ### Phase 10 — responsiveness
 
 The original "hardening" phase is split into three: responsiveness
-(here), startup and warm caches (Phase 11), multi-root (Phase 13).
+(here), startup and warm caches (Phase 11), multi-root (Phase 14).
 
 Measured before planning (release build; this repo and Marten, a large
 web framework: 1366 own files, 1955 indexed with shards and stdlib):
@@ -1500,11 +1500,11 @@ before. Stdlib checks: `Enumerable#first : T`, `Hash#merge`'s `K`,
 rename of a param (rename must change every reopening's header),
 bound values per call site, module params per includer. 0.12.2.
 
-### Phase 14 — keyword snippets and require completion
+### Phase 13 — keyword snippets and require completion
 
 From usage feedback on 0.12.2: built-in snippets for common structures
 (definitions, control flow, `do ... end`) and completion inside
-`require "..."`. Runs before Phase 13 (multi-root), which moves to last.
+`require "..."`. Runs before Phase 14 (multi-root), the last phase.
 
 **Today (0.12.2):** keywords complete as bare labels (`KEYWORDS` in
 `ide/completion.cr`, sort tier `3`). The only snippets are block
@@ -1686,10 +1686,9 @@ names (stdlib round trip), shards appear by direct name only and no
 glob is offered; completion outside require strings is
 unchanged (existing specs, Neovim check).
 
-### Phase 13 — multi-root (deferred, last)
+### Phase 14 — multi-root (deferred)
 
-Moved after Phase 14: the last planned phase, still deferred until asked
-for.
+The last planned phase (renumbered from 13), deferred until asked for.
 
 - One index per workspace folder sharing stdlib/shard entries (cheap
   with the Phase 11 cache); `workspace/didChangeWorkspaceFolders`.

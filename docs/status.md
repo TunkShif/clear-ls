@@ -23,11 +23,11 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 14 — keyword snippets and require completion
-  ([roadmap.md](roadmap.md#phase-14--keyword-snippets-and-require-completion)).
-  Then Phase 13 — multi-root
-  ([roadmap.md](roadmap.md#phase-13--multi-root-deferred-last)), moved
-  to last and deferred until asked for.
+- **Next:** Phase 13 — keyword snippets and require completion
+  ([roadmap.md](roadmap.md#phase-13--keyword-snippets-and-require-completion)).
+  Then Phase 14 — multi-root
+  ([roadmap.md](roadmap.md#phase-14--multi-root-deferred)), the last
+  phase, deferred until asked for.
 - **In progress:** nothing.
 
 ## Resume
@@ -54,6 +54,6 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
 - Language parity: `tools/book_diff.py` must stay free of mismatches;
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - Diagnostics describe saved files only (compiler limitation).
-- Single root (Phase 13). Requires are resolved on every start; cached
+- Single root (Phase 14). Requires are resolved on every start; cached
   compiler facts may be stale until the first check (see
   [architecture.md](architecture.md#known-limitations)).
