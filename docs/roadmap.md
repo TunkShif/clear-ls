@@ -1721,6 +1721,27 @@ Steps (one commit each; pause at the end of each):
    over every stdlib directory: each offered string resolves to its
    file. A regression spec that hover/definition still resolve
    `marten/cli`-style subpaths, transitive shards and globs.
+   *Done:* `IDE::RequireCompletion` (`ide/require_completion.cr`):
+   context from the line text (`\A\s*require\s+"...` up to the
+   cursor, so unterminated strings work); items replace the last path
+   segment (`textEdit` up to the next `/`, `"` or end of line), kind
+   `File` (17), directories `Module` with label `dir/`. Local: `.cr`
+   files, directories holding sources, `dir` for `dir/dir.cr`; the file
+   itself and already written requires skipped. Stdlib: one level,
+   hidden top-level names (the prelude's own requires, `prelude`,
+   `empty`, `docs_*`, `compiler`, `crystal`, `llvm`, `intrinsics`,
+   `primitives`) and `lib_*` at any depth; a file and directory of the
+   same name are one item (`http`, detail "stdlib (also http/)").
+   Shards: `dependencies` + `development_dependencies` names resolving
+   into `lib/`, detail `shard <version>` from the installed
+   `shard.yml`; a shard named like a stdlib file appears once. Listings
+   skip symlinked directories. Trigger characters `"` and `/` added; a
+   `"`/`/` outside a require string returns no items. Round trip: every
+   one of 386 offered stdlib strings resolves to its file (the rest are
+   prelude-loaded or internal). On `/tmp/dorp` (Marten): warm request
+   2–3 ms; `require "mar` → `marten` (shard 0.7.1), `marten/` → nothing.
+   No per-directory cache: a listing is one `readdir` (0.8–2.3 ms in
+   release).
 6. **Require details (R3).** Top-level declarations and leading doc;
    shard version/description from its `shard.yml`; skip files outside
    the index (no detail rather than a parse per

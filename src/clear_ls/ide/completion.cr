@@ -3,6 +3,7 @@ require "./analysis"
 require "./signature_help"
 require "./references"
 require "./statement_site"
+require "./require_completion"
 
 module ClearLS::IDE
   enum CompletionKind
@@ -19,6 +20,7 @@ module ClearLS::IDE
     Keyword
     Snippet
     Macro
+    File
   end
 
   record CompletionItem,
@@ -68,6 +70,14 @@ module ClearLS::IDE
 
     def complete(offset : UInt32) : Array(CompletionItem)
       text = @state.text
+      if ctx = RequireCompletion.context(text, offset)
+        return require_items(ctx)
+      end
+      # Inside any other string or a comment nothing is offered for `"`
+      # and `/` (trigger characters of require completion).
+      if offset > 0 && text.byte_at(offset - 1).chr.in?('"', '/')
+        return [] of CompletionItem
+      end
       prefix_start = word_start(text, offset)
       prefix = text.byte_slice(prefix_start, offset - prefix_start)
       before = prefix_start > 0 ? text.byte_slice(0, prefix_start) : ""
@@ -83,6 +93,23 @@ module ClearLS::IDE
       else
         identifiers(text, prefix_start, offset, prefix)
       end
+    end
+
+    # -- `require "|"` ----------------------------------------------------------------
+
+    private def require_items(ctx : RequireCompletion::Context) : Array(CompletionItem)
+      from = VFS.path_for(@state.uri)
+      rc = RequireCompletion.new(@index.project, from)
+      already = @state.text.scan(/^\s*require\s+"([^"]+)"/m).map(&.[1]).to_set
+      cut = ctx.typed.rindex('/')
+      dir_part = cut ? ctx.typed[0..cut] : ""
+      range = TextRange.new(ctx.segment_start, ctx.segment_end)
+      rc.items(ctx).compact_map do |i|
+        next if !i.directory && already.includes?("#{dir_part}#{i.label}")
+        kind = i.directory ? CompletionKind::Module : CompletionKind::File
+        CompletionItem.new(i.label, kind, detail: i.detail, sort_text: "#{i.directory ? 1 : 0}#{i.label}",
+          insert_text: i.insert, edit_range: range, filter_text: i.label.rchop('/'))
+      end.first(MAX_ITEMS)
     end
 
     # -- receiver members (`x.|`) ---------------------------------------------------

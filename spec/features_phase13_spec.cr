@@ -202,3 +202,132 @@ describe "definition and control-flow snippets (Phase 13)" do
     snippets.call("enum E\n  A\n  i‸\nend\n", on).should be_empty
   end
 end
+
+describe "require completion (Phase 13)" do
+  shard_yml = "name: app\nversion: 0.1.0\ndependencies:\n  web:\n    github: x/web\n  json:\n    github: x/json\ndevelopment_dependencies:\n  timecop:\n    github: x/timecop\n  missing:\n    github: x/missing\n"
+  files = {
+    "shard.yml"                   => shard_yml,
+    "lib/web/shard.yml"           => "name: web\nversion: 1.2.3\n",
+    "lib/web/src/web.cr"          => "module Web; end\n",
+    "lib/web/src/web/cli.cr"      => "module Web::CLI; end\n",
+    "lib/web/src/web_cli.cr"      => "",
+    "lib/json/src/json.cr"        => "module MyJSON; end\n", # shadows the stdlib's json
+    "lib/timecop/src/timecop.cr"  => "",
+    "lib/dbx/src/dbx.cr"          => "", # transitive
+    "src/app.cr"                  => "",
+    "src/models/user.cr"          => "",
+    "src/models/post.cr"          => "",
+    "src/empty_dir/.keep"         => "",
+    "src/nested/nested.cr"        => "",
+    "src/nested/part.cr"          => "",
+  }
+
+  labels = ->(line : String, extra : Hash(String, String)) do
+    fs = files.merge(extra).merge({"src/main.cr" => line})
+    items_at(fs, "src/main.cr", real_stdlib: true).map(&.["label"].as_s)
+  end
+  item = ->(line : String, label : String) do
+    fs = files.merge({"src/main.cr" => line})
+    items_at(fs, "src/main.cr", real_stdlib: true).find(&.["label"].==(label))
+  end
+
+  it "lists local files, directories and dir/dir.cr" do
+    l = labels.call("require \"./‸\n", {} of String => String)
+    l.should contain "app"
+    l.should contain "models/"
+    l.should contain "nested/"
+    l.should contain "nested" # nested/nested.cr
+    l.should_not contain "main" # the file itself
+    l.should_not contain "empty_dir/"
+    l.should_not contain "models" # a bare directory doesn't resolve
+    labels.call("require \"./models/‸\n", {} of String => String).sort.should eq ["post", "user"]
+    labels.call("require \"../src/models/u‸\n", {} of String => String).should eq ["user"]
+  end
+
+  it "replaces only the last segment" do
+    i = item.call("require \"./models/us‸\"\n", "user").not_nil!
+    i["textEdit"]["newText"].should eq "user"
+    i["textEdit"]["range"]["start"]["character"].should eq 18
+    i["textEdit"]["range"]["end"]["character"].should eq 20
+    i["kind"].should eq 17
+  end
+
+  it "offers direct shards by name only" do
+    l = labels.call("require \"‸\n", {} of String => String)
+    l.should contain "web"
+    l.should contain "timecop" # development dependency
+    l.should_not contain "dbx" # transitive
+    l.should_not contain "missing" # not installed
+    l.should_not contain "web_cli"
+    l.count("json").should eq 1 # the shard shadows the stdlib name
+    item.call("require \"we‸\n", "web").not_nil!["detail"].should eq "shard 1.2.3"
+    # No subpaths for shards.
+    labels.call("require \"web/‸\n", {} of String => String).should be_empty
+  end
+
+  it "lists the stdlib one level at a time, internals hidden, no globs" do
+    l = labels.call("require \"‸\n", {} of String => String)
+    %w(http yaml uri option_parser spec).each { |n| l.should contain n }
+    %w(array string prelude crystal compiler llvm lib_c lib_z docs_main).each { |n| l.should_not contain n }
+    l.any?(&.includes?('*')).should be_false
+    l.should_not contain "http/" # `http.cr` and `http/`: one item
+    h = labels.call("require \"http/‸\n", {} of String => String)
+    h.should contain "client"
+    h.should contain "server"
+    h.any?(&.includes?('*')).should be_false
+    labels.call("require \"openssl/‸\n", {} of String => String).any?(&.starts_with?("lib_")).should be_false
+  end
+
+  it "skips requires already written and answers nothing outside require strings" do
+    labels.call("require \"./app\"\nrequire \"./‸\n", {} of String => String).should_not contain "app"
+    labels.call("x = \"./‸\n", {} of String => String).should be_empty
+    labels.call("# see a/‸\n", {} of String => String).should be_empty
+  end
+
+  it "only suggests strings that resolve to the file they name (stdlib round trip)" do
+    c = FeatureClient.new({"src/main.cr" => ""}, real_stdlib: true)
+    begin
+      project = c.server.index.project
+      std = project.stdlib_dir.not_nil!
+      checked = 0
+      dirs = [""] + Dir.glob(File.join(std, "**/")).map { |d| d.lchop(std).lchop('/') }.reject(&.empty?)
+      dirs.each do |d|
+        rc = IDE::RequireCompletion.new(project, File.join(c.root, "src/main.cr"))
+        rc.items(IDE::RequireCompletion::Context.new(d, 0, 0)).each do |i|
+          next if i.directory
+          project.resolver.resolve("#{d}#{i.label}", nil).first?.should eq(i.target), "#{d}#{i.label}"
+          checked += 1
+        end
+      end
+      # Every stdlib file except prelude-loaded ones and internals (386
+      # with Crystal 1.22).
+      checked.should be > 300
+    ensure
+      c.cleanup
+    end
+  end
+end
+
+describe "written requires keep resolving (Phase 13)" do
+  it "goes to shard subpaths, transitive shards and globs" do
+    files = {
+      "shard.yml"              => "name: app\nversion: 0.1.0\ndependencies:\n  web:\n    github: x/web\n",
+      "lib/web/src/web.cr"     => "",
+      "lib/web/src/web/cli.cr" => "",
+      "lib/dbx/src/dbx.cr"     => "",
+      "src/a/x.cr"             => "",
+      "src/main.cr"            => "require \"web/cli\"\nrequire \"dbx\"\nrequire \"./a/*\"\n",
+    }
+    c = FeatureClient.new(files, real_stdlib: true)
+    begin
+      u = c.open("src/main.cr")
+      {0 => "lib/web/src/web/cli.cr", 1 => "lib/dbx/src/dbx.cr", 2 => "src/a/x.cr"}.each do |line, target|
+        r = c.request("textDocument/definition", {textDocument: {uri: u}, position: {line: line, character: 11}})
+        defs = r.as_a? || [r]
+        defs.map(&.["uri"].as_s).should contain(c.uri(target))
+      end
+    ensure
+      c.cleanup
+    end
+  end
+end

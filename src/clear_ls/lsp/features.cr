@@ -50,7 +50,7 @@ module ClearLS::LSP
         documentHighlightProvider: true,
         referencesProvider:      true,
         renameProvider:          {prepareProvider: true},
-        completionProvider:      {triggerCharacters: [".", ":", "@"], resolveProvider: false},
+        completionProvider:      {triggerCharacters: [".", ":", "@", "\"", "/"], resolveProvider: false},
         inlayHintProvider:       true,
         implementationProvider:  true,
         documentFormattingProvider: true,
@@ -357,7 +357,7 @@ module ClearLS::LSP
       IDE::CompletionKind::Field => 5, IDE::CompletionKind::Class => 7, IDE::CompletionKind::Struct => 22,
       IDE::CompletionKind::Module => 9, IDE::CompletionKind::Enum => 13, IDE::CompletionKind::EnumMember => 20,
       IDE::CompletionKind::Constant => 21, IDE::CompletionKind::Keyword => 14, IDE::CompletionKind::Snippet => 15,
-      IDE::CompletionKind::Macro => 3,
+      IDE::CompletionKind::Macro => 3, IDE::CompletionKind::File => 17,
     }
 
     private def completion(params : JSON::Any)
