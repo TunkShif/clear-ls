@@ -154,6 +154,30 @@ files from disk, so diagnostics describe the saved text. Formatting runs
 `crystal tool format` on the buffer text. Settings (`compiler.*`) are in
 [docs/settings.md](docs/settings.md).
 
+**List every program in `shard.yml` `targets`.** clear-ls learns a
+project's programs from `targets` only (or the `compiler.entries`
+setting). A file outside every target is compiled on its own, so a file
+that relies on another file's requires reports false errors. Example: a
+Marten project from `marten new` has no `targets`, and
+`config/routes.cr` reports `undefined constant Marten` because only
+`src/project.cr` requires `marten`. Add the project's programs:
+
+```yaml
+targets:
+  server:
+    main: src/server.cr
+  manage:
+    main: manage.cr   # Marten CLI; the only program that requires src/migrations/**
+```
+
+Targets don't affect dependency resolution or the compiler itself; they
+are what `shards build` builds (into `bin/`), and bare `shards run` needs
+a target name once there are several. Every target that contains a file
+is checked in the background when that file is saved, so several large
+targets cost CPU but never block editing. Targets also define the
+project's program view for hover/definition (without them clear-ls
+falls back to everything under `src/`).
+
 Macro expansion preview: `clearLs/expandMacro {textDocument, position}` runs
 `crystal tool expand` on the saved file and returns
 `{status, message, expansions: [{original, steps: [{source, macros}]}]}`.
