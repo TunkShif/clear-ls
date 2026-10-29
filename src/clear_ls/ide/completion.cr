@@ -425,7 +425,151 @@ module ClearLS::IDE
         items << CompletionItem.new(kw, CompletionKind::Keyword, sort_text: "3#{kw}") if kw.starts_with?(prefix) && seen.add?(kw)
       end
       do_snippet(text, start, offset, prefix).try { |i| items.unshift(i) }
+      case_snippet(text, start, offset, prefix).try { |i| items.unshift(i) }
       items.first(MAX_ITEMS)
+    end
+
+    # -- `case x` / `in|` --------------------------------------------------------------
+
+    # Most branches a case snippet writes.
+    MAX_BRANCHES = 30
+
+    # Every branch missing from the `case` around the word `i`/`in` or
+    # `w`/`when` at the start of a line, from the subject's type (checked
+    # forms in the roadmap, Phase 13 step 3). The word is replaced by
+    # `in <placeholder>` in a copy, so the clause parses whatever was
+    # typed; the subject is inferred there.
+    private def case_snippet(text : String, start : UInt32, offset : UInt32, prefix : String) : CompletionItem?
+      return nil unless @options.snippets && @options.case_snippets
+      keyword = if !prefix.empty? && "in".starts_with?(prefix)
+                  "in"
+                elsif !prefix.empty? && "when".starts_with?(prefix)
+                  "when"
+                else
+                  return nil
+                end
+      return nil unless StatementSite.rest_blank?(text, offset)
+      line_start = start
+      while line_start > 0 && text.byte_at(line_start - 1) != '\n'.ord
+        line_start -= 1
+      end
+      return nil unless text.byte_slice(line_start, start - line_start).strip.empty?
+      patched = Syntax::TextEdit.new(TextRange.new(start, offset), "#{keyword} #{PLACEHOLDER}").apply(text)
+      tree = Syntax::Parser.new.parse(patched)
+      at = start + keyword.bytesize + 1
+      leaf = tree.root.descendant(at, at + PLACEHOLDER.bytesize)
+      clause = leaf.try(&.parent)
+      case_node = clause.try(&.parent)
+      Syntax.keep_alive(tree)
+      return nil unless clause && case_node && case_node.kind.case? && (clause.kind.in? || clause.kind.when?)
+      subject = case_node.field(Syntax::Field::Cond) || return nil
+      # `in` needs every clause to be `in` (the compiler: "expected
+      # 'when', not 'in'"), and the same for `when`.
+      others = case_node.named_children.select { |c| (c.kind.in? || c.kind.when?) && c.range != clause.range }
+      return nil if keyword == "in" && others.any?(&.kind.when?)
+      return nil if keyword == "when" && others.any?(&.kind.in?)
+      written = others.flat_map { |c| c.fields(Syntax::Field::Cond).select(&.named?).map(&.text) }.to_set
+      state = FileState.new(@state.id, @state.uri, @state.revision ^ 0x1000_0000_0000_0000_u64, @state.version, tree)
+      bodies = Bodies.new(state)
+      _, inf = @typing.infer_at(state, bodies, subject.start_byte, cache: false) || return nil
+      body = bodies.at(subject.start_byte) || return nil
+      expr = body.exprs.find { |e| e.range == subject.range && !e.kind.seq? } || return nil
+      t = inf.type_of(expr.id)
+      return nil if @typing.table.unknown?(t)
+      branches = case_branches(t) || return nil
+      missing = branches.reject { |b| written.includes?(b) }
+      return nil if missing.empty? || missing.size > MAX_BRANCHES
+      # Written with the line's own indent (inserted as is); bodies one
+      # level deeper, a tab when the line is tab-indented.
+      indent = text.byte_slice(line_start, start - line_start)
+      step = indent.includes?('\t') ? "\t" : "  "
+      snippet = String.build do |io|
+        missing.each_with_index do |b, k|
+          io << '\n' << indent if k > 0
+          io << keyword << ' ' << b.gsub('$', "\\$") << "\n" << indent << step << '$' << (k + 1 == missing.size ? 0 : k + 1)
+        end
+      end
+      CompletionItem.new("#{keyword} … (#{missing.size} missing)", CompletionKind::Snippet,
+        detail: missing.join(", "), sort_text: "00#{keyword}", insert_text: snippet,
+        edit_range: TextRange.new(start, offset), filter_text: keyword, snippet: true)
+    end
+
+    # Branch patterns covering *t*, or nil when the type can't be covered
+    # exhaustively: `.member?` for a plain enum alone; for unions each
+    # member: `nil`, `true`/`false`, enum members as paths (`.red?` fails
+    # on the other members), every concrete subtype of an abstract class,
+    # else the type itself. `@[Flags]` enums can't be covered.
+    private def case_branches(t : Types::TyId) : Array(String)?
+      table = @typing.table
+      members = table.members(t)
+      if members.size == 1
+        m = table[members[0]]
+        if m.kind.named? && (id = m.def_id) && @typing.def_map[id].kind.enum?
+          return enum_members(id).try &.map { |n| ".#{n.underscore}?" }
+        end
+      end
+      branches = [] of String
+      members.each do |m|
+        if table.nil_type?(m)
+          branches << "nil"
+          next
+        end
+        mt = table[m]
+        return nil unless mt.kind.named? || mt.kind.metaclass?
+        if mt.kind.named? && (id = mt.def_id)
+          info = @typing.def_map[id]
+          case
+          when info.full_name == "Bool"
+            branches << "true" << "false"
+            next
+          when info.kind.enum?
+            names = enum_members(id) || return nil
+            names.each { |n| branches << "#{info.full_name}::#{n}" }
+            next
+          when abstract_type?(id) && mt.args.empty?
+            subs = concrete_descendants(id)
+            return nil if subs.empty?
+            subs.each { |s| branches << @typing.def_map[s].full_name }
+            next
+          end
+        end
+        branches << table.to_s(m)
+      end
+      branches.uniq
+    end
+
+    # Members of enum *id*, nil for `@[Flags]` enums.
+    private def enum_members(id : Semantics::TypeId) : Array(String)?
+      info = @typing.def_map[id]
+      return nil if info.sites.any? { |s| s.item.annotations.any? { |a| a == "Flags" || a == "::Flags" } }
+      names = [] of String
+      info.sites.each do |s|
+        s.item.children.each { |c| names << c.name if c.kind.constant? }
+      end
+      names.uniq!
+      names.empty? ? nil : names
+    end
+
+    private def abstract_type?(id : Semantics::TypeId) : Bool
+      @typing.def_map[id].sites.any? { |s| s.item.header.try(&.is_abstract) || false }
+    end
+
+    # Classes below abstract *id* that cover it: each concrete class whose
+    # superclasses up to *id* are all abstract (a concrete class covers
+    # its own subclasses), in declaration order. Generic ones are left
+    # out (no pattern without type arguments).
+    private def concrete_descendants(id : Semantics::TypeId) : Array(Semantics::TypeId)
+      map = @typing.def_map
+      map.descendants(id).select do |d|
+        info = map[d]
+        next false unless (info.kind.class? || info.kind.struct?) && !abstract_type?(d) && info.type_params.empty?
+        sup = map.superclass(d)
+        while sup && sup != id
+          break unless abstract_type?(sup)
+          sup = map.superclass(sup)
+        end
+        sup == id
+      end
     end
 
     # -- `xs.each do|` ----------------------------------------------------------------

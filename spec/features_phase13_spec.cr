@@ -87,3 +87,79 @@ describe "do ... end snippet (Phase 13)" do
     labels.sort.should eq [14, 15]
   end
 end
+
+# The case snippet's text, with tab stops filled by integers so it
+# compiles: `in .red?\n    $1` → `in .red?\n    1`.
+private def case_item(src : String, **opts) : JSON::Any?
+  items_at({"src/a.cr" => src}, "src/a.cr", **opts).find { |i| i["kind"] == 15 && i["label"].as_s.includes?("missing") }
+end
+
+private def fill(snippet : String) : String
+  snippet.gsub(/\$(\d+)/) { "#{$1}" }
+end
+
+# Compiles *src* with the `‸` line replaced by the item's text.
+private def compiles?(src : String, snippet : String) : {Bool, String}
+  path = File.tempname("clear-ls-case", ".cr")
+  File.write(path, src.sub(/^[ \t]*[a-z]*‸$/m) { |m| m.rchop("‸").sub(/[a-z]*\z/, "") + fill(snippet) })
+  buf = IO::Memory.new
+  ok = Process.run(ENV["CRYSTAL"]? || "crystal", ["build", "--no-codegen", path], output: buf, error: buf).success?
+  {ok, buf.to_s}
+ensure
+  path.try { |p| File.delete?(p) }
+end
+
+describe "exhaustive case snippet (Phase 13)" do
+  types = <<-CR
+    enum Color
+      Red
+      Green
+      Blue
+    end
+    @[Flags]
+    enum Perm
+      Read
+      Write
+    end
+    abstract class Shape; end
+    class Circle < Shape; end
+    abstract class Poly < Shape; end
+    class Square < Poly; end
+    class Cube < Square; end
+
+    CR
+  fixtures = {
+    "enum"          => {"def f(x : Color)\n  case x\n  i‸\n  end\nend\np f(Color::Red)\n", "in .red?\n    $1\n  in .green?\n    $2\n  in .blue?\n    $0"},
+    "nilable enum"  => {"def f(x : Color?)\n  case x\n  i‸\n  end\nend\np f(nil)\n", "in Color::Red\n    $1\n  in Color::Green\n    $2\n  in Color::Blue\n    $3\n  in nil\n    $0"},
+    "union"         => {"def f(x : Int32 | String | Nil)\n  case x\n  in‸\n  end\nend\np f(1)\n", nil},
+    "bool"          => {"def f(x : Bool)\n  case x\n  i‸\n  end\nend\np f(true)\n", "in true\n    $1\n  in false\n    $0"},
+    "abstract"      => {"def f(x : Shape)\n  case x\n  i‸\n  end\nend\np f(Cube.new)\np f(Circle.new)\n", "in Circle\n    $1\n  in Square\n    $0"},
+  }
+
+  fixtures.each do |name, (src, expected)|
+    it "covers a #{name} and compiles" do
+      i = case_item(types + src, real_stdlib: true).not_nil!
+      text = i["textEdit"]["newText"].as_s
+      text.should eq expected if expected
+      ok, log = compiles?(types + src, text)
+      ok.should be_true, "#{name}: #{text.inspect}\n#{log}"
+    end
+  end
+
+  it "lists only missing branches and keeps the typed keyword" do
+    i = case_item(types + "def f(x : Color)\n  case x\n  in .red?\n    1\n  i‸\n  end\nend\n", real_stdlib: true).not_nil!
+    i["label"].should eq "in … (2 missing)"
+    i["textEdit"]["newText"].should eq "in .green?\n    $1\n  in .blue?\n    $0"
+    i["detail"].should eq ".green?, .blue?"
+    w = case_item(types + "def f(x : Bool)\n  case x\n  wh‸\n  end\nend\n", real_stdlib: true).not_nil!
+    w["textEdit"]["newText"].should eq "when true\n    $1\n  when false\n    $0"
+  end
+
+  it "is not offered when it can't be exhaustive or is off" do
+    case_item(types + "def f(x : Perm)\n  case x\n  i‸\n  end\nend\n", real_stdlib: true).should be_nil
+    case_item(types + "def f(x)\n  case x\n  i‸\n  end\nend\n", real_stdlib: true).should be_nil
+    case_item(types + "def f(x : Color)\n  case x\n  when .red?\n  i‸\n  end\nend\n", real_stdlib: true).should be_nil
+    case_item(types + "def f(x : Color)\n  case x\n  i‸\n  end\nend\n", real_stdlib: true, settings: {completion: {caseSnippets: false}}).should be_nil
+    case_item(types + "def f(x : Color)\n  y = x i‸\nend\n", real_stdlib: true).should be_nil
+  end
+end

@@ -1683,6 +1683,20 @@ Steps (one commit each; pause at the end of each):
    generated `case ... in` with the compiler (fixtures for enum,
    nilable enum, union, Bool, abstract class) and expects no
    exhaustiveness error.
+   *Done:* `Completion#case_snippet`: the word `i`/`in` or `w`/`when`
+   alone on its line is replaced by `in <placeholder>` in a copy; the
+   clause must parse as a child of a `case` with a subject, whose type
+   is inferred there. Branches (`case_branches`): a plain enum alone →
+   `.member?`; in a union, `nil`, `true`/`false`, enum members as
+   paths, abstract classes → the concrete classes that cover them
+   (`Circle`, `Square`, not `Square`'s subclass `Cube`: a class covers
+   its subclasses; generic ones skipped), else the type's name.
+   Already written conditions are skipped; nothing when none is
+   missing, more than 30, a `@[Flags]` enum, an unknown subject, or a
+   `when` and `in` mix (the compiler refuses it). Bodies indented one
+   level below the clause (tab if the line uses tabs). The five
+   fixtures compile (`crystal build --no-codegen` per spec, ~20 s of
+   `make spec`, now 312 examples / 66 s).
 4. **Definition and control-flow snippets.** Decision 3 forms
    (`class ${1:Name}\n\t$0\nend`, `def ${1:name}\n\t$0\nend`,
    `if ${1:cond}\n\t$0\nend`, `begin\n\t$1\nrescue ${2:ex}\n\t$0\nend`,
