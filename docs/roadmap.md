@@ -1500,21 +1500,11 @@ before. Stdlib checks: `Enumerable#first : T`, `Hash#merge`'s `K`,
 rename of a param (rename must change every reopening's header),
 bound values per call site, module params per includer. 0.12.2.
 
-### Phase 13 — multi-root (deferred)
-
-- One index per workspace folder sharing stdlib/shard entries (cheap
-  with the Phase 11 cache); `workspace/didChangeWorkspaceFolders`.
-- Diagnostics and compiler facts per project, in its own directory
-  (nested projects use the root's toolchain today).
-
-Exit criterion: two folders open in one client, each with correct
-definitions and diagnostics.
-
 ### Phase 14 — keyword snippets and require completion
 
 From usage feedback on 0.12.2: built-in snippets for common structures
 (definitions, control flow, `do ... end`) and completion inside
-`require "..."`. Phase 13 stays deferred, so this phase comes first.
+`require "..."`. Runs before Phase 13 (multi-root), which moves to last.
 
 **Today (0.12.2):** keywords complete as bare labels (`KEYWORDS` in
 `ide/completion.cr`, sort tier `3`). The only snippets are block
@@ -1664,6 +1654,19 @@ exhaustiveness error on the fixtures; no structural snippet in
 modifier position; every require suggestion resolves to the file it
 names (stdlib round trip); completion outside require strings is
 unchanged (existing specs, Neovim check).
+
+### Phase 13 — multi-root (deferred, last)
+
+Moved after Phase 14: the last planned phase, still deferred until asked
+for.
+
+- One index per workspace folder sharing stdlib/shard entries (cheap
+  with the Phase 11 cache); `workspace/didChangeWorkspaceFolders`.
+- Diagnostics and compiler facts per project, in its own directory
+  (nested projects use the root's toolchain today).
+
+Exit criterion: two folders open in one client, each with correct
+definitions and diagnostics.
 
 ## Testing approach
 

@@ -25,9 +25,9 @@ stops mid-phase). History and per-phase details are in
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
 - **Next:** Phase 14 — keyword snippets and require completion
   ([roadmap.md](roadmap.md#phase-14--keyword-snippets-and-require-completion)).
-  Phase 13 — multi-root
-  ([roadmap.md](roadmap.md#phase-13--multi-root-deferred)) stays
-  deferred until asked for.
+  Then Phase 13 — multi-root
+  ([roadmap.md](roadmap.md#phase-13--multi-root-deferred-last)), moved
+  to last and deferred until asked for.
 - **In progress:** nothing.
 
 ## Resume
