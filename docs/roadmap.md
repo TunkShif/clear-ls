@@ -1702,6 +1702,16 @@ Steps (one commit each; pause at the end of each):
    `if ${1:cond}\n\t$0\nend`, `begin\n\t$1\nrescue ${2:ex}\n\t$0\nend`,
    ...), off by default; gating specs (no `if` snippet in modifier
    position, no `class` inside a def).
+   *Done:* `Completion#structure_snippets`: a `Snippet` item beside
+   each matching keyword (sort tier `3`, `insertTextMode: 2`), only at
+   a `StatementSite`. Where (checked with Crystal 1.22): types, `lib`,
+   `annotation` at the top level and in type bodies; `def`/`macro`
+   there and in enum bodies; nothing in a def body ("can't define
+   class/macro inside def") or under `if`/blocks outside a def ("can't
+   declare ... dynamically"); control flow everywhere except enum
+   bodies ("unexpected token"). Skeletons `class ${1:Name}\n\t$0\nend`,
+   `if ${1:condition}\n\t$0\nend`, `case ${1:value}\nwhen
+   ${2:pattern}\n\t$0\nend`, `begin ... rescue ${2:ex} ... end`.
 5. **Require paths (R1, R2).** Context detection (including
    unterminated strings), local/stdlib/shard listing per the rules
    above, trigger characters. Specs over a fixture with `lib/` shards

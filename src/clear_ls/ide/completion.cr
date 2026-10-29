@@ -424,9 +424,65 @@ module ClearLS::IDE
       KEYWORDS.each do |kw|
         items << CompletionItem.new(kw, CompletionKind::Keyword, sort_text: "3#{kw}") if kw.starts_with?(prefix) && seen.add?(kw)
       end
+      structure_snippets(text, start, offset, prefix).reverse_each { |i| items.unshift(i) }
       do_snippet(text, start, offset, prefix).try { |i| items.unshift(i) }
       case_snippet(text, start, offset, prefix).try { |i| items.unshift(i) }
       items.first(MAX_ITEMS)
+    end
+
+    # -- `class|`, `if|` ------------------------------------------------------------
+
+    alias Scope = StatementSite::Scope
+
+    # Definition skeletons and where the compiler accepts them (checked
+    # with Crystal 1.22: inside a def "can't define class inside def",
+    # inside `if`/blocks "can't declare ... dynamically", an enum body
+    # takes only `def`/`macro`).
+    DEFINITION_SNIPPETS = {
+      "class"      => {"class ${1:Name}\n\t$0\nend", [Scope::TopLevel, Scope::Type]},
+      "module"     => {"module ${1:Name}\n\t$0\nend", [Scope::TopLevel, Scope::Type]},
+      "struct"     => {"struct ${1:Name}\n\t$0\nend", [Scope::TopLevel, Scope::Type]},
+      "enum"       => {"enum ${1:Name}\n\t$0\nend", [Scope::TopLevel, Scope::Type]},
+      "lib"        => {"lib ${1:LibName}\n\t$0\nend", [Scope::TopLevel, Scope::Type]},
+      "annotation" => {"annotation ${1:Name}\nend", [Scope::TopLevel, Scope::Type]},
+      "def"        => {"def ${1:name}\n\t$0\nend", [Scope::TopLevel, Scope::Type, Scope::Enum]},
+      "macro"      => {"macro ${1:name}\n\t$0\nend", [Scope::TopLevel, Scope::Type, Scope::Enum]},
+    }
+
+    # Control flow: anywhere a statement goes except enum and lib bodies.
+    CONTROL_FLOW_SNIPPETS = {
+      "if"     => "if ${1:condition}\n\t$0\nend",
+      "unless" => "unless ${1:condition}\n\t$0\nend",
+      "while"  => "while ${1:condition}\n\t$0\nend",
+      "until"  => "until ${1:condition}\n\t$0\nend",
+      "case"   => "case ${1:value}\nwhen ${2:pattern}\n\t$0\nend",
+      "begin"  => "begin\n\t$1\nrescue ${2:ex}\n\t$0\nend",
+    }
+
+    # Snippets for keywords starting with the word, at a statement start
+    # (`StatementSite`), each next to the plain keyword item.
+    private def structure_snippets(text : String, start : UInt32, offset : UInt32, prefix : String) : Array(CompletionItem)
+      items = [] of CompletionItem
+      return items unless @options.snippets && (@options.definition_snippets || @options.control_flow_snippets)
+      return items if prefix.empty? || !prefix[0].lowercase?
+      defs = @options.definition_snippets ? DEFINITION_SNIPPETS.select { |k, _| k.starts_with?(prefix) } : {} of String => {String, Array(Scope)}
+      flow = @options.control_flow_snippets ? CONTROL_FLOW_SNIPPETS.select { |k, _| k.starts_with?(prefix) } : {} of String => String
+      return items if defs.empty? && flow.empty?
+      scope = StatementSite.at(text, start, offset) || return items
+      defs.each do |kw, (body, scopes)|
+        items << structure_item(kw, body, start, offset) if scopes.includes?(scope)
+      end
+      unless scope.enum?
+        flow.each { |kw, body| items << structure_item(kw, body, start, offset) }
+      end
+      items
+    end
+
+    private def structure_item(keyword : String, body : String, start : UInt32, offset : UInt32) : CompletionItem
+      detail = body.gsub(/\$\{\d+:([^}]*)\}/, "\\1").gsub(/\$\d/, "").gsub("\n\t", " … ").gsub('\n', ' ').squeeze(' ')
+      CompletionItem.new(keyword, CompletionKind::Snippet, detail: detail, sort_text: "3#{keyword}",
+        insert_text: body, edit_range: TextRange.new(start, offset), filter_text: keyword,
+        snippet: true, adjust_indent: true)
     end
 
     # -- `case x` / `in|` --------------------------------------------------------------

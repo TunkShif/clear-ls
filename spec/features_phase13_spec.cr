@@ -163,3 +163,42 @@ describe "exhaustive case snippet (Phase 13)" do
     case_item(types + "def f(x : Color)\n  y = x i‸\nend\n", real_stdlib: true).should be_nil
   end
 end
+
+describe "definition and control-flow snippets (Phase 13)" do
+  on = {completion: {definitionSnippets: true, controlFlowSnippets: true}}
+
+  snippets = ->(src : String, settings : NamedTuple(completion: NamedTuple(definitionSnippets: Bool, controlFlowSnippets: Bool))?) do
+    items_at({"src/a.cr" => src}, "src/a.cr", settings: settings).select { |i| i["kind"] == 15 }.map(&.["label"].as_s).sort
+  end
+
+  it "is off by default; the keyword stays" do
+    snippets.call("cla‸\n", nil).should be_empty
+    items_at({"src/a.cr" => "cla‸\n"}, "src/a.cr").any? { |i| i["label"] == "class" && i["kind"] == 14 }.should be_true
+  end
+
+  it "writes skeletons where the compiler accepts them" do
+    i = items_at({"src/a.cr" => "cla‸\n"}, "src/a.cr", settings: on).find { |x| x["kind"] == 15 && x["label"] == "class" }.not_nil!
+    i["textEdit"]["newText"].should eq "class ${1:Name}\n\t$0\nend"
+    i["insertTextMode"].should eq 2
+    i["detail"].should eq "class Name … end"
+    snippets.call("class A\n  de‸\nend\n", on).should eq ["def"]
+    snippets.call("enum E\n  A\n  m‸\nend\n", on).should eq ["macro"] # no `module` in an enum
+    # Inside a def: control flow only.
+    snippets.call("def f\n  c‸\nend\n", on).should eq ["case"]
+    snippets.call("def f\n  i‸\nend\n", on).should eq ["if"]
+    # Inside `if` outside a def: no definitions ("can't declare ... dynamically").
+    snippets.call("if x\n  cla‸\nend\n", on).should be_empty
+    snippets.call("if x\n  wh‸\nend\n", on).should eq ["while"]
+  end
+
+  it "is never offered off a statement start" do
+    snippets.call("x if i‸\n", on).should be_empty
+    snippets.call("x = i‸\n", on).should be_empty
+    snippets.call("foo(i‸)\n", on).should be_empty
+    snippets.call("return i‸\n", on).should be_empty
+  end
+
+  it "skips structural snippets in an enum body, also for control flow" do
+    snippets.call("enum E\n  A\n  i‸\nend\n", on).should be_empty
+  end
+end
