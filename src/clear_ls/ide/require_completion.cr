@@ -17,7 +17,8 @@ module ClearLS::IDE
   # resolves to the file it names. Written requires are unaffected: hover,
   # definition and links resolve everything (`Analysis#resolve_require`).
   class RequireCompletion
-    record Item, label : String, insert : String, directory : Bool, target : String?, detail : String
+    record Item, label : String, insert : String, directory : Bool, target : String?, detail : String,
+      documentation : String? = nil
 
     # Context of a cursor inside a require string: the typed path up to
     # the cursor, and the byte range of its last segment (what an item
@@ -150,7 +151,8 @@ module ClearLS::IDE
         target = @project.resolver.resolve(name, @from_file).first? || next
         # Only shards installed in `lib/` (a stdlib name is not a shard).
         next unless target.starts_with?(File.join(@project.root, "lib") + "/")
-        items << Item.new(name, name, false, target, version ? "shard #{version}" : "shard")
+        items << Item.new(name, name, false, target, version ? "shard #{version}" : "shard",
+          shard_description(name))
       end
       items
     end
@@ -175,6 +177,13 @@ module ClearLS::IDE
       end
     rescue YAML::ParseException
       [] of {String, String?}
+    end
+
+    # `description` of the installed shard's `shard.yml`.
+    private def shard_description(name : String) : String?
+      YAML.parse(File.read(File.join(@project.root, "lib", name, "shard.yml")))["description"]?.try(&.as_s?).try(&.strip.presence)
+    rescue
+      nil
     end
 
     # -- helpers --------------------------------------------------------------------

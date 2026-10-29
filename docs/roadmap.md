@@ -1746,6 +1746,14 @@ Steps (one commit each; pause at the end of each):
    shard version/description from its `shard.yml`; skip files outside
    the index (no detail rather than a parse per
    item).
+   *Done:* `Completion#file_summary`: public top-level types, defs and
+   macros of the file's index entry (at most 4, then `…`) before the
+   detail (`HTTP::Client — stdlib (also client/)`, `Marten — shard
+   0.7.1`); documentation is the shard's `shard.yml` `description`,
+   else the first paragraph of the first documented declaration.
+   `Index#entry_for_path?`. Files not in the index (nothing requires
+   them) keep the plain detail: no parse per item. On `/tmp/dorp`
+   most stdlib files are indexed (the workspace's require closure).
 7. **Verification and docs.** Neovim `editing` check: accept
    `xs.each do` (block params selected), an exhaustive `in` on an enum
    and a union, `require "./` → a file, `require "js` → `json`; with

@@ -207,14 +207,14 @@ describe "require completion (Phase 13)" do
   shard_yml = "name: app\nversion: 0.1.0\ndependencies:\n  web:\n    github: x/web\n  json:\n    github: x/json\ndevelopment_dependencies:\n  timecop:\n    github: x/timecop\n  missing:\n    github: x/missing\n"
   files = {
     "shard.yml"                   => shard_yml,
-    "lib/web/shard.yml"           => "name: web\nversion: 1.2.3\n",
-    "lib/web/src/web.cr"          => "module Web; end\n",
+    "lib/web/shard.yml"           => "name: web\nversion: 1.2.3\ndescription: |\n  A web framework.\n",
+    "lib/web/src/web.cr"          => "# Web things.\n#\n# More text.\nmodule Web; end\nclass Web::App; end\nprivate class Hidden; end\ndef web_helper; end\n",
     "lib/web/src/web/cli.cr"      => "module Web::CLI; end\n",
     "lib/web/src/web_cli.cr"      => "",
     "lib/json/src/json.cr"        => "module MyJSON; end\n", # shadows the stdlib's json
     "lib/timecop/src/timecop.cr"  => "",
     "lib/dbx/src/dbx.cr"          => "", # transitive
-    "src/app.cr"                  => "",
+    "src/app.cr"                  => "require \"web\"\nrequire \"uri\"\nmodule App; end\n",
     "src/models/user.cr"          => "",
     "src/models/post.cr"          => "",
     "src/empty_dir/.keep"         => "",
@@ -260,7 +260,7 @@ describe "require completion (Phase 13)" do
     l.should_not contain "missing" # not installed
     l.should_not contain "web_cli"
     l.count("json").should eq 1 # the shard shadows the stdlib name
-    item.call("require \"we‸\n", "web").not_nil!["detail"].should eq "shard 1.2.3"
+    item.call("require \"we‸\n", "web").not_nil!["detail"].as_s.should end_with "shard 1.2.3"
     # No subpaths for shards.
     labels.call("require \"web/‸\n", {} of String => String).should be_empty
   end
@@ -276,6 +276,18 @@ describe "require completion (Phase 13)" do
     h.should contain "server"
     h.any?(&.includes?('*')).should be_false
     labels.call("require \"openssl/‸\n", {} of String => String).any?(&.starts_with?("lib_")).should be_false
+  end
+
+  it "describes indexed files and shards" do
+    w = item.call("require \"we‸\n", "web").not_nil!
+    w["detail"].should eq "Web, Web::App, web_helper — shard 1.2.3"
+    w["documentation"]["value"].should eq "A web framework." # shard.yml first
+    a = item.call("require \"./ap‸\n", "app").not_nil!
+    a["detail"].should eq "App — file"
+    item.call("require \"ur‸\n", "uri").not_nil!["detail"].as_s.should start_with "URI"
+    item.call("require \"ht‸\n", "http").not_nil!["detail"].should eq "stdlib (also http/)" # not required anywhere
+    # Not indexed (nothing requires it): the plain detail, no parse.
+    item.call("require \"./models/u‸\n", "user").not_nil!["detail"].should eq "file"
   end
 
   it "skips requires already written and answers nothing outside require strings" do

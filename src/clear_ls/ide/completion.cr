@@ -107,9 +107,46 @@ module ClearLS::IDE
       rc.items(ctx).compact_map do |i|
         next if !i.directory && already.includes?("#{dir_part}#{i.label}")
         kind = i.directory ? CompletionKind::Module : CompletionKind::File
-        CompletionItem.new(i.label, kind, detail: i.detail, sort_text: "#{i.directory ? 1 : 0}#{i.label}",
+        detail, doc = i.detail, i.documentation
+        if (target = i.target) && (summary = file_summary(target))
+          names, file_doc = summary
+          detail = "#{names} — #{detail}" unless names.empty?
+          doc ||= file_doc
+        end
+        CompletionItem.new(i.label, kind, detail: detail, documentation: doc, sort_text: "#{i.directory ? 1 : 0}#{i.label}",
           insert_text: i.insert, edit_range: range, filter_text: i.label.rchop('/'))
       end.first(MAX_ITEMS)
+    end
+
+    # Most declarations named in a require item's detail.
+    MAX_DECLARED = 4
+
+    # Top-level declarations of an indexed file (`HTTP::Client`, `JSON`)
+    # and the first one's doc. Nil for files the index doesn't have:
+    # completion never parses files to describe them.
+    private def file_summary(path : String) : {String, String?}?
+      entry = @index.entry_for_path?(path) || return nil
+      names = [] of String
+      doc = nil
+      entry.items.items.each do |item|
+        next unless item.kind.type? || item.kind.def? || item.kind.macro?
+        next if item.visibility.private?
+        doc ||= item.doc
+        name = if item.kind.type?
+                 item.header.try { |h| h.path.join("::") } || item.name
+               else
+                 "#{item.name}#{item.kind.macro? ? " (macro)" : ""}"
+               end
+        names << name unless names.includes?(name)
+      end
+      shown = names.first(MAX_DECLARED).join(", ")
+      shown += ", …" if names.size > MAX_DECLARED
+      {shown, doc.try { |d| first_paragraph(d) }}
+    end
+
+    # Up to the first blank line, so a long module doc stays short.
+    private def first_paragraph(doc : String) : String
+      doc.split(/\n\s*\n/, 2).first.strip
     end
 
     # -- receiver members (`x.|`) ---------------------------------------------------

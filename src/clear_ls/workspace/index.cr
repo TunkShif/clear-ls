@@ -293,6 +293,11 @@ module ClearLS::Workspace
       @entries[file]?
     end
 
+    # Entry of the file at absolute *path*, if indexed.
+    def entry_for_path?(path : String) : Entry?
+      @entries[@vfs.id_for(VFS.uri_for(path))]?
+    end
+
     def size : Int32
       @entries.size
     end
