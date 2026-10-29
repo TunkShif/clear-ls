@@ -129,7 +129,7 @@ bin/probes/%: tools/probes/%.cr deps $(SOURCES)
 # Copies each fixture project to a temp dir and drives the release binary
 # from headless Neovim; prints results for review (no assertions).
 NVIM ?= nvim
-NVIM_CHECKS ?= smoke calls chains compiler workspace cache editing
+NVIM_CHECKS ?= smoke calls chains compiler workspace cache editing snippets
 
 nvim-check: release
 	@for c in $(NVIM_CHECKS); do echo "== $$c"; tools/nvim/run.sh $$c || exit 1; done

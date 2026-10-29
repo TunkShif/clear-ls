@@ -599,19 +599,18 @@ module ClearLS::IDE
       branches = case_branches(t) || return nil
       missing = branches.reject { |b| written.includes?(b) }
       return nil if missing.empty? || missing.size > MAX_BRANCHES
-      # Written with the line's own indent (inserted as is); bodies one
-      # level deeper, a tab when the line is tab-indented.
-      indent = text.byte_slice(line_start, start - line_start)
-      step = indent.includes?('\t') ? "\t" : "  "
+      # Relative to the line: the client adds its indent to every line
+      # (`insertTextMode: adjustIndentation`, Neovim's `vim.snippet` does
+      # the same) and turns `\t` into its indent unit.
       snippet = String.build do |io|
         missing.each_with_index do |b, k|
-          io << '\n' << indent if k > 0
-          io << keyword << ' ' << b.gsub('$', "\\$") << "\n" << indent << step << '$' << (k + 1 == missing.size ? 0 : k + 1)
+          io << '\n' if k > 0
+          io << keyword << ' ' << b.gsub('$', "\\$") << "\n\t$" << (k + 1 == missing.size ? 0 : k + 1)
         end
       end
       CompletionItem.new("#{keyword} … (#{missing.size} missing)", CompletionKind::Snippet,
         detail: missing.join(", "), sort_text: "00#{keyword}", insert_text: snippet,
-        edit_range: TextRange.new(start, offset), filter_text: keyword, snippet: true)
+        edit_range: TextRange.new(start, offset), filter_text: keyword, snippet: true, adjust_indent: true)
     end
 
     # Branch patterns covering *t*, or nil when the type can't be covered

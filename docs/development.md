@@ -114,9 +114,9 @@ paths. Per-phase numbers are in the roadmap.
 | Compiler check | ~1.9 s this repo, ~0.7 s small project; hover during a check: median 0.2 ms |
 | DefMap rebuild | ~4 ms; with compiler facts 5–7 ms |
 | Grammar (`make grammar-check`) | 1635/1646 stdlib files parse cleanly |
-| Spec suite (`make spec`) | 287 examples, ~40 s |
+| Spec suite (`make spec`) | 324 examples, ~1.5 min (Phase 13 case fixtures run the real compiler, the stdlib require round trip) |
 | Block form round trip (full stdlib) | 5195 blocks: 5109 convert, 86 refused, ~4 min with `BLOCK_FILES=9999 BLOCKS_PER_FILE=9999` |
-| Book parity (`tools/book_diff.py`) | 552 markers: 527 match, 25 accepted, 0 mismatches |
+| Book parity (`tools/book_diff.py`) | 565 markers: 540 match, 25 accepted, 0 mismatches |
 | Marten soak (`tools/soak.py`) | index 0.82–0.84 s cold (`CLEAR_LS_ARGS=--no-cache`) / ~130 MB RSS; 100 specs + 10 searches 234–244 MB; hover p99 during a search 38–80 ms |
 | Marten warm-up (`tools/warm.py`) | ~7.5 s idle, RSS 300 MB; first references after it 88 ms (cold 1.3 s, warm 36–44 ms) |
 | Marten sweep (`tools/sweep.py`, 120 s) | 64,696 requests, 0 errors, 1 answer over 300 ms |

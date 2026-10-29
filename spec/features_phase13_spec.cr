@@ -89,19 +89,20 @@ describe "do ... end snippet (Phase 13)" do
 end
 
 # The case snippet's text, with tab stops filled by integers so it
-# compiles: `in .red?\n    $1` → `in .red?\n    1`.
+# compiles, indented the way the client does it: `in .red?\n\t$1` under a
+# two-space `case` → `in .red?\n    1`.
 private def case_item(src : String, **opts) : JSON::Any?
   items_at({"src/a.cr" => src}, "src/a.cr", **opts).find { |i| i["kind"] == 15 && i["label"].as_s.includes?("missing") }
 end
 
-private def fill(snippet : String) : String
-  snippet.gsub(/\$(\d+)/) { "#{$1}" }
+private def fill(snippet : String, indent : String) : String
+  snippet.gsub(/\$(\d+)/) { "#{$1}" }.gsub('\t', "  ").gsub('\n', "\n#{indent}")
 end
 
 # Compiles *src* with the `‸` line replaced by the item's text.
 private def compiles?(src : String, snippet : String) : {Bool, String}
   path = File.tempname("clear-ls-case", ".cr")
-  File.write(path, src.sub(/^[ \t]*[a-z]*‸$/m) { |m| m.rchop("‸").sub(/[a-z]*\z/, "") + fill(snippet) })
+  File.write(path, src.sub(/^([ \t]*)[a-z]*‸$/m) { |m| $1 + fill(snippet, $1) })
   buf = IO::Memory.new
   ok = Process.run(ENV["CRYSTAL"]? || "crystal", ["build", "--no-codegen", path], output: buf, error: buf).success?
   {ok, buf.to_s}
@@ -129,11 +130,11 @@ describe "exhaustive case snippet (Phase 13)" do
 
     CR
   fixtures = {
-    "enum"          => {"def f(x : Color)\n  case x\n  i‸\n  end\nend\np f(Color::Red)\n", "in .red?\n    $1\n  in .green?\n    $2\n  in .blue?\n    $0"},
-    "nilable enum"  => {"def f(x : Color?)\n  case x\n  i‸\n  end\nend\np f(nil)\n", "in Color::Red\n    $1\n  in Color::Green\n    $2\n  in Color::Blue\n    $3\n  in nil\n    $0"},
+    "enum"          => {"def f(x : Color)\n  case x\n  i‸\n  end\nend\np f(Color::Red)\n", "in .red?\n\t$1\nin .green?\n\t$2\nin .blue?\n\t$0"},
+    "nilable enum"  => {"def f(x : Color?)\n  case x\n  i‸\n  end\nend\np f(nil)\n", "in Color::Red\n\t$1\nin Color::Green\n\t$2\nin Color::Blue\n\t$3\nin nil\n\t$0"},
     "union"         => {"def f(x : Int32 | String | Nil)\n  case x\n  in‸\n  end\nend\np f(1)\n", nil},
-    "bool"          => {"def f(x : Bool)\n  case x\n  i‸\n  end\nend\np f(true)\n", "in true\n    $1\n  in false\n    $0"},
-    "abstract"      => {"def f(x : Shape)\n  case x\n  i‸\n  end\nend\np f(Cube.new)\np f(Circle.new)\n", "in Circle\n    $1\n  in Square\n    $0"},
+    "bool"          => {"def f(x : Bool)\n  case x\n  i‸\n  end\nend\np f(true)\n", "in true\n\t$1\nin false\n\t$0"},
+    "abstract"      => {"def f(x : Shape)\n  case x\n  i‸\n  end\nend\np f(Cube.new)\np f(Circle.new)\n", "in Circle\n\t$1\nin Square\n\t$0"},
   }
 
   fixtures.each do |name, (src, expected)|
@@ -149,10 +150,10 @@ describe "exhaustive case snippet (Phase 13)" do
   it "lists only missing branches and keeps the typed keyword" do
     i = case_item(types + "def f(x : Color)\n  case x\n  in .red?\n    1\n  i‸\n  end\nend\n", real_stdlib: true).not_nil!
     i["label"].should eq "in … (2 missing)"
-    i["textEdit"]["newText"].should eq "in .green?\n    $1\n  in .blue?\n    $0"
+    i["textEdit"]["newText"].should eq "in .green?\n\t$1\nin .blue?\n\t$0"
     i["detail"].should eq ".green?, .blue?"
     w = case_item(types + "def f(x : Bool)\n  case x\n  wh‸\n  end\nend\n", real_stdlib: true).not_nil!
-    w["textEdit"]["newText"].should eq "when true\n    $1\n  when false\n    $0"
+    w["textEdit"]["newText"].should eq "when true\n\t$1\nwhen false\n\t$0"
   end
 
   it "is not offered when it can't be exhaustive or is off" do

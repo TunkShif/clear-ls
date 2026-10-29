@@ -1,7 +1,16 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 12 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 13 —
+
+- snippets and require completion: `xs.each do` completes to
+  `do |x| ... end` with the method's block parameters; `in`/`when` in a
+  `case` writes every missing branch (enum members, union members,
+  `true`/`false`, concrete subclasses); optional `class`/`def`/`if`/...
+  skeletons only where the compiler accepts them (off by default);
+  inside `require "..."`: local files, stdlib paths one level at a
+  time, and direct shard dependencies, each verified to resolve, with
+  the file's declarations as detail;
 
 - editing UX: `property`/`getter`/`setter`/`record` accessors are one
   symbol for references and rename (getter, `name=`, `@name`, `name?`,

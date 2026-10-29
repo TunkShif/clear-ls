@@ -4,7 +4,11 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–12 (through editing UX: accessor symbols for
+- **Done:** Phases 0–13 (through snippets and require completion:
+  `do ... end` with block parameters, exhaustive `case` branches,
+  opt-in definition/control-flow snippets gated by where the compiler
+  accepts them, require path completion for local files, stdlib and
+  direct shards; before that, editing UX: accessor symbols for
   references/rename, setter/operator/block completion, alias names in
   hints, block form code action, one settings schema; before that,
   startup and warm caches: a two-layer
@@ -23,11 +27,9 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 13 — keyword snippets and require completion
-  ([roadmap.md](roadmap.md#phase-13--keyword-snippets-and-require-completion)).
-  Then Phase 14 — multi-root
+- **Next:** Phase 14 — multi-root
   ([roadmap.md](roadmap.md#phase-14--multi-root-deferred)), the last
-  phase, deferred until asked for.
+  phase, deferred until asked for; otherwise usage feedback.
 - **In progress:** nothing.
 
 ## Resume

@@ -1761,6 +1761,22 @@ Steps (one commit each; pause at the end of each):
    endwise-style auto `end` documented. README features, settings doc,
    status, architecture (Editing UX).
 
+   *Done:* Neovim check `snippets` (`tools/nvim/snippets.lua`,
+   fixture `tools/fixtures/snippets`, in `make nvim-check`): accepted
+   through `vim.lsp.completion` conversion and `vim.snippet`:
+   `each_pair d` → `each_pair do |x, y| / end`; `in` in `case c` (enum)
+   and `case v` (`Int32 | String | Nil`) → every branch at the `case`'s
+   indent with bodies one level deeper; `cla` → `class Name / end`
+   (definition snippets on), none inside `if`; `require "./mo` →
+   `models/`, `./models/po` → `post`, the already required `user` not
+   offered; `require "js` → `json`, `http/cl` → `client`. Completion
+   1 ms warm (141 ms for the first request). Found on the way: the
+   case snippet wrote the line's indent itself, and Neovim's
+   `vim.snippet` (like `insertTextMode: adjustIndentation`) adds it
+   again: branches are now relative (`in X\n\t$1\nin Y`), with
+   `adjust_indent`. README, status, architecture (Snippets and require
+   completion). 0.13.0.
+
 Exit criteria: with default settings only `do ... end` and case
 snippets appear; every generated `case ... in` compiles without an
 exhaustiveness error on the fixtures; no structural snippet in
@@ -1768,6 +1784,20 @@ modifier position; every require suggestion resolves to the file it
 names (stdlib round trip), shards appear by direct name only and no
 glob is offered; completion outside require strings is
 unchanged (existing specs, Neovim check).
+
+Status: done; every exit criterion met. Defaults: only `do ... end`
+and case snippets (settings spec; the definition/control-flow spec
+checks that `cla` gets only the keyword without the settings;
+endwise-style double `end` is documented in those settings); the five case fixtures compile; the
+statement-site spec covers modifier positions; 386 stdlib suggestions
+resolve to their files; `editing` Neovim check output unchanged.
+`make spec` 324 examples (~1.5 min); book diff 0 mismatches (565
+markers); `make verify-static` OK.
+
+Not yet: structural snippets after an earlier parse error in the file
+(an unfinished `class` without `end`) are not offered (scope unknown);
+require items describe only indexed files; `when` branches have no
+compiler exhaustiveness check.
 
 ### Phase 14 — multi-root (deferred)
 

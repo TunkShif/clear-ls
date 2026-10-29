@@ -159,6 +159,23 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
   body (cancel, budget, `Fiber.yield`). Cancelled by `$/cancelRequest`,
   by edits of files the job read, and by any declaration edit.
 
+### Snippets and require completion (Phase 13)
+
+- `IDE::StatementSite` (`statement_site.cr`): is the word at a statement
+  start, and in which scope (top level, type, enum, def, dynamic)? On a
+  parse with the word replaced by a placeholder; nil after any earlier
+  parse error.
+- `Completion` (`completion.cr`): `do_snippet` (block parameters of the
+  call the parser attaches `do` to), `case_snippet` / `case_branches`
+  (subject type of the `case` around a patched `in <placeholder>`),
+  `structure_snippets` (`DEFINITION_SNIPPETS` with allowed scopes,
+  `CONTROL_FLOW_SNIPPETS`). Multi-line snippets are written relative to
+  the line with `\t` and sent with `insertTextMode: adjustIndentation`.
+- `IDE::RequireCompletion` (`require_completion.cr`): context from the
+  line text; local/stdlib/shard listings; every item resolved back
+  through `RequireResolver`. `Completion#file_summary` describes indexed
+  files only.
+
 ### Editing UX (Phase 12)
 
 - `LSP::Settings` (`lsp/settings.cr`): one key table → defaults, type
