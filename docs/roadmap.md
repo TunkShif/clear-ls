@@ -1752,8 +1752,9 @@ Steps (one commit each; pause at the end of each):
    0.7.1`); documentation is the shard's `shard.yml` `description`,
    else the first paragraph of the first documented declaration.
    `Index#entry_for_path?`. Files not in the index (nothing requires
-   them) keep the plain detail: no parse per item. On `/tmp/dorp`
-   most stdlib files are indexed (the workspace's require closure).
+   them) keep the plain detail: no parse per item. On `/tmp/dorp`,
+   `http`, `http/client`, `json`, `uri` had details (Marten requires
+   them); in a fixture that requires nothing, `http` had none.
 7. **Verification and docs.** Neovim `editing` check: accept
    `xs.each do` (block params selected), an exhaustive `in` on an enum
    and a union, `require "./` → a file, `require "js` → `json`; with
