@@ -1799,14 +1799,86 @@ Not yet: structural snippets after an earlier parse error in the file
 require items describe only indexed files; `when` branches have no
 compiler exhaustiveness check.
 
-### Phase 14 — multi-root (deferred)
+### Phase 14 — multi-root
 
-The last planned phase (renumbered from 13), deferred until asked for.
+The last planned phase (renumbered from 13).
 
 - One index per workspace folder sharing stdlib/shard entries (cheap
   with the Phase 11 cache); `workspace/didChangeWorkspaceFolders`.
 - Diagnostics and compiler facts per project, in its own directory
   (nested projects use the root's toolchain today).
+
+**Today (0.13.0):** `Server#client_root` takes the first
+`workspaceFolders` entry (else `rootUri`), widened to the project above
+it; every other folder is ignored. Files of another folder get the
+fallback views (their own per-file view, or the library view), resolved
+with the first root's `lib/`. One `Compiler::Toolchain` runs in the
+first root's directory, so a nested project (its own `shard.yml` and
+`lib/`) is compiled there: checked with Crystal 1.22, a nested
+`sub/src/app.cr` requiring its own shard fails from the outer
+directory and compiles from `sub/`. Entry points are the first root's
+shard targets only; the facts exporter keeps methods under that root.
+
+**Design decisions:**
+
+1. **Roots.** Each workspace folder maps to a project root as today
+   (the folder, or the project above it); folders mapping to one root
+   share it. One `Workspace::Index` per root, each with its own
+   `Project` (toolchain detection, `lib/`, resolver), local cache
+   (`<root>/.clear-ls/cache/`) and views. The first root is the
+   primary one (`Server#index`, as before).
+2. **Which index answers.** A file belongs to the root that is the
+   longest prefix of its path (a nested folder wins over its parent).
+   A file under no root (a stdlib or shard file opened by
+   go-to-definition) is answered by the index the last workspace
+   document used, when it has the file, else the first index that has
+   it, else the primary one.
+3. **Sharing.** Item trees of files outside every root's own sources
+   (stdlib, shards) are shared between indexes: a file indexed by one
+   root is reused by the next while its size and mtime match, so a
+   second root doesn't parse the stdlib again. Requires are still
+   resolved per root (`lib/` differs). DefMaps stay per view, as now.
+4. **Edits.** An edit updates every index that has the file, and the
+   file's own root.
+5. **References, rename, call/type hierarchy** stay in the index of the
+   file they start from: a project and a path dependency opened as two
+   folders are separate programs (the dependency is a library file in
+   the app's index, so renames into it are refused as today).
+   `workspace/symbol` searches every index, files of any root first.
+6. **Compiler per project.** Checks, `tool context` and `tool expand`
+   run in the directory of the project that contains the entry point
+   (`Project.find_root`), so nested projects and every folder use
+   their own `shard.yml`/`lib/`. Entry points are that project's shard
+   targets; `compiler.entries` applies per root (relative to each, the
+   ones that exist). One exporter source per root; facts are kept per
+   entry and applied to (and cached in) the index whose root has the
+   entry.
+7. **Folders change.** `workspace/didChangeWorkspaceFolders`
+   (capability `workspace.workspaceFolders`): a new root is indexed
+   like at startup (requests wait), checked and warmed up; a removed
+   root's index, typings and diagnostics are dropped (empty
+   `publishDiagnostics` for its files).
+
+Steps (one commit each; pause at the end of each):
+
+1. **Indexes per root.** `Server` keeps indexes by root; routing
+   (`index_for`), shared item trees, edits and watched files to every
+   index concerned, `workspace/symbol` and warm-up over all,
+   `clearLs/clearCache` for all. Specs: two folders with a same-named
+   class each resolve to their own; a shard of the same name with
+   different versions in each `lib/`; the second root parses no stdlib
+   file; a stdlib file opened from the second root.
+2. **Compiler per project.** Toolchain per project directory, entry
+   points per project, exporter per root, facts per index. Specs with
+   the real compiler: two folders each with a program needing its own
+   `lib/` shard check clean; a nested project (not a folder) checked in
+   its own directory.
+3. **Folder changes.** `didChangeWorkspaceFolders` add/remove. Specs:
+   add a folder (definitions and diagnostics there), remove it
+   (diagnostics cleared, files back to the fallback views).
+4. **Verification and docs.** Neovim check `multiroot`
+   (`vim.lsp.buf.add_workspace_folder`), startup time and RSS with two
+   roots (this repo + Marten), README, status, architecture, 0.14.0.
 
 Exit criterion: two folders open in one client, each with correct
 definitions and diagnostics.

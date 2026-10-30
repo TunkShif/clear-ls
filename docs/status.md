@@ -27,10 +27,9 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 14 — multi-root
-  ([roadmap.md](roadmap.md#phase-14--multi-root-deferred)), the last
-  phase, deferred until asked for; otherwise usage feedback.
-- **In progress:** nothing.
+- **In progress:** Phase 14 — multi-root
+  ([roadmap.md](roadmap.md#phase-14--multi-root)), the last phase;
+  step 1 (indexes per root) next.
 
 ## Resume
 
