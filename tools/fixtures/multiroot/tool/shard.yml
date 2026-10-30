@@ -1,0 +1,5 @@
+name: tool
+version: 0.1.0
+targets:
+  tool:
+    main: src/tool.cr

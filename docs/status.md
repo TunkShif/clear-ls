@@ -4,7 +4,10 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–13 (through snippets and require completion:
+- **Done:** Phases 0–14 (last: multi-root workspaces: one index per
+  workspace folder sharing stdlib/shard trees, each program compiled in
+  its project's directory, folders added/removed live; before that,
+  snippets and require completion:
   `do ... end` with block parameters, exhaustive `case` branches,
   opt-in definition/control-flow snippets gated by where the compiler
   accepts them, require path completion for local files, stdlib and
@@ -27,10 +30,8 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **In progress:** Phase 14 — multi-root
-  ([roadmap.md](roadmap.md#phase-14--multi-root)), the last phase;
-  steps 1–3 (indexes per root, compiler per project, folder changes)
-  done, step 4 (verification and docs) next.
+- **Next:** usage feedback; every planned phase is done.
+- **In progress:** nothing.
 
 ## Resume
 
@@ -56,6 +57,8 @@ roadmap and in [architecture.md](architecture.md#known-limitations)):
 - Language parity: `tools/book_diff.py` must stay free of mismatches;
   new deviations need a `# cls:` marker and a book-gaps.md entry.
 - Diagnostics describe saved files only (compiler limitation).
-- Single root (Phase 14). Requires are resolved on every start; cached
+- Multi-root: references and rename stay in one project's index (see
+  [architecture.md](architecture.md#known-limitations)). Requires are
+  resolved on every start; cached
   compiler facts may be stale until the first check (see
   [architecture.md](architecture.md#known-limitations)).

@@ -1,0 +1,5 @@
+name: app
+version: 0.1.0
+targets:
+  app:
+    main: src/app.cr

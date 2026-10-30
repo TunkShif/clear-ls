@@ -23,12 +23,13 @@ module ClearLS::Workspace
     end
 
     # Queries the `crystal` executable (`crystal env`, `crystal --version`).
-    # Falls back to `lib` only when no compiler is found.
+    # Falls back to `lib` only when no compiler is found. Runs in *root*,
+    # so a version manager picks that project's Crystal (`.tool-versions`).
     def self.detect(root : String, crystal : String = ENV["CRYSTAL"]? || "crystal") : Project
-      env = run(crystal, ["env", "CRYSTAL_PATH", "CRYSTAL_VERSION"]).try(&.lines) || [] of String
+      env = run(crystal, ["env", "CRYSTAL_PATH", "CRYSTAL_VERSION"], root).try(&.lines) || [] of String
       path = (env[0]? || "lib").split(Process::PATH_DELIMITER, remove_empty: true)
       version = env[1]?.presence
-      triple = run(crystal, ["--version"]).try { |text| text[/Default target: (\S+)/, 1]? } || default_triple
+      triple = run(crystal, ["--version"], root).try { |text| text[/Default target: (\S+)/, 1]? } || default_triple
       stdlib = path.map { |p| File.expand_path(p, root) }.find { |p| File.file?(File.join(p, "prelude.cr")) }
       Log.info { "project #{root}: crystal #{version || "?"} target #{triple} stdlib #{stdlib || "not found"}" }
       new(root, path, stdlib, version, triple)
@@ -107,9 +108,10 @@ module ClearLS::Workspace
     rescue File::Error
     end
 
-    private def self.run(cmd : String, args : Array(String)) : String?
+    private def self.run(cmd : String, args : Array(String), dir : String) : String?
       buffer = IO::Memory.new
-      status = Process.run(cmd, args, output: buffer, error: Process::Redirect::Close)
+      dir = Dir.current unless Dir.exists?(dir)
+      status = Process.run(cmd, args, output: buffer, error: Process::Redirect::Close, chdir: dir)
       status.success? ? buffer.to_s : nil
     rescue File::NotFoundError | IO::Error
       nil

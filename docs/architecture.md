@@ -25,7 +25,7 @@ above it in this table):
 | types | `types/ty.cr`, `type_expr.cr`, `infer.cr`, `call_resolver.cr`, `summaries.cr` | interned `Ty`, restriction parser, `Subst`, dataflow `Infer`, overload resolution, per-call-shape return summaries |
 | compiler | `compiler/job.cr`, `output.cr`, `toolchain.cr`, `checker.cr`, `exporter.cr` | `crystal` subprocesses and their output (no LSP types) |
 | ide | `ide/*.cr` | protocol-free features: analysis, locals, typing, completion, type info, tokens, signature help, navigation, references/rename |
-| lsp | `lsp/transport.cr`, `json_rpc.cr`, `server.cr`, `features.cr`, `diagnostics.cr`, `formatting.cr`, `expand.cr`, `context.cr`, `code_actions.cr`, `job.cr`, `warmup.cr` | stdio server; `features.cr` and the others reopen `Server` |
+| lsp | `lsp/transport.cr`, `json_rpc.cr`, `server.cr`, `features.cr`, `diagnostics.cr`, `formatting.cr`, `expand.cr`, `context.cr`, `code_actions.cr`, `job.cr`, `warmup.cr` | stdio server, one index per workspace root; `features.cr` and the others reopen `Server` |
 
 `compiler/` sits beside `types/`: it does not depend on analysis, and
 `workspace/compiler_facts.cr` turns its output into DefMap members.
@@ -159,6 +159,26 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
   body (cancel, budget, `Fiber.yield`). Cancelled by `$/cancelRequest`,
   by edits of files the job read, and by any declaration edit.
 
+### Multi-root (Phase 14)
+
+- `Server#indexes`: one `Workspace::Index` per workspace root (folders
+  mapped to their project; the primary one first). `Server#index` is
+  the index of the current fiber's scope (`with_index`), else the
+  primary one: `request` scopes document requests with
+  `index_for(file)` (longest root containing the file; else the last
+  index a workspace document used, when it has the file; else the first
+  that has it). Jobs and deferred blocks keep the scope of their fiber.
+- Edits, closes and watched files update every index concerned
+  (`indexes_touching`). `Index#seed`: library item trees of the earlier
+  indexes, reused while size and mtime match (`seeded`/`parsed`).
+- Compiler: `compile_dir(path)` (nearest `shard.yml`, climbing out of
+  `lib/<shard>`; else the root) picks the toolchain, entry points and
+  facts exporter; `Checker` takes a toolchain per entry. Facts are kept
+  per entry and merged into the index whose root holds the entry.
+- `didChangeWorkspaceFolders`: `add_root` (+ facts, checks, warm-up),
+  `remove_root` (index, typings, jobs, `forget_root`:
+  `Checker#forget` clears diagnostics only that root reported).
+
 ### Snippets and require completion (Phase 13)
 
 - `IDE::StatementSite` (`statement_site.cr`): is the word at a statement
@@ -253,6 +273,9 @@ the roadmap):
 - One thread: long requests (references, rename, incoming calls) are
   `LSP::Job`s that yield at checkpoints; other requests still run one
   at a time.
-- Single workspace root (first `workspaceFolders` entry / `rootUri`, or
-  the project above it); nested projects get their own views, but
-  diagnostics still run in the root's toolchain.
+- References, rename and call/type hierarchy stay within the index of
+  the file they start from: a path dependency opened as its own folder
+  is a library file in the app's index (renames into it are refused).
+  `crystal env` runs in each root (a version manager's per-project
+  Crystal is used for its index and `CRYSTAL_PATH`); `compiler.path` is
+  one setting for all.

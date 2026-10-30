@@ -1,7 +1,14 @@
 # clear-ls
 
 Experimental Crystal language server written in Crystal, built on
-Tree-sitter with an editor-oriented semantic model. Status: Phase 13 —
+Tree-sitter with an editor-oriented semantic model. Status: Phase 14 —
+
+- multi-root workspaces: every workspace folder is its own project
+  (its own `lib/`, program views, local cache and compiler facts);
+  stdlib and shard declarations parsed once for all of them; each
+  program is compiled in its project's directory, nested projects
+  included; folders added or removed while running
+  (`workspace/didChangeWorkspaceFolders`);
 
 - snippets and require completion: `xs.each do` completes to
   `do |x| ... end` with the method's block parameters; `in`/`when` in a
@@ -113,7 +120,18 @@ bin/clear-ls dump-cfg FILE LINE                          # print a def's control
 The server reads `CRYSTAL_PATH`, version, and target from `crystal env` /
 `crystal --version` (override the executable with `CRYSTAL=...`) and indexes
 the prelude's require closure, required shards, and all `.cr` files under
-the workspace root.
+each workspace root.
+
+**Several projects.** Each workspace folder (or the project above it,
+when the folder is a directory inside a project) is indexed as its own
+project; requests on a file are answered by the project that contains it
+(the innermost, for nested folders), and a stdlib or shard file you
+jumped into by the project you came from. References and rename stay
+within one project; workspace symbols cover all of them. In Neovim, add
+a folder to the running client with
+`:lua vim.lsp.buf.add_workspace_folder("/path/to/other")`: buffers under
+it then attach to the same client (a buffer under another `root_markers`
+match that is not a folder gets a client of its own, as before).
 
 Every setting, and a recommended Neovim setup (including blink.cmp without
 automatic `()`), is in [docs/settings.md](docs/settings.md)
@@ -150,15 +168,17 @@ workspace bodies while idle (no messages for 300 ms) so references
 searches start warm. Settings:
 
 Settings: `cache.*`, `warmup.enabled` ([docs/settings.md](docs/settings.md)).
-`clearLs/clearCache` (no params) deletes the project's cache and the global
-packs it uses, then re-indexes.
+`clearLs/clearCache` (no params) deletes every root's project cache and the
+global packs they use, then re-indexes.
 
 ### Compiler integration
 
 Diagnostics come only from the compiler. In the background, clear-ls runs
 `crystal build --no-codegen` for each program that contains the file: the
-`shard.yml` targets that require it, or the file itself. These checks run at
-startup, when a file is opened, and when a file is saved. The compiler reads
+`shard.yml` targets that require it, or the file itself. Each program is
+compiled in its project's directory (the nearest `shard.yml` above it), so a
+nested project or another workspace folder uses its own `lib/`. These checks
+run at startup, when a file is opened, and when a file is saved. The compiler reads
 files from disk, so diagnostics describe the saved text. Formatting runs
 `crystal tool format` on the buffer text. Settings (`compiler.*`) are in
 [docs/settings.md](docs/settings.md).
