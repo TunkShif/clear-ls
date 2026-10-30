@@ -18,8 +18,8 @@ private TWO = {
   "tool/lib/dep/src/dep.cr"  => "module Dep\n  def self.v2; end\nend\n",
 }
 
-private def with_folders(files, folders, stdlib = STD, &)
-  c = FeatureClient.new(files, stdlib, folders: folders)
+private def with_folders(files, folders, stdlib = STD, compiler = {enabled: false}, &)
+  c = FeatureClient.new(files, stdlib, compiler, folders: folders)
   yield c
 ensure
   c.try(&.cleanup)
@@ -105,6 +105,52 @@ describe "multi-root workspaces" do
   it "maps folders inside one project to that project" do
     with_folders(TWO, ["app/src", "app"]) do |c|
       c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app")]
+    end
+  end
+
+  # Runs the installed compiler. Each program needs its project's own
+  # `lib/dep` (`Dep.v1` / `Dep.v2`): compiled anywhere else, `require
+  # "dep"` fails or finds the wrong version.
+  compiler = {enabled: true, debounceMs: 0}
+  broken = TWO.merge({
+    "app/src/app.cr"  => "require \"dep\"\nDep.v1\n1.app_error\n",
+    "tool/src/tool.cr" => "require \"dep\"\nDep.v2\n1.tool_error\n",
+  })
+
+  it "checks each folder's programs in its own directory" do
+    with_folders(broken, ["app", "tool"], compiler: compiler) do |c|
+      c.wait_compiler
+      c.diagnostics("app/src/app.cr").not_nil!.map(&.["message"].as_s).should eq ["undefined method 'app_error' for Int32"]
+      c.diagnostics("tool/src/tool.cr").not_nil!.map(&.["message"].as_s).should eq ["undefined method 'tool_error' for Int32"]
+    end
+  end
+
+  it "checks a nested project in its own directory" do
+    files = {
+      "shard.yml"              => "name: outer\n",
+      "sub/shard.yml"          => "name: sub\ntargets:\n  sub:\n    main: src/sub.cr\n",
+      "sub/src/sub.cr"         => "require \"dep\"\nDep.v1\n1.sub_error\n",
+      "sub/lib/dep/src/dep.cr" => "module Dep\n  def self.v1; end\nend\n",
+    }
+    with_folders(files, ["."], compiler: compiler) do |c|
+      c.open("sub/src/sub.cr")
+      c.wait_compiler
+      c.diagnostics("sub/src/sub.cr").not_nil!.map(&.["message"].as_s).should eq ["undefined method 'sub_error' for Int32"]
+    end
+  end
+
+  it "keeps compiler facts in the index of the entry's root" do
+    files = TWO.merge({
+      "app/src/app.cr"  => "require \"dep\"\nDep.v1\nclass Gen\n  {% for n in %w(made_in_app) %}\n    def {{n.id}}; 1; end\n  {% end %}\nend\nGen.new.made_in_app\n",
+      "tool/src/tool.cr" => "require \"dep\"\nDep.v2\nclass Gen\n  {% for n in %w(made_in_tool) %}\n    def {{n.id}}; 1; end\n  {% end %}\nend\nGen.new.made_in_tool\n",
+    })
+    with_folders(files, ["app", "tool"], compiler: compiler) do |c|
+      c.wait_compiler
+      app, tool = c.server.indexes
+      app.facts.methods.map(&.header).should contain "made_in_app()"
+      app.facts.methods.map(&.header).should_not contain "made_in_tool()"
+      tool.facts.methods.map(&.header).should contain "made_in_tool()"
+      tool.facts.methods.map(&.header).should_not contain "made_in_app()"
     end
   end
 

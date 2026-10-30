@@ -1868,11 +1868,46 @@ Steps (one commit each; pause at the end of each):
    class each resolve to their own; a shard of the same name with
    different versions in each `lib/`; the second root parses no stdlib
    file; a stdlib file opened from the second root.
+   *Done:* `Server#indexes` (one `Workspace::Index` per root, primary
+   first; `workspace_roots` maps folders as before, folders of one
+   project collapse). Requests on a document (or a hierarchy item) run
+   under `with_index(index_for(file))`, a per-fiber scope, so a job
+   that yields keeps its index; `index` outside a scope is the primary
+   one. `index_for`: the longest root containing the path, else the
+   last index a workspace document used when it has the file, else the
+   first that has it. Edits, closes and watched files update the
+   file's own index and every index that has it. `Index#seed`: library
+   trees of the earlier indexes, reused while size and mtime match
+   (path dependencies still go to the root's local cache).
+   `workspace/symbol` over every index (each file once, files under any
+   root first); warm-up over every root's files; `clearLs/clearCache`
+   clears each root. Specs `features_phase14_spec.cr` (8; the shard and
+   workspace-symbol ones fail on 0.13.0). Release, `--no-cache`: this
+   repo alone 566 ms / 92 MB, Marten alone 870 ms / 119 MB, both
+   1190 ms / 132 MB, Marten as second root 606 ms with 353 stdlib files
+   shared (Marten sits inside this repo as a nested project: its files
+   route to its own index).
 2. **Compiler per project.** Toolchain per project directory, entry
    points per project, exporter per root, facts per index. Specs with
    the real compiler: two folders each with a program needing its own
    `lib/` shard check clean; a nested project (not a folder) checked in
    its own directory.
+   *Done:* `Compiler::Checker` takes a toolchain per entry (and extra
+   sources per entry). `Server#compile_dir(path)`: the nearest
+   `shard.yml` above the file, climbing out of `lib/<shard>` (an
+   installed shard compiles with the project that installed it), else
+   the workspace root holding it. Toolchains and `EntryPoints` are kept
+   per directory; checks, `tool context` and `tool expand` run there,
+   `tool format` in the request's root. Startup checks every root's
+   targets. `compiler.entries` applies to the primary root and to other
+   roots that have one of the listed files. One facts exporter per
+   compile directory (methods under it); facts are kept per entry,
+   merged into the index of the root holding the entry, and cached in
+   that root's local cache. Specs (real compiler): two folders each
+   needing their own `lib/dep` get only their own error; a nested
+   project (not a folder) is checked in `sub/`; generated methods land
+   in their own root's facts only. All three fail on step 1. `make
+   spec` 335 examples; Neovim checks unchanged.
 3. **Folder changes.** `didChangeWorkspaceFolders` add/remove. Specs:
    add a folder (definitions and diagnostics there), remove it
    (diagnostics cleared, files back to the fallback views).

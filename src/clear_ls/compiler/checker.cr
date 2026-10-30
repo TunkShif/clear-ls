@@ -13,11 +13,18 @@ module ClearLS::Compiler
   #
   # Requests and publishing run on fibers of the current execution context;
   # nothing here waits on the caller's fiber.
+  #
+  # Each entry is compiled by its project's toolchain (`toolchain_for`):
+  # in that project's directory, so its `lib/` resolves.
   class Checker
     alias Publish = Proc(String, Array(Problem), Nil)
+    alias ToolchainFor = Proc(String, Toolchain)
 
     property debounce : Time::Span = 150.milliseconds
     property extra_sources : Array(String) = [] of String
+    # Extra sources per entry (the facts exporter of its project); wins
+    # over `extra_sources`.
+    property extra_sources_for : Proc(String, Array(String))? = nil
     property flags : Array(String) = [] of String
     # Called with each completed job result (facts exporter output etc.).
     property on_result : Proc(String, Job::Result, Nil)? = nil
@@ -29,7 +36,12 @@ module ClearLS::Compiler
     @published = {} of String => Array(Problem)
     @running = 0
 
-    def initialize(@toolchain : Toolchain, @on_publish : Publish)
+    def initialize(@toolchain_for : ToolchainFor, @on_publish : Publish)
+    end
+
+    # One toolchain for every entry.
+    def self.new(toolchain : Toolchain, on_publish : Publish) : Checker
+      new(->(_e : String) { toolchain }, on_publish)
     end
 
     # True while a job is pending or running.
@@ -63,7 +75,9 @@ module ClearLS::Compiler
     private def run(entry : String, gen : Int32) : Nil
       sleep @debounce
       return unless @generation[entry] == gen
-      job = @toolchain.check(entry, @extra_sources, @flags)
+      toolchain = @toolchain_for.call(entry)
+      extra = @extra_sources_for.try(&.call(entry)) || @extra_sources
+      job = toolchain.check(entry, extra, @flags)
       @jobs[entry] = job
       result = job.wait
       return unless @generation[entry] == gen
@@ -76,9 +90,9 @@ module ClearLS::Compiler
         Log.warn { "compiler timed out on #{entry} after #{result.elapsed.total_seconds.round(1)}s" }
         return
       end
-      Log.info { "checked #{entry} in #{result.elapsed.total_milliseconds.round}ms (exit #{result.exit_code})" }
+      Log.info { "checked #{entry} (in #{toolchain.root}) in #{result.elapsed.total_milliseconds.round}ms (exit #{result.exit_code})" }
       @on_result.try &.call(entry, result)
-      record_problems(entry, Toolchain.problems(result, @toolchain.root))
+      record_problems(entry, Toolchain.problems(result, toolchain.root))
     rescue ex
       Log.error(exception: ex) { "check #{entry} failed" }
     ensure

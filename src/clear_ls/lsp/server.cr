@@ -450,7 +450,7 @@ module ClearLS::LSP
       warmup_restart
       # This session's facts are current: keep them in the new index.
       unless @entry_facts.empty?
-        primary_index.local.try(&.write_facts(@entry_facts))
+        write_all_facts
         apply_entry_facts
       end
       {cleared: true, files: @indexes.sum(&.size)}

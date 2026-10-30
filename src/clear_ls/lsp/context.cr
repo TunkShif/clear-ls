@@ -53,7 +53,7 @@ module ClearLS::LSP
       line = lines.line_of(body.range.start)
       pos = lines.position(lines.line_range(line).end, PositionEncoding::UTF32)
       entry = (program_entries(state.uri) || [key.file]).first
-      job = toolchain.context(entry, key.file, pos.line.to_i + 1, pos.column.to_i + 1)
+      job = toolchain_in(compile_dir(entry)).context(entry, key.file, pos.line.to_i + 1, pos.column.to_i + 1)
       @contexts[key] = nil
       @context_running = true
       spawn(name: "clear-ls-context") do

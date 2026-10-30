@@ -28,7 +28,7 @@ module ClearLS::LSP
       offset = lines.offset(position(params["position"]), @encoding)
       pos = lines.position(offset, PositionEncoding::UTF32)
       entry = (program_entries(uri) || [path]).first
-      job = toolchain.expand(entry, path, pos.line.to_i + 1, pos.column.to_i + 1)
+      job = toolchain_in(compile_dir(entry)).expand(entry, path, pos.line.to_i + 1, pos.column.to_i + 1)
       Deferred.new { expansion_json(job.wait) }
     end
 

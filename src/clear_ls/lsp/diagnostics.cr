@@ -11,11 +11,18 @@ module ClearLS::LSP
   # from disk, so results describe saved contents; positions are converted
   # with the saved text.
   #
+  # Every program is compiled in the directory of its project (the
+  # nearest `shard.yml` above the entry point, else the workspace root
+  # that holds it), so each project's `lib/` resolves. Entry points are
+  # that project's shard targets (`compiler.entries` per workspace root);
+  # compiler facts go to the index of the root that holds the entry.
+  #
   # Settings `compiler.*` (settings.cr).
   class Server
     @checker : Compiler::Checker? = nil
-    @toolchain : Compiler::Toolchain? = nil
-    @entry_points : Compiler::EntryPoints? = nil
+    # By project directory.
+    @toolchains = {} of String => Compiler::Toolchain
+    @entry_points = {} of String => Compiler::EntryPoints
     # Entry points checked since the last change on disk.
     @checked = Set(String).new
 
@@ -25,45 +32,83 @@ module ClearLS::LSP
       @settings.bool("compiler.enabled")
     end
 
-    # The `crystal` executable for the workspace.
+    # The `crystal` executable, run in the current request's root (for
+    # `tool format`, which reads no other file).
     def toolchain : Compiler::Toolchain
-      @toolchain ||= begin
+      toolchain_in(@indexes.empty? ? (@roots.first? || Dir.current) : index.project.root)
+    end
+
+    # The toolchain running in *dir*.
+    def toolchain_in(dir : String) : Compiler::Toolchain
+      @toolchains[dir] ||= begin
         crystal = @settings.string?("compiler.path") || ENV["CRYSTAL"]? || "crystal"
-        Compiler::Toolchain.new(crystal, @indexes.first?.try(&.project.root) || @roots.first? || Dir.current)
+        Compiler::Toolchain.new(crystal, dir)
       end
     end
 
-    private def entry_points : Compiler::EntryPoints
-      @entry_points ||= begin
-        root = primary_index.project.root
-        entries = @settings.strings?("compiler.entries").try &.map { |e| File.expand_path(e, root) }
-        Compiler::EntryPoints.new(root, entries)
+    # Directory a program at *path* is compiled in: the project above it
+    # (a nested project is its own; an installed shard in `lib/` belongs
+    # to the project that installed it), else the workspace root holding
+    # it, else the primary root.
+    def compile_dir(path : String) : String
+      dir = Workspace::Project.find_root(path)
+      while dir && File.basename(File.dirname(dir)) == "lib" && (outer = Workspace::Project.find_root(File.dirname(dir)))
+        dir = outer
+      end
+      dir || owner_index(path).try(&.project.root) ||
+        @indexes.first?.try(&.project.root) || @roots.first? || Dir.current
+    end
+
+    # Entry points of the project in *dir*: `compiler.entries` relative
+    # to it, else its shard targets. The setting applies to the primary
+    # root, and to other workspace roots where one of its files exists.
+    private def entry_points(dir : String) : Compiler::EntryPoints
+      @entry_points[dir] ||= begin
+        entries = nil.as(Array(String)?)
+        if (i = @roots.index(dir)) && (list = @settings.strings?("compiler.entries"))
+          full = list.map { |e| File.expand_path(e, dir) }
+          entries = full if i == 0 || full.any? { |e| File.file?(e) }
+        end
+        Compiler::EntryPoints.new(dir, entries)
       end
     end
 
     private def start_compiler : Nil
       return unless compiler_enabled?
-      checker = Compiler::Checker.new(toolchain,
+      checker = Compiler::Checker.new(->(entry : String) { toolchain_in(compile_dir(entry)) },
         ->(file : String, problems : Array(Compiler::Problem)) { publish_problems(file, problems) })
       checker.debounce = @settings.int("compiler.debounceMs").milliseconds
       if @settings.bool("compiler.facts")
-        exporter = File.join(Dir.tempdir, "clear-ls-facts-#{Process.pid}.cr")
-        File.write(exporter, Compiler::Exporter.source(primary_index.project.root))
-        @exporter_file = exporter
-        checker.extra_sources = [exporter]
+        checker.extra_sources_for = ->(entry : String) { [exporter_for(compile_dir(entry))] }
         checker.on_result = ->(entry : String, result : Compiler::Job::Result) { import_facts(entry, result) }
       end
       @checker = checker
-      check_entries(entry_points.targets)
+      @indexes.each { |idx| check_root(idx) }
+    end
+
+    # Checks the programs of a newly indexed root.
+    private def check_root(idx : Workspace::Index) : Nil
+      check_entries(entry_points(idx.project.root).targets)
     end
 
     private def stop_compiler : Nil
       @checker.try(&.stop)
-      @exporter_file.try { |f| File.delete?(f) }
+      @exporter_files.each_value { |f| File.delete?(f) }
+      @exporter_files.clear
     end
 
-    @exporter_file : String? = nil
-    # Facts per entry point; merged into the index.
+    # The facts exporter for programs compiled in *dir* (it keeps methods
+    # under that directory), written on first use.
+    private def exporter_for(dir : String) : String
+      @exporter_files[dir] ||= begin
+        path = File.join(Dir.tempdir, "clear-ls-facts-#{Process.pid}-#{@exporter_files.size}.cr")
+        File.write(path, Compiler::Exporter.source(dir))
+        path
+      end
+    end
+
+    @exporter_files = {} of String => String
+    # Facts per entry point; merged into the index of the entry's root.
     @entry_facts = {} of String => Workspace::CompilerFacts
 
     # Takes the facts from one check. A section that the compile did not
@@ -74,8 +119,23 @@ module ClearLS::LSP
       methods = parsed.methods || old.try(&.methods) || [] of Compiler::Exporter::MethodFact
       ivars = parsed.ivars || old.try(&.ivars) || [] of Compiler::Exporter::IvarFact
       @entry_facts[entry] = Workspace::CompilerFacts.snapshot(methods, ivars)
-      @indexes.first?.try(&.local).try(&.write_facts(@entry_facts))
+      idx = facts_index(entry)
+      idx.try(&.local).try(&.write_facts(entry_facts_of(idx)))
       apply_entry_facts
+    end
+
+    # The index an entry point's facts belong to.
+    private def facts_index(entry : String) : Workspace::Index?
+      owner_index(entry) || @indexes.first?
+    end
+
+    private def entry_facts_of(idx : Workspace::Index?) : Hash(String, Workspace::CompilerFacts)
+      @entry_facts.select { |e, _| facts_index(e).same?(idx) }
+    end
+
+    # Writes every index's facts to its local cache (after a cache clear).
+    private def write_all_facts : Nil
+      @indexes.each { |idx| idx.local.try(&.write_facts(entry_facts_of(idx))) }
     end
 
     # Facts of the previous session (local cache), applied before the
@@ -83,23 +143,30 @@ module ClearLS::LSP
     # the digest taken with them. The first check replaces them.
     private def restore_facts : Nil
       return unless compiler_enabled? && @settings.bool("compiler.facts")
-      local = @indexes.first?.try(&.local) || return
-      saved = local.read_facts
-      return if saved.empty?
-      @entry_facts = saved
-      apply_entry_facts
+      restored = false
+      @indexes.each do |idx|
+        saved = idx.local.try(&.read_facts) || next
+        saved.each { |e, f| (@entry_facts[e] = f) if facts_index(e).same?(idx) }
+        restored = true unless saved.empty?
+      end
+      apply_entry_facts if restored
     end
 
+    # Sets each index's facts to the merge of its entries' facts.
     private def apply_entry_facts : Nil
-      digests = {} of String => UInt64
-      @entry_facts.each_value { |f| digests.merge!(f.digests) }
-      merged = Workspace::CompilerFacts.new(
-        @entry_facts.values.flat_map(&.methods).uniq,
-        @entry_facts.values.flat_map(&.ivars).uniq, digests)
-      idx = @indexes.first? || return
-      changed = idx.facts != merged
-      idx.facts = merged
-      Log.info { "compiler facts: #{merged.methods.size} methods, #{merged.ivars.size} ivars" }
+      changed = false
+      @indexes.each do |idx|
+        mine = entry_facts_of(idx)
+        digests = {} of String => UInt64
+        mine.each_value { |f| digests.merge!(f.digests) }
+        merged = Workspace::CompilerFacts.new(
+          mine.values.flat_map(&.methods).uniq,
+          mine.values.flat_map(&.ivars).uniq, digests)
+        next if idx.facts == merged
+        idx.facts = merged
+        changed = true
+        Log.info { "compiler facts: #{merged.methods.size} methods, #{merged.ivars.size} ivars (#{idx.project.root})" }
+      end
       # Hints and tokens computed before the facts may have been unknown.
       refresh_views if changed
     end
@@ -156,8 +223,9 @@ module ClearLS::LSP
     private def program_entries(uri : String) : Array(String)?
       path = VFS.path_for(uri) || return
       return unless path.ends_with?(".cr") && File.file?(path)
-      idx = @indexes.first? || return
-      entry_points.for(path) do |p|
+      return if @indexes.empty?
+      idx = index_for(@vfs.id_for(uri))
+      entry_points(compile_dir(path)).for(path) do |p|
         idx.entry?(@vfs.id_for(VFS.uri_for(p))).try(&.requires)
       end
     end
