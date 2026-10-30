@@ -29,13 +29,13 @@ module ClearLS::LSP
     def toolchain : Compiler::Toolchain
       @toolchain ||= begin
         crystal = @settings.string?("compiler.path") || ENV["CRYSTAL"]? || "crystal"
-        Compiler::Toolchain.new(crystal, @index.try(&.project.root) || @root)
+        Compiler::Toolchain.new(crystal, @indexes.first?.try(&.project.root) || @roots.first? || Dir.current)
       end
     end
 
     private def entry_points : Compiler::EntryPoints
       @entry_points ||= begin
-        root = index.project.root
+        root = primary_index.project.root
         entries = @settings.strings?("compiler.entries").try &.map { |e| File.expand_path(e, root) }
         Compiler::EntryPoints.new(root, entries)
       end
@@ -48,7 +48,7 @@ module ClearLS::LSP
       checker.debounce = @settings.int("compiler.debounceMs").milliseconds
       if @settings.bool("compiler.facts")
         exporter = File.join(Dir.tempdir, "clear-ls-facts-#{Process.pid}.cr")
-        File.write(exporter, Compiler::Exporter.source(index.project.root))
+        File.write(exporter, Compiler::Exporter.source(primary_index.project.root))
         @exporter_file = exporter
         checker.extra_sources = [exporter]
         checker.on_result = ->(entry : String, result : Compiler::Job::Result) { import_facts(entry, result) }
@@ -74,7 +74,7 @@ module ClearLS::LSP
       methods = parsed.methods || old.try(&.methods) || [] of Compiler::Exporter::MethodFact
       ivars = parsed.ivars || old.try(&.ivars) || [] of Compiler::Exporter::IvarFact
       @entry_facts[entry] = Workspace::CompilerFacts.snapshot(methods, ivars)
-      @index.try(&.local).try(&.write_facts(@entry_facts))
+      @indexes.first?.try(&.local).try(&.write_facts(@entry_facts))
       apply_entry_facts
     end
 
@@ -83,7 +83,7 @@ module ClearLS::LSP
     # the digest taken with them. The first check replaces them.
     private def restore_facts : Nil
       return unless compiler_enabled? && @settings.bool("compiler.facts")
-      local = @index.try(&.local) || return
+      local = @indexes.first?.try(&.local) || return
       saved = local.read_facts
       return if saved.empty?
       @entry_facts = saved
@@ -96,7 +96,7 @@ module ClearLS::LSP
       merged = Workspace::CompilerFacts.new(
         @entry_facts.values.flat_map(&.methods).uniq,
         @entry_facts.values.flat_map(&.ivars).uniq, digests)
-      idx = @index || return
+      idx = @indexes.first? || return
       changed = idx.facts != merged
       idx.facts = merged
       Log.info { "compiler facts: #{merged.methods.size} methods, #{merged.ivars.size} ivars" }
@@ -156,7 +156,7 @@ module ClearLS::LSP
     private def program_entries(uri : String) : Array(String)?
       path = VFS.path_for(uri) || return
       return unless path.ends_with?(".cr") && File.file?(path)
-      idx = @index || return
+      idx = @indexes.first? || return
       entry_points.for(path) do |p|
         idx.entry?(@vfs.id_for(VFS.uri_for(p))).try(&.requires)
       end

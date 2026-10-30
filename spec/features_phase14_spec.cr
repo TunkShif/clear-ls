@@ -1,0 +1,123 @@
+require "./support/feature_client"
+
+# Phase 14: multi-root workspaces.
+
+private STD = {
+  "object.cr" => "class Object\n  def to_s : String\n    \"\"\n  end\nend\n",
+  "int.cr"    => "struct Int32\n  def +(other : Int32) : Int32\n    self\n  end\nend\n",
+}
+
+# Two projects side by side, each with a `Widget` of its own and its own
+# version of the shard `dep` in `lib/`.
+private TWO = {
+  "app/shard.yml"            => "name: app\ntargets:\n  app:\n    main: src/app.cr\n",
+  "app/src/app.cr"           => "require \"dep\"\nclass Widget\n  def app_only; end\nend\nWidget.new.app_only\nDep.v1\n",
+  "app/lib/dep/src/dep.cr"   => "module Dep\n  def self.v1; end\nend\n",
+  "tool/shard.yml"           => "name: tool\ntargets:\n  tool:\n    main: src/tool.cr\n",
+  "tool/src/tool.cr"         => "require \"dep\"\nclass Widget\n  def tool_only; end\nend\nWidget.new.tool_only\nDep.v2\n",
+  "tool/lib/dep/src/dep.cr"  => "module Dep\n  def self.v2; end\nend\n",
+}
+
+private def with_folders(files, folders, stdlib = STD, &)
+  c = FeatureClient.new(files, stdlib, folders: folders)
+  yield c
+ensure
+  c.try(&.cleanup)
+end
+
+private def definition(c : FeatureClient, path : String, needle : String, shift = 0) : Array(String)
+  u = c.open(path)
+  r = c.request("textDocument/definition", {textDocument: {uri: u}, position: c.pos(path, needle, shift)})
+  r.as_a.map { |l| l["uri"].as_s }
+end
+
+describe "multi-root workspaces" do
+  it "indexes every workspace folder as its own project" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app"), File.join(c.root, "tool")]
+      definition(c, "app/src/app.cr", "Widget.new").should eq [c.uri("app/src/app.cr")]
+      definition(c, "tool/src/tool.cr", "Widget.new").should eq [c.uri("tool/src/tool.cr")]
+    end
+  end
+
+  it "resolves shards in each root's own lib/" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      definition(c, "app/src/app.cr", "Dep.v1", 4).should eq [c.uri("app/lib/dep/src/dep.cr")]
+      definition(c, "tool/src/tool.cr", "Dep.v2", 4).should eq [c.uri("tool/lib/dep/src/dep.cr")]
+      # The other root's shard version isn't visible.
+      u = c.open("tool/src/tool.cr")
+      items = c.request("textDocument/completion", {textDocument: {uri: u}, position: c.pos("tool/src/tool.cr", "Dep.v2", 4)})["items"].as_a
+      labels = items.map(&.["label"].as_s)
+      labels.should contain "v2"
+      labels.should_not contain "v1"
+    end
+  end
+
+  it "parses library files once for all roots" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      first, second = c.server.indexes
+      first.parsed.should be >= STD.size
+      # The fake stdlib (prelude + files) comes from the first root.
+      second.seeded.should eq STD.size + 1
+      # Each root's own `lib/dep` differs: parsed by its index.
+      second.parsed.should eq 2 # tool.cr, its dep.cr
+    end
+  end
+
+  it "finds workspace symbols of every root without opening files" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      r = c.request("workspace/symbol", {query: "tool_only"})
+      r.as_a.map { |s| s["location"]["uri"].as_s }.should eq [c.uri("tool/src/tool.cr")]
+    end
+  end
+
+  it "answers a library file from the index of the document that led there" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      std = File.join(c.root, ".stdlib", "object.cr")
+      definition(c, "tool/src/tool.cr", "Widget.new").should eq [c.uri("tool/src/tool.cr")]
+      u = VFS.uri_for(std)
+      c.notify("textDocument/didOpen", {textDocument: {uri: u, languageId: "crystal", version: 1, text: File.read(std)}})
+      r = c.request("workspace/symbol", {query: "Widget"})
+      r.as_a.map { |s| s["location"]["uri"].as_s }.sort.should eq [c.uri("app/src/app.cr"), c.uri("tool/src/tool.cr")].sort
+      hover = c.request("textDocument/hover", {textDocument: {uri: u}, position: {line: 1, character: 7}})
+      hover["contents"]["value"].as_s.should contain "to_s"
+      std_id = c.server.vfs.id_for(u)
+      c.server.index_for(std_id).project.root.should eq File.join(c.root, "tool")
+      definition(c, "app/src/app.cr", "Widget.new")
+      c.server.index_for(std_id).project.root.should eq File.join(c.root, "app")
+    end
+  end
+
+  it "keeps a nested folder apart from its parent" do
+    files = {
+      "shard.yml"         => "name: outer\ntargets:\n  outer:\n    main: src/outer.cr\n",
+      "src/outer.cr"      => "class Thing\nend\nThing.new\n",
+      "sub/shard.yml"     => "name: sub\ntargets:\n  sub:\n    main: src/sub.cr\n",
+      "sub/src/sub.cr"    => "class Thing\n  def sub; end\nend\nThing.new.sub\n",
+    }
+    with_folders(files, [".", "sub"]) do |c|
+      c.server.indexes.size.should eq 2
+      definition(c, "sub/src/sub.cr", "Thing.new").should eq [c.uri("sub/src/sub.cr")]
+      definition(c, "src/outer.cr", "Thing.new").should eq [c.uri("src/outer.cr")]
+    end
+  end
+
+  it "maps folders inside one project to that project" do
+    with_folders(TWO, ["app/src", "app"]) do |c|
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app")]
+    end
+  end
+
+  it "applies edits to the index that owns the file" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      u = c.open("tool/src/tool.cr")
+      text = File.read(File.join(c.root, "tool/src/tool.cr")).sub("def tool_only; end", "def tool_only; end\n  def added; end")
+      c.notify("textDocument/didChange", {textDocument: {uri: u, version: 2}, contentChanges: [{text: text}]})
+      items = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 5, character: 11}})["items"].as_a
+      items.map(&.["label"].as_s).should contain "added"
+      app = c.open("app/src/app.cr")
+      items = c.request("textDocument/completion", {textDocument: {uri: app}, position: {line: 4, character: 11}})["items"].as_a
+      items.map(&.["label"].as_s).should_not contain "added"
+    end
+  end
+end

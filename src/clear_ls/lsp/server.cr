@@ -42,7 +42,9 @@ module ClearLS::LSP
     getter encoding = PositionEncoding::UTF16
     # Process exit code once `exit` arrives: 0 after shutdown, else 1.
     getter exit_code : Int32? = nil
-    @index : Workspace::Index? = nil
+    # One index per workspace root, in root order; the first is the
+    # primary one (`Server#index` outside a request).
+    getter indexes = [] of Workspace::Index
     # Overridable for tests: builds the project for a workspace root.
     property project_factory : Proc(String, Workspace::Project) = ->(root : String) { Workspace::Project.detect(root) }
     property index_workers : Int32? = nil
@@ -56,8 +58,68 @@ module ClearLS::LSP
     def initialize(@transport : Transport)
     end
 
+    # The index the current request is answered from (`#with_index`),
+    # else the primary one.
     def index : Workspace::Index
-      @index || raise ResponseError.new(ErrorCode::ServerNotInitialized, "workspace not indexed")
+      @scoped[Fiber.current.object_id]? || primary_index
+    end
+
+    def primary_index : Workspace::Index
+      @indexes.first? || raise ResponseError.new(ErrorCode::ServerNotInitialized, "workspace not indexed")
+    end
+
+    # Index per fiber: requests and jobs run on their own fibers, so a
+    # job that yields keeps its index while others answer from theirs.
+    @scoped = {} of UInt64 => Workspace::Index
+    # Index of the last workspace document a request came from: answers
+    # for files under no root (a stdlib file opened by go-to-definition).
+    @last_index : Workspace::Index? = nil
+
+    # Runs the block with *idx* as `#index` on this fiber.
+    def with_index(idx : Workspace::Index, & : -> T) : T forall T
+      fid = Fiber.current.object_id
+      prev = @scoped[fid]?
+      @scoped[fid] = idx
+      begin
+        yield
+      ensure
+        prev ? (@scoped[fid] = prev) : @scoped.delete(fid)
+      end
+    end
+
+    # The index whose root holds *path* (longest root: a nested folder
+    # wins over its parent).
+    def owner_index(path : String) : Workspace::Index?
+      best = nil.as(Workspace::Index?)
+      @indexes.each do |i|
+        root = i.project.root
+        next unless path.starts_with?(root.ends_with?('/') ? root : root + "/")
+        best = i if best.nil? || root.size > best.project.root.size
+      end
+      best
+    end
+
+    # The index that answers for *file*: its root's, else the last used
+    # one when it has the file, else the first that has it, else the
+    # primary one.
+    def index_for(file : FileId) : Workspace::Index
+      if (path = VFS.path_for(@vfs.uri(file))) && (own = owner_index(path))
+        return own
+      end
+      if (last = @last_index) && last.entry?(file) && @indexes.includes?(last)
+        return last
+      end
+      @indexes.find(&.entry?(file)) || primary_index
+    end
+
+    # Indexes to update when *file* changes: its root's and every index
+    # that has it (the primary one for a file nobody has yet).
+    private def indexes_touching(file : FileId) : Array(Workspace::Index)
+      return [] of Workspace::Index if @indexes.empty?
+      own = VFS.path_for(@vfs.uri(file)).try { |p| owner_index(p) }
+      list = @indexes.select { |i| i.same?(own) || i.entry?(file) }
+      list << primary_index if list.empty?
+      list
     end
 
     def run : Int32
@@ -206,12 +268,29 @@ module ClearLS::LSP
 
       case method
       when "initialize"         then initialize_request(params)
-      when "shutdown"           then stop_compiler; @index.try(&.flush_cache); @state = State::ShuttingDown; nil
+      when "shutdown"           then stop_compiler; @indexes.each(&.flush_cache); @state = State::ShuttingDown; nil
       when "clearLs/syntaxTree" then syntax_tree(params)
       when "clearLs/expandMacro" then expand_macro(params)
       when "clearLs/clearCache" then clear_cache
-      else                           feature_request(method, params)
+      else
+        idx = request_index(method, params)
+        idx ? with_index(idx) { feature_request(method, params) } : feature_request(method, params)
       end
+    end
+
+    # The index for a request on a document (or a hierarchy item); nil
+    # for workspace-wide requests.
+    private def request_index(method : String, params : JSON::Any) : Workspace::Index?
+      return nil if @indexes.size <= 1
+      file = if method.starts_with?("typeHierarchy/") && (f = params.dig?("item", "data", "file").try(&.as_i64?))
+               FileId.new(f.to_u32)
+             elsif uri = params.dig?("textDocument", "uri").try(&.as_s?) || params.dig?("item", "uri").try(&.as_s?)
+               @vfs.id_for(uri)
+             end
+      return nil unless file
+      idx = index_for(file)
+      @last_index = idx if VFS.path_for(@vfs.uri(file)).try { |p| owner_index(p) }
+      idx
     end
 
     private def handle_notification(msg : Message) : Nil
@@ -251,7 +330,7 @@ module ClearLS::LSP
       encodings = offered.compact_map { |e| e.as_s?.try { |s| PositionEncoding.from_lsp?(s) } }
       # Byte offsets are native for us; prefer them, then utf-32, else utf-16.
       @encoding = [PositionEncoding::UTF8, PositionEncoding::UTF32].find { |e| encodings.includes?(e) } || PositionEncoding::UTF16
-      @root = workspace_root(params)
+      @roots = workspace_roots(params)
       @client_capabilities = params["capabilities"]? || @client_capabilities
       @settings.apply(params["initializationOptions"]?)
       @state = State::Initialized
@@ -269,43 +348,67 @@ module ClearLS::LSP
       }
     end
 
-    @root : String = Dir.current
+    # Project roots of the workspace folders, primary first.
+    getter roots = [] of String
     @client_capabilities = JSON::Any.new({} of String => JSON::Any)
 
-    # The client's root, or the project containing it when the client
-    # opened a directory inside a project (no `shard.yml` of its own).
-    private def workspace_root(params : JSON::Any) : String
-      root = client_root(params)
-      return root if File.file?(File.join(root, "shard.yml"))
-      Workspace::Project.find_root(File.join(root, "x")) || root
+    # Project roots of the client's workspace folders (else `rootUri`):
+    # each folder, or the project containing it when the folder is a
+    # directory inside a project (no `shard.yml` of its own). Folders of
+    # one project share its root.
+    private def workspace_roots(params : JSON::Any) : Array(String)
+      client_roots(params).map { |r| project_root(r) }.uniq
     end
 
-    private def client_root(params : JSON::Any) : String
+    private def project_root(dir : String) : String
+      return dir if File.file?(File.join(dir, "shard.yml"))
+      Workspace::Project.find_root(File.join(dir, "x")) || dir
+    end
+
+    private def client_roots(params : JSON::Any) : Array(String)
       if folders = params["workspaceFolders"]?.try(&.as_a?)
-        folders.each { |f| (p = VFS.path_for(f["uri"].as_s)) && return p }
+        roots = folders.compact_map { |f| f["uri"]?.try(&.as_s?).try { |u| VFS.path_for(u) } }
+        return roots unless roots.empty?
       end
-      params["rootUri"]?.try(&.as_s?).try { |u| VFS.path_for(u) } ||
-        params["rootPath"]?.try(&.as_s?) || Dir.current
+      [params["rootUri"]?.try(&.as_s?).try { |u| VFS.path_for(u) } ||
+        params["rootPath"]?.try(&.as_s?) || Dir.current]
     end
 
-    # Indexes the workspace. Runs synchronously on `initialized`: requests
+    # Indexes every root. Runs synchronously on `initialized`: requests
     # queue behind it, which keeps every answer consistent with a complete
     # index (stdlib + workspace takes well under a second).
     private def load_index : Nil
-      return if @index
-      elapsed = Time.measure do
-        project = @project_factory.call(@root)
-        idx = Workspace::Index.new(project, @vfs)
-        attach_cache(idx, project) if cache_enabled?
-        workers = @index_workers
-        workers ? idx.load(workers) : idx.load
-        # Open buffers may have arrived before indexing; they win.
-        @vfs.snapshot.files.each { |f| idx.update(f) if f.overlay? }
-        idx.def_map # build now rather than on the first request
-        @index = idx
-      end
-      Log.info { "index ready: #{index.size} files in #{elapsed.total_milliseconds.round}ms#{cache_summary}" }
+      return unless @indexes.empty?
+      @roots.each { |r| add_root(r) }
       restore_facts
+    end
+
+    # Indexes one root. Library files another index has already parsed
+    # are reused (`Index#seed`).
+    private def add_root(root : String) : Workspace::Index
+      idx = nil.as(Workspace::Index?)
+      elapsed = Time.measure do
+        project = @project_factory.call(root)
+        i = Workspace::Index.new(project, @vfs)
+        attach_cache(i, project) if cache_enabled?
+        unless @indexes.empty?
+          seed = {} of String => {Int64, Int64, Items::ItemTree}
+          @indexes.each { |o| seed.merge!(o.library_trees) }
+          i.seed = seed
+        end
+        workers = @index_workers
+        workers ? i.load(workers) : i.load
+        i.seed = nil
+        @indexes << i
+        # Open buffers may have arrived before indexing; they win.
+        @vfs.snapshot.files.each { |f| i.update(f) if f.overlay? && indexes_touching(f.id).includes?(i) }
+        i.def_map # build now rather than on the first request
+        idx = i
+      end
+      idx = idx.not_nil!
+      seeded = idx.seeded > 0 ? ", #{idx.seeded} shared" : ""
+      Log.info { "index ready: #{root}: #{idx.size} files in #{elapsed.total_milliseconds.round}ms#{cache_summary(idx)}#{seeded}" }
+      idx
     end
 
     private def attach_cache(idx : Workspace::Index, project : Workspace::Project) : Nil
@@ -324,8 +427,7 @@ module ClearLS::LSP
       "#{project.crystal_version || "unknown"} #{project.target_triple} #{project.crystal_path.join(':')}"
     end
 
-    private def cache_summary : String
-      idx = @index || return ""
+    private def cache_summary(idx : Workspace::Index) : String
       g = idx.store
       l = idx.local
       return "" unless g || l
@@ -333,23 +435,25 @@ module ClearLS::LSP
       "local #{l.try(&.hits) || 0}/#{(l.try(&.hits) || 0) + (l.try(&.misses) || 0)})"
     end
 
-    # `clearLs/clearCache`: drops this project's local cache and the
-    # global packs it uses, then re-indexes from source.
+    # `clearLs/clearCache`: drops every root's local cache and the global
+    # packs they use, then re-indexes from source.
     private def clear_cache
-      idx = @index || raise ResponseError.new(ErrorCode::ServerNotInitialized, "workspace not indexed")
-      project = idx.project
-      idx.store.try { |st| st.pack_keys.each { |k| File.delete?(st.pack_path(k)) } }
-      Cache::Local.clear(project.root)
-      @index = nil
+      raise ResponseError.new(ErrorCode::ServerNotInitialized, "workspace not indexed") if @indexes.empty?
+      @indexes.each do |idx|
+        idx.store.try { |st| st.pack_keys.each { |k| File.delete?(st.pack_path(k)) } }
+        Cache::Local.clear(idx.project.root)
+      end
+      @indexes.clear
+      @last_index = nil
       @typings.clear
       load_index
       warmup_restart
       # This session's facts are current: keep them in the new index.
       unless @entry_facts.empty?
-        index.local.try(&.write_facts(@entry_facts))
+        primary_index.local.try(&.write_facts(@entry_facts))
         apply_entry_facts
       end
-      {cleared: true, files: index.size}
+      {cleared: true, files: @indexes.sum(&.size)}
     end
 
     private def cache_enabled? : Bool
@@ -382,7 +486,7 @@ module ClearLS::LSP
     private def did_open(params : JSON::Any) : Nil
       doc = params["textDocument"]
       state = @vfs.open(doc["uri"].as_s, doc["text"].as_s, doc["version"].as_i64)
-      @index.try(&.update(state))
+      indexes_touching(state.id).each(&.update(state))
       compiler_opened(state.uri)
       Log.debug { "didOpen #{state.uri} v#{state.version} (#{state.text.bytesize} bytes)" }
     end
@@ -398,8 +502,8 @@ module ClearLS::LSP
         end
       end
       state = @vfs.change(doc["uri"].as_s, doc["version"].as_i64, changes, @encoding)
-      decls_changed = @index.try(&.update(state))
-      edited(state.id, !!decls_changed)
+      decls_changed = indexes_touching(state.id).map(&.update(state)).any?
+      edited(state.id, decls_changed)
       Log.debug do
         ranges = state.tree.changed_ranges.try(&.join(", ")) || "full"
         "didChange #{state.uri} v#{state.version}: #{changes.size} edit(s), changed [#{ranges}], error=#{state.tree.has_error?}, decls_changed=#{decls_changed}"
@@ -411,13 +515,13 @@ module ClearLS::LSP
       @vfs.close(uri)
       evict_bodies(@vfs.id_for(uri))
       # Back to the disk contents (or forget an unsaved untitled buffer).
-      if idx = @index
-        if state = @vfs.file?(uri)
-          edited(state.id, idx.update(state))
-        else
-          edited(@vfs.id_for(uri), true)
-          idx.remove(@vfs.id_for(uri))
-        end
+      return if @indexes.empty?
+      if state = @vfs.file?(uri)
+        edited(state.id, indexes_touching(state.id).map(&.update(state)).any?)
+      else
+        id = @vfs.id_for(uri)
+        edited(id, true)
+        @indexes.each(&.remove(id))
       end
     end
 
@@ -427,12 +531,11 @@ module ClearLS::LSP
         uri = c["uri"].as_s
         @vfs.disk_changed(uri)
         compiler_saved(uri) if c["type"]?.try(&.as_i) != 3
-        idx = @index || next
-        next if @vfs.open?(uri)
+        next if @indexes.empty? || @vfs.open?(uri)
         if c["type"]?.try(&.as_i) == 3
-          idx.remove(@vfs.id_for(uri))
+          @indexes.each(&.remove(@vfs.id_for(uri)))
         elsif state = @vfs.load(uri)
-          edited(state.id, idx.update(state))
+          edited(state.id, indexes_touching(state.id).map(&.update(state)).any?)
         end
       end
     end

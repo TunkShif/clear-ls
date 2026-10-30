@@ -122,7 +122,7 @@ module ClearLS::LSP
 
     private def workspace_symbol(params : JSON::Any)
       query = params["query"]?.try(&.as_s) || ""
-      IDE::Analysis.workspace_symbols(index, query, index.project.root).compact_map do |s|
+      IDE::Analysis.workspace_symbols(@indexes, query).compact_map do |s|
         loc = location_json(s.location) || next
         {name: s.name, kind: SYMBOL_KINDS[s.kind], containerName: s.container, location: loc}
       end
@@ -603,7 +603,7 @@ module ClearLS::LSP
       # Drop typings of maps no view uses any more (declarations changed).
       # Live views keep theirs: a references search walks many views, and
       # evicting by count threw their summary caches away every search.
-      @typings.reject! { |_, (m, _)| !index.live_map?(m) }
+      @typings.reject! { |_, (m, _)| @indexes.none?(&.live_map?(m)) }
       @typings[key] = {map, IDE::Typing.new(map, @vfs)}
       @typings[key][1]
     end

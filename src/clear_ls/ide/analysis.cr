@@ -90,17 +90,24 @@ module ClearLS::IDE
 
     MAX_WORKSPACE_SYMBOLS = 512
 
-    # Fuzzy subsequence match, workspace files first, case-insensitive.
-    def self.workspace_symbols(index : Workspace::Index, query : String, root : String) : Array(WorkspaceSymbolInfo)
+    # Fuzzy subsequence match, case-insensitive, over every index (a file
+    # in several indexes counts once); files under one of *roots*
+    # (default: the indexes' roots) first.
+    def self.workspace_symbols(indexes : Array(Workspace::Index), query : String, roots : Array(String) = indexes.map(&.project.root)) : Array(WorkspaceSymbolInfo)
       q = query.downcase
       own = [] of WorkspaceSymbolInfo
       other = [] of WorkspaceSymbolInfo
-      index.each_entry do |file, entry|
-        bucket = entry.path.starts_with?(root) ? own : other
-        each_named(entry.items.items, nil) do |item, container|
-          next if item.kind.instance_var? || item.kind.class_var? || item.kind.c_field?
-          next unless subsequence?(q, item.name.downcase)
-          bucket << WorkspaceSymbolInfo.new(item.name, container, item.kind, Location.new(file, item.name_range))
+      prefixes = roots.map { |r| r.ends_with?('/') ? r : r + "/" }
+      seen = Set(FileId).new
+      indexes.each do |index|
+        index.each_entry do |file, entry|
+          next unless seen.add?(file)
+          bucket = prefixes.any? { |r| entry.path.starts_with?(r) } ? own : other
+          each_named(entry.items.items, nil) do |item, container|
+            next if item.kind.instance_var? || item.kind.class_var? || item.kind.c_field?
+            next unless subsequence?(q, item.name.downcase)
+            bucket << WorkspaceSymbolInfo.new(item.name, container, item.kind, Location.new(file, item.name_range))
+          end
         end
       end
       rank = ->(s : WorkspaceSymbolInfo) { {s.name.downcase == q ? 0 : s.name.downcase.starts_with?(q) ? 1 : 2, s.name.size} }

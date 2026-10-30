@@ -18,7 +18,7 @@ class FeatureClient
   # reuse a project directory (a second session over the same files).
   def initialize(files : Hash(String, String), stdlib : Hash(String, String)? = nil, compiler = {enabled: false}, workspace_caps = {} of String => String, references = {includePossible: false}, budgets = {} of String => Float64,
                  cache = {enabled: false}, root : String? = nil, warmup = {enabled: false}, crystal_version : String? = nil,
-                 text_document_caps = {} of String => String, real_stdlib = false)
+                 text_document_caps = {} of String => String, real_stdlib = false, folders : Array(String)? = nil)
     @root = root || File.tempname("clear-ls-feat")
     files.each do |path, text|
       full = File.join(@root, path)
@@ -44,7 +44,10 @@ class FeatureClient
     # Specs opt in per session (`cache:` / `warmup:` options).
     @server.cache_allowed = true
     @server.warmup_allowed = true
-    request("initialize", {rootUri: VFS.uri_for(@root), capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps, textDocument: text_document_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets, cache: cache, warmup: warmup}})
+    # *folders*: workspace folders (relative to the temp dir) instead of
+    # `rootUri`.
+    ws = folders.try &.map { |f| {uri: VFS.uri_for(File.join(@root, f)), name: f} }
+    request("initialize", {rootUri: VFS.uri_for(@root), workspaceFolders: ws, capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps, textDocument: text_document_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets, cache: cache, warmup: warmup}})
     notify("initialized", {} of String => String)
   end
 

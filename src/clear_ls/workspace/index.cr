@@ -53,6 +53,12 @@ module ClearLS::Workspace
     # else (nil: no cache). See design/persistent-cache.md.
     property store : Cache::Store? = nil
     property local : Cache::Local? = nil
+    # Library item trees another root's index already has (path → size,
+    # mtime, tree): reused while the file is unchanged on disk, so a
+    # second root doesn't parse the stdlib again. Read-only during `#load`.
+    property seed : Hash(String, {Int64, Int64, Items::ItemTree})? = nil
+    @seed_hits = Atomic(Int32).new(0)
+    @parsed = Atomic(Int32).new(0)
     @entries = {} of FileId => Entry
     @project_view = View.new([] of FileId)
     # Views of workspace files outside the project's closure, by file.
@@ -217,6 +223,28 @@ module ClearLS::Workspace
         View.new(paths.map { |p| id_of(p) })
       end
       files_of(view).includes?(file) ? view : nil
+    end
+
+    # Files taken from `#seed` / parsed, by `#load` and later loads.
+    def seeded : Int32
+      @seed_hits.get
+    end
+
+    def parsed : Int32
+      @parsed.get
+    end
+
+    # Item trees of library files not open in an editor, with their size
+    # and mtime now (a `#seed` for another root's index).
+    def library_trees : Hash(String, {Int64, Int64, Items::ItemTree})
+      out = {} of String => {Int64, Int64, Items::ItemTree}
+      @entries.each do |id, e|
+        next unless library_path?(e.path)
+        next if @vfs.open?(@vfs.uri(id))
+        info = File.info?(e.path) || next
+        out[e.path] = {info.size, Cache::Local.mtime(info), e.items}
+      end
+      out
     end
 
     # In the stdlib or a shard (a `CRYSTAL_PATH` entry).
@@ -417,6 +445,20 @@ module ClearLS::Workspace
     # its words. Runs on workers: touches only its arguments and read-only
     # project state (resolver, flags, CRYSTAL_PATH).
     private def load_file(parser : Syntax::Parser, path : String) : Loaded
+      if (seed = @seed) && (s = seed[path]?) && library_path?(path)
+        info = File.info(path)
+        if info.size == s[0] && Cache::Local.mtime(info) == s[1]
+          @seed_hits.add(1)
+          # Not in the global layer (a path dependency): this root's
+          # local cache still records it.
+          if @local && !@store.try(&.global?(path))
+            meta = Cache::FileMeta.new(path, s[0], s[1], 0_u64)
+            return Loaded.new(path, make_entry(path, s[2]), nil, Cached::LocalMiss, meta)
+          end
+          return Loaded.new(path, make_entry(path, s[2]), nil)
+        end
+      end
+      @parsed.add(1)
       store = @store
       if store && store.global?(path)
         # Global entries are shared between checkouts: validated by content.
@@ -424,6 +466,7 @@ module ClearLS::Workspace
         words = library_path?(path) ? nil : Index.words(text)
         hash = StableHash.hash(text)
         if tree = store.lookup(path, text.bytesize.to_i64, hash)
+          @parsed.sub(1)
           return Loaded.new(path, make_entry(path, tree), words, Cached::GlobalHit)
         end
         meta = Cache::FileMeta.new(path, text.bytesize.to_i64, 0_i64, hash)
@@ -434,6 +477,7 @@ module ClearLS::Workspace
         # Stat before reading: a write in between makes the next lookup miss.
         info = File.info(path)
         if hit = local.lookup(path, info)
+          @parsed.sub(1)
           return Loaded.new(path, make_entry(path, hit.tree), hit.words, Cached::LocalHit)
         end
         text = File.read(path)

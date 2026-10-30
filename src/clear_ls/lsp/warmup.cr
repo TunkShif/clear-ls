@@ -30,7 +30,7 @@ module ClearLS::LSP
     end
 
     private def warmup_restart : Nil
-      return unless warmup_enabled? && @index
+      return unless warmup_enabled? && !@indexes.empty?
       @warmup_generation += 1
       @warmup_done = false
       start_warmup
@@ -61,7 +61,8 @@ module ClearLS::LSP
         # keep every file's HIR (~120 MB on Marten); a search re-lowers the
         # bodies it needs (lowering is cheap, inference is what's cached).
         file_bodies = IDE::Bodies.new(state)
-        typing = typing(state)
+        idx = index_for(state.id)
+        typing = with_index(idx) { typing(state) }
         starts = [0_u32]
         state.tree.root.walk { |n| starts << n.start_byte + 1 if n.kind.method_def?; true }
         starts.each do |s|
@@ -69,7 +70,7 @@ module ClearLS::LSP
           t = Time.instant
           # Call facts only (what a search reads), not the whole Infer:
           # keeping every body's would cost ~460 MB on Marten.
-          typing.call_facts(state, file_bodies, s)
+          with_index(idx) { typing.call_facts(state, file_bodies, s) }
           busy += t.elapsed
           bodies += 1
         end
@@ -85,10 +86,11 @@ module ClearLS::LSP
     # Workspace source files of the project (the reference search's
     # candidates): not stdlib or shards.
     private def warmup_files : Array(String)
-      idx = index
-      files = [] of String
-      idx.each_entry { |id, e| files << e.path unless idx.library_file?(id) }
-      files.sort!
+      files = Set(String).new
+      @indexes.each do |idx|
+        idx.each_entry { |id, e| files << e.path unless idx.library_file?(id) }
+      end
+      files.to_a.sort!
     end
 
     # Waits until the server is idle; false when the warm-up is stale

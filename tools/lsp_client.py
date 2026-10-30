@@ -7,7 +7,7 @@ BIN = os.environ.get("CLEAR_LS_BIN", os.path.join(REPO, "bin", "clear-ls"))
 
 
 class Client:
-    def __init__(self, root, compiler=False, init_options=None):
+    def __init__(self, root, compiler=False, init_options=None, folders=None):
         # CLEAR_LS_ARGS: extra server flags, e.g. "--no-cache".
         args = [BIN, "lsp"] + os.environ.get("CLEAR_LS_ARGS", "").split()
         self.p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -24,8 +24,12 @@ class Client:
             opts.setdefault("compiler", {"enabled": False})
         # Phase 10 measurements are of a cold server; warm.py turns it on.
         opts.setdefault("warmup", {"enabled": False})
-        self.request("initialize", {"rootUri": "file://" + root, "initializationOptions": opts,
-                                    "capabilities": {"general": {"positionEncodings": ["utf-16"]}}})
+        init = {"rootUri": "file://" + root, "initializationOptions": opts,
+                "capabilities": {"general": {"positionEncodings": ["utf-16"]}}}
+        # folders: extra workspace folders after *root* (multi-root).
+        if folders:
+            init["workspaceFolders"] = [{"uri": "file://" + f, "name": os.path.basename(f)} for f in [root] + folders]
+        self.request("initialize", init)
         self.notify("initialized", {})
 
     def _reader(self):
