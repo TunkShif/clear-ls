@@ -29,8 +29,8 @@ stops mid-phase). History and per-phase details are in
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
 - **In progress:** Phase 14 — multi-root
   ([roadmap.md](roadmap.md#phase-14--multi-root)), the last phase;
-  steps 1–2 (indexes per root, compiler per project) done, step 3
-  (folder changes) next.
+  steps 1–3 (indexes per root, compiler per project, folder changes)
+  done, step 4 (verification and docs) next.
 
 ## Resume
 

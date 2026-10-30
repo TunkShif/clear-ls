@@ -25,6 +25,11 @@ ensure
   c.try(&.cleanup)
 end
 
+private def folders_changed(c : FeatureClient, added = [] of String, removed = [] of String) : Nil
+  f = ->(list : Array(String)) { list.map { |p| {uri: VFS.uri_for(File.join(c.root, p)), name: p} } }
+  c.notify("workspace/didChangeWorkspaceFolders", {event: {added: f.call(added), removed: f.call(removed)}})
+end
+
 private def definition(c : FeatureClient, path : String, needle : String, shift = 0) : Array(String)
   u = c.open(path)
   r = c.request("textDocument/definition", {textDocument: {uri: u}, position: c.pos(path, needle, shift)})
@@ -151,6 +156,71 @@ describe "multi-root workspaces" do
       app.facts.methods.map(&.header).should_not contain "made_in_tool()"
       tool.facts.methods.map(&.header).should contain "made_in_tool()"
       tool.facts.methods.map(&.header).should_not contain "made_in_app()"
+    end
+  end
+
+  it "advertises workspace folder change notifications" do
+    with_folders(TWO, ["app"]) do |c|
+      c.init_result.dig("capabilities", "workspace", "workspaceFolders").should eq JSON.parse(%({"supported":true,"changeNotifications":true}))
+    end
+  end
+
+  it "indexes an added folder and drops a removed one" do
+    with_folders(TWO, ["app"]) do |c|
+      c.server.indexes.size.should eq 1
+      # Before: tool.cr is a loose file of the app's index, whose `lib`
+      # is app/lib (Dep has v1 only): Dep.v2 is unknown.
+      definition(c, "tool/src/tool.cr", "Dep.v2", 4).should be_empty
+      folders_changed(c, added: ["tool"])
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app"), File.join(c.root, "tool")]
+      definition(c, "tool/src/tool.cr", "Dep.v2", 4).should eq [c.uri("tool/lib/dep/src/dep.cr")]
+      folders_changed(c, removed: ["tool"])
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app")]
+      definition(c, "tool/src/tool.cr", "Dep.v2", 4).should be_empty
+      # The kept root still answers.
+      definition(c, "app/src/app.cr", "Dep.v1", 4).should eq [c.uri("app/lib/dep/src/dep.cr")]
+    end
+  end
+
+  it "keeps an edited buffer of a removed folder" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      u = c.open("tool/src/tool.cr")
+      text = File.read(File.join(c.root, "tool/src/tool.cr")).sub("def tool_only; end", "def tool_only; end\n  def unsaved; end")
+      c.notify("textDocument/didChange", {textDocument: {uri: u, version: 2}, contentChanges: [{text: text}]})
+      folders_changed(c, removed: ["tool"])
+      # Now a loose file of the app's index, with its edited text.
+      items = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 5, character: 11}})["items"].as_a
+      items.map(&.["label"].as_s).should contain "unsaved"
+    end
+  end
+
+  it "keeps the last root when every folder is removed" do
+    with_folders(TWO, ["app"]) do |c|
+      folders_changed(c, removed: ["app"])
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app")]
+    end
+  end
+
+  it "makes the next root primary when the first is removed" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      folders_changed(c, removed: ["app"])
+      c.server.primary_index.project.root.should eq File.join(c.root, "tool")
+      r = c.request("workspace/symbol", {query: "app_only"})
+      r.as_a.should be_empty
+    end
+  end
+
+  it "checks an added folder and clears a removed folder's diagnostics" do
+    with_folders(broken, ["app"], compiler: compiler) do |c|
+      c.wait_compiler
+      c.diagnostics("tool/src/tool.cr").should be_nil
+      folders_changed(c, added: ["tool"])
+      c.wait_compiler
+      c.diagnostics("tool/src/tool.cr").not_nil!.map(&.["message"].as_s).should eq ["undefined method 'tool_error' for Int32"]
+      folders_changed(c, removed: ["tool"])
+      c.diagnostics("tool/src/tool.cr").should eq [] of JSON::Any
+      # The app's diagnostics stay.
+      c.diagnostics("app/src/app.cr").not_nil!.size.should eq 1
     end
   end
 

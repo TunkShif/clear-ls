@@ -312,6 +312,7 @@ module ClearLS::LSP
       when "textDocument/didSave"            then compiler_saved(params.dig("textDocument", "uri").as_s)
       when "workspace/didChangeWatchedFiles" then did_change_watched(params)
       when "workspace/didChangeConfiguration" then did_change_configuration(params)
+      when "workspace/didChangeWorkspaceFolders" then did_change_folders(params)
       when "$/cancelRequest"                 then cancel_request(params)
       when "$/setTrace"                      then nil
       else
@@ -330,7 +331,8 @@ module ClearLS::LSP
       encodings = offered.compact_map { |e| e.as_s?.try { |s| PositionEncoding.from_lsp?(s) } }
       # Byte offsets are native for us; prefer them, then utf-32, else utf-16.
       @encoding = [PositionEncoding::UTF8, PositionEncoding::UTF32].find { |e| encodings.includes?(e) } || PositionEncoding::UTF16
-      @roots = workspace_roots(params)
+      @folders = client_roots(params)
+      @roots = roots_of(@folders)
       @client_capabilities = params["capabilities"]? || @client_capabilities
       @settings.apply(params["initializationOptions"]?)
       @state = State::Initialized
@@ -343,6 +345,9 @@ module ClearLS::LSP
             change:    2, # incremental
             save:      {includeText: false},
           },
+          workspace: {
+            workspaceFolders: {supported: true, changeNotifications: true},
+          },
         }.merge(feature_capabilities),
         serverInfo: {name: "clear-ls", version: VERSION},
       }
@@ -352,12 +357,15 @@ module ClearLS::LSP
     getter roots = [] of String
     @client_capabilities = JSON::Any.new({} of String => JSON::Any)
 
+    # The client's workspace folders (paths), in order.
+    @folders = [] of String
+
     # Project roots of the client's workspace folders (else `rootUri`):
     # each folder, or the project containing it when the folder is a
     # directory inside a project (no `shard.yml` of its own). Folders of
     # one project share its root.
-    private def workspace_roots(params : JSON::Any) : Array(String)
-      client_roots(params).map { |r| project_root(r) }.uniq
+    private def roots_of(folders : Array(String)) : Array(String)
+      folders.map { |r| project_root(r) }.uniq
     end
 
     private def project_root(dir : String) : String
@@ -377,10 +385,62 @@ module ClearLS::LSP
     # Indexes every root. Runs synchronously on `initialized`: requests
     # queue behind it, which keeps every answer consistent with a complete
     # index (stdlib + workspace takes well under a second).
+    @loaded = false
+
     private def load_index : Nil
       return unless @indexes.empty?
+      @loaded = true
       @roots.each { |r| add_root(r) }
       restore_facts
+    end
+
+    # `workspace/didChangeWorkspaceFolders`: index the roots that appear
+    # (like at startup: requests wait), drop those that no folder maps to
+    # any more. The primary root stays first while it remains.
+    private def did_change_folders(params : JSON::Any) : Nil
+      event = params["event"]
+      paths = ->(key : String) do
+        (event[key]?.try(&.as_a?) || [] of JSON::Any).compact_map { |f| f["uri"]?.try(&.as_s?).try { |u| VFS.path_for(u) } }
+      end
+      removed = paths.call("removed").map { |p| p.rchop('/') }
+      @folders.reject! { |f| removed.includes?(f.rchop('/')) }
+      paths.call("added").each { |p| @folders << p unless @folders.includes?(p) }
+      new_roots = roots_of(@folders)
+      # Without folders the last root stays: files still need an index.
+      new_roots = @roots.first(1) if new_roots.empty?
+      gone = @roots - new_roots
+      fresh = new_roots - @roots
+      return if gone.empty? && fresh.empty?
+      @roots = new_roots
+      return unless @loaded # not indexed yet: `initialized` will
+      gone.each { |r| remove_root(r) }
+      fresh.each do |r|
+        idx = add_root(r)
+        restore_facts(idx)
+        check_root(idx) if @checker
+      end
+      # Keep the indexes in root order (the primary one first).
+      @indexes.sort_by! { |i| @roots.index(i.project.root) || @roots.size }
+      warmup_restart unless fresh.empty?
+    end
+
+    # Drops a root's index, its typings and its diagnostics.
+    private def remove_root(root : String) : Nil
+      idx = @indexes.find { |i| i.project.root == root } || return
+      idx.flush_cache
+      @indexes.delete(idx)
+      @last_index = nil if @last_index.same?(idx)
+      @typings.reject! { |_, (m, _)| @indexes.none?(&.live_map?(m)) }
+      # A job on the dropped index answers from stale views.
+      @jobs.each_value { |j| j.cancel(ErrorCode::ContentModified, "workspace folder removed during #{j.method.split('/').last}") }
+      forget_root(root)
+      # Open buffers of the root now belong to the index that answers
+      # for them (a view of their own, or another root's).
+      @vfs.snapshot.files.each do |f|
+        next unless f.overlay? && VFS.path_for(f.uri).try(&.starts_with?(root.ends_with?('/') ? root : root + "/"))
+        indexes_touching(f.id).each(&.update(f))
+      end
+      Log.info { "removed root #{root}" }
     end
 
     # Indexes one root. Library files another index has already parsed

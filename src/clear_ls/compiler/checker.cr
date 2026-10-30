@@ -60,6 +60,20 @@ module ClearLS::Compiler
       @jobs.clear
     end
 
+    # Drops pending runs and results of the entries the block selects
+    # (their workspace root was removed), then publishes the files they
+    # reported: cleared, unless another entry still reports them.
+    def forget(& : String -> Bool) : Nil
+      touched = Set(String).new
+      (@results.keys + @generation.keys).uniq.each do |entry|
+        next unless yield entry
+        @generation[entry] += 1
+        @jobs.delete(entry).try(&.cancel)
+        @results.delete(entry).try { |files| touched.concat(files.keys) }
+      end
+      touched.each { |file| publish(file) }
+    end
+
     # Problems for *file* as last published.
     def problems(file : String) : Array(Problem)
       @published[file]? || [] of Problem

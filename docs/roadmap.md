@@ -1911,6 +1911,24 @@ Steps (one commit each; pause at the end of each):
 3. **Folder changes.** `didChangeWorkspaceFolders` add/remove. Specs:
    add a folder (definitions and diagnostics there), remove it
    (diagnostics cleared, files back to the fallback views).
+   *Done:* `initialize` answers `workspace.workspaceFolders:
+   {supported, changeNotifications}`. The server keeps the client's
+   folders; `didChangeWorkspaceFolders` recomputes the roots. A new
+   root is indexed (`add_root`, seeded from the other indexes), its
+   cached facts restored, its targets checked, and the warm-up
+   restarted; a removed root's index is flushed and dropped with its
+   typings, running jobs are cancelled (`ContentModified`), and
+   `Checker#forget` drops its entries' runs and results and publishes
+   the files they reported (empty unless another program still reports
+   them); its facts, entry points and context results go too. Open
+   buffers of a removed root move to the index that now answers for
+   them (edited text kept). Removing every folder keeps the last root;
+   removing the first makes the next one primary. Before `initialized`,
+   a change only updates the root list. Specs: add/remove (definitions
+   follow the root's `lib/`), compiler diagnostics on add and cleared on
+   remove, an edited buffer of a removed folder, last root kept,
+   primary moved; three fail with the handler disabled. `make spec` 341
+   examples.
 4. **Verification and docs.** Neovim check `multiroot`
    (`vim.lsp.buf.add_workspace_folder`), startup time and RSS with two
    roots (this repo + Marten), README, status, architecture, 0.14.0.

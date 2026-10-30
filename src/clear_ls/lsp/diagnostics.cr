@@ -91,6 +91,20 @@ module ClearLS::LSP
       check_entries(entry_points(idx.project.root).targets)
     end
 
+    # A workspace root was removed: its programs' runs, results and
+    # facts go, and diagnostics only it reported are cleared. Entries
+    # are matched by compile directory under the root (its nested
+    # projects too).
+    private def forget_root(root : String) : Nil
+      prefix = root.ends_with?('/') ? root : root + "/"
+      gone = ->(e : String) { e.starts_with?(prefix) && owner_index(e).nil? }
+      @checker.try(&.forget { |e| gone.call(e) })
+      @checked.reject! { |e| gone.call(e) }
+      @entry_facts.reject! { |e, _| gone.call(e) }
+      @entry_points.reject! { |d, _| d == root || d.starts_with?(prefix) }
+      @contexts.reject! { |k, _| gone.call(k.file) }
+    end
+
     private def stop_compiler : Nil
       @checker.try(&.stop)
       @exporter_files.each_value { |f| File.delete?(f) }
@@ -141,10 +155,10 @@ module ClearLS::LSP
     # Facts of the previous session (local cache), applied before the
     # first check; each file's facts apply only while its text matches
     # the digest taken with them. The first check replaces them.
-    private def restore_facts : Nil
+    private def restore_facts(only : Workspace::Index? = nil) : Nil
       return unless compiler_enabled? && @settings.bool("compiler.facts")
       restored = false
-      @indexes.each do |idx|
+      (only ? [only] : @indexes).each do |idx|
         saved = idx.local.try(&.read_facts) || next
         saved.each { |e, f| (@entry_facts[e] = f) if facts_index(e).same?(idx) }
         restored = true unless saved.empty?

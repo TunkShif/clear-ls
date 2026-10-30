@@ -9,6 +9,8 @@ class FeatureClient
   @out = IO::Memory.new
   @next_id = 0
   getter root : String
+  # Result of `initialize` (capabilities).
+  getter init_result = JSON::Any.new(nil)
 
   # *stdlib*: files placed in a fake stdlib dir with a prelude.cr that
   # requires them all.
@@ -47,7 +49,7 @@ class FeatureClient
     # *folders*: workspace folders (relative to the temp dir) instead of
     # `rootUri`.
     ws = folders.try &.map { |f| {uri: VFS.uri_for(File.join(@root, f)), name: f} }
-    request("initialize", {rootUri: VFS.uri_for(@root), workspaceFolders: ws, capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps, textDocument: text_document_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets, cache: cache, warmup: warmup}})
+    @init_result = request("initialize", {rootUri: VFS.uri_for(@root), workspaceFolders: ws, capabilities: {general: {positionEncodings: ["utf-16"]}, workspace: workspace_caps, textDocument: text_document_caps}, initializationOptions: {compiler: compiler, references: references, budgets: budgets, cache: cache, warmup: warmup}})
     notify("initialized", {} of String => String)
   end
 
