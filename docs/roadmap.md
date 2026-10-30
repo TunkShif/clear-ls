@@ -1932,9 +1932,36 @@ Steps (one commit each; pause at the end of each):
 4. **Verification and docs.** Neovim check `multiroot`
    (`vim.lsp.buf.add_workspace_folder`), startup time and RSS with two
    roots (this repo + Marten), README, status, architecture, 0.14.0.
+   *Done:* Neovim check `multiroot` (fixture `tools/fixtures/multiroot`:
+   `app/` and `tool/`, each with a vendored `lib/dep` of a different
+   API, in `make nvim-check`): starting on `app`, `Dep.v1` resolves to
+   `app/lib`, `tool.cr` (not yet a folder) can't see `Dep.v2`;
+   `vim.lsp.buf.add_workspace_folder` indexes `tool` in ~80 ms, then
+   `Dep.v2` goes to `tool/lib`, hover shows `def Dep.v2() : String`,
+   `tool.cr` gets its own compiler error and `app.cr` keeps its own;
+   workspace symbols find `Widget` in both; after
+   `remove_workspace_folder` the tool diagnostics are cleared and the
+   app's stay. Neovim's default `reuse_client` already attaches buffers
+   under an added folder to the same client (checked). `Project.detect`
+   now runs `crystal env` in the root (a version manager's
+   per-project Crystal). Release build, ready / RSS: `--no-cache`: this
+   repo 552 ms / 86 MB, Marten 813 ms / 132 MB, both 1242 ms / 131 MB;
+   warm cache: 115 ms / 38 MB, 236 ms / 66 MB, both 335 ms / 79 MB.
+   README (multi-root, compiler directory), architecture, status;
+   0.14.0.
 
 Exit criterion: two folders open in one client, each with correct
 definitions and diagnostics.
+
+Status: done. The `multiroot` Neovim check and the specs show two
+folders in one client with their own definitions (each `lib/dep`) and
+their own diagnostics, also when the second folder is added live.
+`make spec` 341 examples; every Neovim check passes; book diff 0
+mismatches; `make verify-static` OK.
+
+Not yet: references and rename don't cross roots (a path dependency
+opened as a second folder is a library file of the app); one
+`compiler.path` for every root.
 
 ## Testing approach
 
