@@ -2105,6 +2105,20 @@ Steps (one commit each):
    (entries added, removed or renamed change its mtime). Specs: new,
    deleted, renamed file and directory between sessions; a nested
    `shard.yml` appearing. Target: Marten walk 70–85 → < 15 ms warm.
+   *Done:* `Cache::Local#children`, a separate `dirs.pack` (names per
+   directory, keyed by its mtime; `items.pack` unchanged, so no
+   `SCHEMA` bump); the directory is `stat`-ed before it is listed, and
+   children are still `stat`-ed as before (file kinds, nested
+   `shard.yml`). `Project#children` is the walk's lister (`Dir.children`
+   without the cache). The `index ready` line adds `dirs hits/total`.
+   The first warm session lists the root again (the cold one created
+   `.clear-ls/` in it). Marten `warm.py` A/B vs step 5: warm start
+   349–392 → 228–294 ms (criterion < 300 ms met in both runs). Spec:
+   hits on an unchanged tree; new directory, file renamed away, nested
+   `shard.yml` appearing. `make spec` 348 examples; once, a
+   compiler-backed spec failed in the full run (`keeps compiler facts`;
+   6 of 6 alone, two more full runs green): `wait_compiler` may return
+   before a check is scheduled (step 9).
 7. **Global layer by size + mtime first.** Packs record mtime next to
    size and hash; a match skips reading the file, a mismatch falls back
    to the content hash as now (packs stay shared across checkouts).

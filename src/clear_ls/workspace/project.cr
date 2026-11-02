@@ -16,6 +16,10 @@ module ClearLS::Workspace
     getter flags : Set(String)
     getter resolver : RequireResolver
 
+    # Lists a directory for the source walk (`Cache::Local#children`
+    # when the cache is on).
+    property children : Proc(String, Array(String)) = ->(dir : String) { Dir.children(dir) }
+
     def initialize(@root : String, crystal_path : Array(String), @stdlib_dir, @crystal_version, @target_triple)
       @crystal_path = crystal_path.map { |p| File.expand_path(p, @root) }
       @flags = Items.flags_for_triple(@target_triple)
@@ -94,7 +98,7 @@ module ClearLS::Workspace
     end
 
     private def walk(dir : String, files : Array(String), top : Bool) : Nil
-      Dir.each_child(dir) do |name|
+      @children.call(dir).each do |name|
         next if name.starts_with?('.')
         full = File.join(dir, name)
         if File.directory?(full)

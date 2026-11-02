@@ -502,7 +502,8 @@ module ClearLS::LSP
 
     private def attach_cache(idx : Workspace::Index, project : Workspace::Project) : Nil
       idx.store = Cache::Store.new(@settings.string?("cache.dir") || Cache::Store.default_dir, project.stdlib_dir, project.crystal_version, project.root)
-      idx.local = Cache::Local.new(project.root, local_cache_key(project))
+      local = idx.local = Cache::Local.new(project.root, local_cache_key(project))
+      project.children = ->(dir : String) { local.children(dir) }
     rescue ex
       Log.warn { "cache disabled: #{ex.message}" }
       idx.store = nil
@@ -521,7 +522,8 @@ module ClearLS::LSP
       l = idx.local
       return "" unless g || l
       " (cache: global #{g.try(&.hits) || 0}/#{(g.try(&.hits) || 0) + (g.try(&.misses) || 0)}, " \
-      "local #{l.try(&.hits) || 0}/#{(l.try(&.hits) || 0) + (l.try(&.misses) || 0)})"
+      "local #{l.try(&.hits) || 0}/#{(l.try(&.hits) || 0) + (l.try(&.misses) || 0)}, " \
+      "dirs #{l.try(&.dir_hits) || 0}/#{(l.try(&.dir_hits) || 0) + (l.try(&.dir_misses) || 0)})"
     end
 
     # `clearLs/clearCache`: drops every root's local cache and the global
