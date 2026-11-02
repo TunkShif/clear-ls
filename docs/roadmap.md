@@ -2168,8 +2168,10 @@ Steps (one commit each):
    `make verify-static` always rebuilt it as a debug build (fixed).
    Docs: development.md (macOS baselines), gotchas.md (macOS),
    architecture.md, persistent-cache.md, tools README, README.
-   *Not yet:* the same run on Linux (EPYC), `make grammar-check` on
-   macOS (needs the `tree-sitter` CLI), 0.15.0. Open: two multi-folder
+   `make grammar-check` on macOS: 1634/1646 with Crystal 1.22.2 (1635
+   with 1.22.0): `libevent/event.cr` gained a known gap (`&.x=(v)`); the
+   vendored runtime fails the same 12 files as CLI 0.27.1.
+   *Not yet:* the same run on Linux (EPYC), 0.15.0. Open: two multi-folder
    compiler specs failed once each in ~10 full runs (gotchas.md).
 
 Exit criteria: every tool, probe and Neovim check runs unchanged on
