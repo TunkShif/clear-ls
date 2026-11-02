@@ -84,6 +84,24 @@ describe Cache::Store do
     end
   end
 
+  it "takes unchanged library files by size and mtime, without reading them" do
+    with_setup do |base, stdlib, cache|
+      index(File.join(base, "a"), stdlib, cache)
+      a = index(File.join(base, "a"), stdlib, cache).store.not_nil!
+      {a.hits, a.unchanged_hits}.should eq({3, 3})
+      # Touched, same content: found by content.
+      File.touch(File.join(stdlib, "object.cr"))
+      a = index(File.join(base, "a"), stdlib, cache).store.not_nil!
+      {a.hits, a.unchanged_hits, a.misses}.should eq({3, 2, 0})
+      # Another checkout of the same shard version: its dep.cr has its own
+      # mtime, so it is found by content; the stamp of the first stays.
+      b = index(File.join(base, "b"), stdlib, cache).store.not_nil!
+      {b.hits, b.unchanged_hits}.should eq({3, 1})
+      a = index(File.join(base, "a"), stdlib, cache).store.not_nil!
+      a.unchanged_hits.should eq 2
+    end
+  end
+
   it "re-parses a patched shard file and keeps the shared entry" do
     with_setup do |base, stdlib, cache|
       index(File.join(base, "a"), stdlib, cache)

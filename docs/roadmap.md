@@ -2124,6 +2124,21 @@ Steps (one commit each):
    to the content hash as now (packs stay shared across checkouts).
    `Cache::SCHEMA` and patch bump. Specs: touched file with the same
    content is a hit after rehashing, patched shard file a miss.
+   *Done:* `FileMeta` already had an `mtime` (global entries wrote 0),
+   so the format is unchanged (no `SCHEMA` bump; 0.14.1 for the changed
+   entries). Workers `stat` a global file and take
+   `Store#lookup_unchanged` when size and mtime match, else read and
+   hash as before. Misses are recorded with their mtime. Entries are
+   not re-stamped: other checkouts of a shard version and touched files
+   stay checked by content (re-stamping would make two checkouts
+   rewrite the pack on alternating starts). Packs from older builds are
+   never read (build key), so there is nothing to migrate. Marten
+   startup probe (global layer only): index phase 293–299 → 230–234
+   ms; server warm start (`index ready`, median of 10, two rounds):
+   212/210 → 206/194 ms (project files already come from the local
+   layer). Spec: unchanged files by stat (3 of 3), a touched stdlib file
+   by content, a second checkout's shard by content. `make spec` 349
+   examples.
 8. **Detection.** `crystal env` and `crystal --version` concurrently,
    or one result per `crystal` executable (real path, size, mtime) in
    the global cache dir. Spec: a changed executable is detected again.
