@@ -2051,6 +2051,9 @@ Steps (one commit each):
    (symlinked folders: step 5).
 2. **Specs on macOS.** Real temp path in the toolchain spec; enough
    candidates that the cancel spec's search outlives its sleep.
+   *Done:* toolchain spec compares against `File.realpath` of its temp
+   root; cancel spec on 400 candidates (10 of 10 runs pass, was 3 of 6
+   failing).
 3. **Repeated slashes in client paths.** `VFS.path_for` collapses
    `//` (only that: `Path#normalize` would also resolve the `..` in
    Homebrew's stdlib path, `.../bin/../share/...`, and change file
