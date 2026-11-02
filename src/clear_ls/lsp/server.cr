@@ -140,12 +140,35 @@ module ClearLS::LSP
       end
       return if msg.response?
       touch_activity
+      canonicalize(msg)
 
       if msg.request?
         handle_request(msg)
       else
         handle_notification(msg)
       end
+    end
+
+    # Document URIs of *msg* under the names the server uses (see
+    # `VFS#canonical_uri`), so code that reads paths from params agrees
+    # with the interned ids. A document opened through a symlink into a
+    # root is aliased to its name under that root first.
+    private def canonicalize(msg : Message) : Nil
+      doc = msg.params.as_h?.try(&.["textDocument"]?).try(&.as_h?) || return
+      uri = doc["uri"]?.try(&.as_s?) || return
+      alias_document(uri) if msg.method == "textDocument/didOpen"
+      canonical = @vfs.canonical_uri(uri)
+      doc["uri"] = JSON::Any.new(canonical) unless canonical == uri
+    end
+
+    private def alias_document(uri : String) : Nil
+      return if @indexes.empty?
+      path = VFS.path_for(@vfs.canonical_uri(uri)) || return
+      return if owner_index(path)
+      real = File.realpath(path) rescue return
+      return if real == path
+      target = @vfs.canonical_uri(VFS.uri_for(real))
+      @vfs.alias_file(uri, target) if VFS.path_for(target).try { |p| owner_index(p) }
     end
 
     # Requests that may search the whole program.
@@ -446,6 +469,12 @@ module ClearLS::LSP
     # Indexes one root. Library files another index has already parsed
     # are reused (`Index#seed`).
     private def add_root(root : String) : Workspace::Index
+      # Clients may name the folder through a symlink and its files by
+      # real path (Neovim on macOS: `/var/...` vs `/private/var/...`).
+      @vfs.claim(root)
+      if (real = (File.realpath(root) rescue nil)) && real != root
+        @vfs.alias_dir(real, root)
+      end
       idx = nil.as(Workspace::Index?)
       elapsed = Time.measure do
         project = @project_factory.call(root)
@@ -473,7 +502,8 @@ module ClearLS::LSP
 
     private def attach_cache(idx : Workspace::Index, project : Workspace::Project) : Nil
       idx.store = Cache::Store.new(@settings.string?("cache.dir") || Cache::Store.default_dir, project.stdlib_dir, project.crystal_version, project.root)
-      idx.local = Cache::Local.new(project.root, local_cache_key(project))
+      local = idx.local = Cache::Local.new(project.root, local_cache_key(project))
+      project.children = ->(dir : String) { local.children(dir) }
     rescue ex
       Log.warn { "cache disabled: #{ex.message}" }
       idx.store = nil
@@ -492,7 +522,8 @@ module ClearLS::LSP
       l = idx.local
       return "" unless g || l
       " (cache: global #{g.try(&.hits) || 0}/#{(g.try(&.hits) || 0) + (g.try(&.misses) || 0)}, " \
-      "local #{l.try(&.hits) || 0}/#{(l.try(&.hits) || 0) + (l.try(&.misses) || 0)})"
+      "local #{l.try(&.hits) || 0}/#{(l.try(&.hits) || 0) + (l.try(&.misses) || 0)}, " \
+      "dirs #{l.try(&.dir_hits) || 0}/#{(l.try(&.dir_hits) || 0) + (l.try(&.dir_misses) || 0)})"
     end
 
     # `clearLs/clearCache`: drops every root's local cache and the global

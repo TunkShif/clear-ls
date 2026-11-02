@@ -4,7 +4,12 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–14 (last: multi-root workspaces: one index per
+- **Done:** Phases 0–15 (last: macOS: every tool, spec and Neovim
+  check runs unchanged on Linux and macOS, folders and documents named
+  through symlinks or with `//`, directory listings and unchanged
+  stdlib/shard files taken from the cache by mtime, concurrent compiler
+  detection; Marten warm start on an M3 Pro 280–363 → 174–237 ms, on
+  Linux 235–254 → 209–239 ms; before that, multi-root workspaces: one index per
   workspace folder sharing stdlib/shard trees, each program compiled in
   its project's directory, folders added/removed live; before that,
   snippets and require completion:

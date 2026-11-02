@@ -461,7 +461,15 @@ module ClearLS::Workspace
       @parsed.add(1)
       store = @store
       if store && store.global?(path)
-        # Global entries are shared between checkouts: validated by content.
+        # Global entries are shared between checkouts: unchanged by size
+        # and mtime (no read), else validated by content. Stat before
+        # reading: a write in between makes the next lookup miss.
+        info = File.info(path)
+        mtime = Cache::Local.mtime(info)
+        if library_path?(path) && (tree = store.lookup_unchanged(path, info.size, mtime))
+          @parsed.sub(1)
+          return Loaded.new(path, make_entry(path, tree), nil, Cached::GlobalHit)
+        end
         text = File.read(path)
         words = library_path?(path) ? nil : Index.words(text)
         hash = StableHash.hash(text)
@@ -469,7 +477,7 @@ module ClearLS::Workspace
           @parsed.sub(1)
           return Loaded.new(path, make_entry(path, tree), words, Cached::GlobalHit)
         end
-        meta = Cache::FileMeta.new(path, text.bytesize.to_i64, 0_i64, hash)
+        meta = Cache::FileMeta.new(path, text.bytesize.to_i64, mtime, hash)
         return Loaded.new(path, make_entry(path, Items::Lower.lower(parser.parse(text))), words, Cached::GlobalMiss, meta)
       end
       if local = @local

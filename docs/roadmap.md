@@ -1963,6 +1963,249 @@ Not yet: references and rename don't cross roots (a path dependency
 opened as a second folder is a library file of the app); one
 `compiler.path` for every root.
 
+### Phase 15 — macOS
+
+Development and every baseline so far are Linux (AMD EPYC 7K62, 16
+cores / 32 threads). Goal: the tools, specs and checks run unchanged on
+Linux and macOS, and the macOS-specific costs and bugs they reveal are
+fixed.
+
+Measured before planning (release build, Apple M3 Pro: 6 performance +
+6 efficiency cores, 36 GB, macOS 26.5, Crystal 1.22.2 from Homebrew;
+Marten as in Phase 10):
+
+- **CPU-bound work is 1.6–4× faster than the EPYC:** stdlib parse
+  single-thread 0.56–0.67 s (2.3 s), `coverage` this repo 0.47 s
+  (0.75 s) and stdlib 1.25 s (3.4 s), compiler check of this repo
+  0.93 s (1.9 s), Marten soak index 0.50–0.53 s (0.82–0.84 s), cold
+  references `Request#method` 0.73–0.84 s (1.34 s), warm-up 4.6–5.2 s
+  (7.5 s). Startup probe: 4–12 workers within 350–380 ms; the default
+  (6 = `cpu_count // 2`) is fine. `--mcpu native` and tree-sitter at
+  `-O3 -mcpu=native` change nothing measurable.
+- **File-heavy work is slower: warm start 280–363 ms** (Linux
+  237–254 ms; `warm.py`'s 300 ms criterion fails in most runs).
+  `open()` costs ~110 µs per call from a freshly built binary and
+  ~15 µs from Python on the same paths. The machine runs an endpoint
+  security agent. Opens don't get faster beyond 2 threads
+  (~75 µs each); `stat` and `readdir` stay cheap (1.7 ms to stat
+  1346 files). So `Project#walk` costs 70–85 ms for Marten's 818
+  directories, and a warm start still opens and hashes ~600 stdlib
+  and shard files (global layer, content-checked). The first launch of
+  a new binary is ~500 ms slower (scanned once).
+- `Project.detect` runs `crystal env` and `crystal --version` one after
+  the other: 13–15 ms each, 26–38 ms per root.
+- **Memory:** `Memory.trim` is a no-op off glibc. `ps` RSS overstates
+  the footprint: right after indexing 155 MB RSS vs 105 MB physical
+  footprint (`vmmap --summary`: ~80 MB of empty `MALLOC_SMALL` regions,
+  reclaimable). `malloc_zone_pressure_relief` frees nothing measurable
+  (tried and reverted). Soak RSS after 100 specs + 10 searches
+  272–279 MB (Linux 234–244 MB); the criterion (< 400 MB) passes.
+- **Tools that fail on macOS:** `lsp_client.py` reads RSS from
+  `/proc` (soak.py and warm.py crash); `tools/nvim/run.sh` calls GNU
+  `timeout`; `make verify-static` expects ELF symbol names (Mach-O
+  prefixes `_`) and checks only with `ldd`. `xargs -r`, `cksum`,
+  `lsp_bench.py`, `book_diff.py`, `types_diff.py`, `external.sh` work.
+- **Specs:** 2 of 341 fail. The toolchain spec expects the temp path
+  as given; the compiler reports real paths (`/var` is a symlink to
+  `/private/var`). The Phase 10 cancel spec's search over 40
+  candidates finishes within its 5 ms sleep on the M3 (3 of 6 runs).
+- **Paths from clients.** `$TMPDIR` ends in `/`, so `"$TMPDIR/x"` has
+  `//`; Neovim sends such folder URIs as given, and the server compares
+  roots with file paths by string prefix: the `multiroot` check's added
+  folder never matched its files. Neovim also names buffers by real
+  path (`/private/var/...`) while the folder keeps the symlinked one
+  (`/var/...`). Making roots real paths fixes that, but breaks clients
+  that use the symlinked path for both (26 specs).
+- **Pitfalls met while measuring:** `make spec` rebuilds `bin/clear-ls`
+  as a debug build when sources changed (a 3× "regression" in a
+  release A/B); outside `make`, a build without `PKG_CONFIG_PATH` links
+  Homebrew's shared `libtree-sitter` 0.27 silently instead of the
+  vendored 0.26.9.
+
+Decisions:
+
+- **Portable means unchanged:** every script, probe and check runs on
+  both systems with the same command and prints the same criteria;
+  platform branches stay inside the tool (no macOS copies).
+- **Memory criteria use one metric per platform:** `VmRSS` on Linux,
+  physical footprint on macOS (what the kernel can't take back); both
+  printed where they differ.
+- **Fewer opens, not platform tricks:** the warm start is fixed by
+  not opening unchanged files and directories (helps Linux too).
+  Endpoint agents are a fact of developer machines. No
+  `getattrlistbulk` or other macOS-only syscalls while the portable
+  change is enough.
+- **Every step is verified on both systems** (startup probe,
+  `warm.py`, soak on Linux within noise of the Phase 14 numbers).
+
+Steps (one commit each):
+
+1. **Portable tools.** RSS from `ps` without `/proc`; `run.sh` falls
+   back to `gtimeout` or a Perl alarm and copies fixtures to a real
+   path; `verify-static` matches `_`-prefixed symbols and checks
+   `otool -L`.
+   *Done:* soak.py and warm.py run on macOS (every criterion passes
+   except the warm start, step 6), `make nvim-check` runs all 9 checks
+   and `make verify-static` reports OK. With the real-path work dir,
+   `multiroot` shows `Dep.v2 -> tool/lib/dep/src/dep.cr` after the add
+   (symlinked folders: step 5).
+2. **Specs on macOS.** Real temp path in the toolchain spec; enough
+   candidates that the cancel spec's search outlives its sleep.
+   *Done:* toolchain spec compares against `File.realpath` of its temp
+   root; cancel spec on 400 candidates (10 of 10 runs pass, was 3 of 6
+   failing).
+3. **Repeated slashes in client paths.** `VFS.path_for` collapses
+   `//` (only that: `Path#normalize` would also resolve the `..` in
+   Homebrew's stdlib path, `.../bin/../share/...`, and change file
+   identities). Spec: a folder URI with `//` and a document named
+   through it.
+   *Done:* fails without the change (the root kept `//`). Sweep and
+   `warm.py` A/B against the previous release build: equal within
+   noise (completion p50 0.8 ms, cold references 0.73–0.84 s).
+4. **Memory metric.** `lsp_client.py` reports physical footprint on
+   macOS (`footprint`/`vmmap`, cheap enough for `warm.py`'s polling, or
+   a separate call); soak and warm print it; Linux unchanged.
+   *Done:* `Client.mem_mb`/`mem_text`: `footprint -p` (~16 ms; `vmmap`
+   takes 0.5–0.75 s) on macOS, `VmRSS` on Linux with the same output as
+   before. Marten soak: footprint 103 / 173 / 226 MB (RSS 153 / 223 /
+   276 MB) after indexing / 100 specs / 10 searches; after warm-up
+   footprint 299 MB (RSS 307 MB).
+5. **Symlinked folders.** A file belongs to a root when its path or its
+   real path is under the root's given or real path (real paths
+   computed once per root and cached per file id). Specs: folder by
+   symlink with documents by real path, and the reverse; both
+   consistent forms keep working. Neovim `multiroot` with the
+   symlinked `$TMPDIR` (no `pwd -P` in `run.sh`).
+   *Done:* the root keeps the client's name (consistent clients
+   unchanged). `VFS#alias_dir` maps a root's real path to it, and
+   `alias_file` maps one document opened through a symlink into a root
+   (checked on `didOpen` of a file under no root: one `realpath`).
+   `VFS#canonical_uri` applies both in `id_for`/`file?`, and
+   `Server#canonicalize` rewrites `textDocument.uri` once per message.
+   Files interned before their alias (a buffer opened before its
+   folder was added) are re-keyed and keep their id. Aliases outlive
+   their folder (open buffers keep their ids); adding the folder again
+   under its other name turns its alias around (`VFS#claim`).
+   Diagnostics: a removed root also forgets entries named by real path
+   (the buffer's loose-file program); publications follow
+   `canonical_uri`, and a file whose name changed gets an empty
+   publication under its old URI (the compiler names files neither
+   like the client nor consistently). Specs: both directions, the
+   consistent symlink, a buffer opened before its folder is added and
+   the folder added again by real path, and the full Neovim sequence
+   with the compiler (each fails without its change; the `forget_root`
+   one only through the checker's state). `run.sh` uses the symlinked
+   `$TMPDIR` again (only the trailing `/` dropped): every check passes,
+   `multiroot` as in Phase 14 (tool diagnostics cleared on removal).
+   Sweep A/B vs step 4: equal within noise. `make spec` 347 examples;
+   one compiler spec failed once under load (`wait_compiler`), 8 of 8
+   alone.
+6. **Directory listing cache.** The local layer stores each walked
+   directory's mtime and entries; an unchanged directory isn't opened
+   (entries added, removed or renamed change its mtime). Specs: new,
+   deleted, renamed file and directory between sessions; a nested
+   `shard.yml` appearing. Target: Marten walk 70–85 → < 15 ms warm.
+   *Done:* `Cache::Local#children`, a separate `dirs.pack` (names per
+   directory, keyed by its mtime; `items.pack` unchanged, so no
+   `SCHEMA` bump); the directory is `stat`-ed before it is listed, and
+   children are still `stat`-ed as before (file kinds, nested
+   `shard.yml`). `Project#children` is the walk's lister (`Dir.children`
+   without the cache). The `index ready` line adds `dirs hits/total`.
+   The first warm session lists the root again (the cold one created
+   `.clear-ls/` in it). Marten `warm.py` A/B vs step 5: warm start
+   349–392 → 228–294 ms (criterion < 300 ms met in both runs). Spec:
+   hits on an unchanged tree; new directory, file renamed away, nested
+   `shard.yml` appearing. `make spec` 348 examples; once, a
+   compiler-backed spec failed in the full run (`keeps compiler facts`;
+   6 of 6 alone, two more full runs green): `wait_compiler` may return
+   before a check is scheduled (step 9).
+7. **Global layer by size + mtime first.** Packs record mtime next to
+   size and hash; a match skips reading the file, a mismatch falls back
+   to the content hash as now (packs stay shared across checkouts).
+   `Cache::SCHEMA` and patch bump. Specs: touched file with the same
+   content is a hit after rehashing, patched shard file a miss.
+   *Done:* `FileMeta` already had an `mtime` (global entries wrote 0),
+   so the format is unchanged (no `SCHEMA` bump; 0.14.1 for the changed
+   entries). Workers `stat` a global file and take
+   `Store#lookup_unchanged` when size and mtime match, else read and
+   hash as before. Misses are recorded with their mtime. Entries are
+   not re-stamped: other checkouts of a shard version and touched files
+   stay checked by content (re-stamping would make two checkouts
+   rewrite the pack on alternating starts). Packs from older builds are
+   never read (build key), so there is nothing to migrate. Marten
+   startup probe (global layer only): index phase 293–299 → 230–234
+   ms; server warm start (`index ready`, median of 10, two rounds):
+   212/210 → 206/194 ms (project files already come from the local
+   layer). Spec: unchanged files by stat (3 of 3), a touched stdlib file
+   by content, a second checkout's shard by content. `make spec` 349
+   examples.
+8. **Detection.** `crystal env` and `crystal --version` concurrently,
+   or one result per `crystal` executable (real path, size, mtime) in
+   the global cache dir. Spec: a changed executable is detected again.
+   *Done:* concurrently. Not cached: `crystal` may be a version
+   manager's shim that resolves per directory (why Phase 14 runs it in
+   the root), so the executable's identity says nothing about the
+   Crystal it runs. Both processes start before either is read
+   (outputs fit the pipe buffer). `Project.detect` with the real
+   compiler: 22–27 → 12–13 ms per root. Specs: a fake `crystal` taking
+   0.3 s per command is detected in < 0.55 s (0.68 s before), with its
+   version, target and path; no compiler falls back to `lib`.
+9. **Verification and docs.** Both systems: `make spec`, `make
+   nvim-check`, `make verify-static`, `tools/book_diff.py`, soak,
+   sweep, `warm.py`, startup probe; `make grammar-check` on macOS
+   (`brew install tree-sitter-cli`). macOS baselines next to Linux in
+   development.md; gotchas (endpoint agents and per-open cost, the
+   `/var` symlink and `$TMPDIR`'s slash, `make spec` overwriting the
+   release binary, Homebrew's `libtree-sitter`, RSS vs footprint);
+   README; 0.15.0.
+   *Done on macOS:* `make spec` 351 examples, every Neovim check
+   (`multiroot` as in Phase 14 with the symlinked work dir),
+   `verify-static` OK, book diff 540 match + 25 accepted (0
+   mismatches), soak (hover p99 43 ms, footprint 224 MB, cancel OK),
+   `warm.py` (warm start 174–237 ms, first references after warm-up 48
+   ms vs 17–20 warm), sweep 60 s (0 errors, 0 over 300 ms). Found on
+   the way: `$(BIN)` depended on the phony `deps`, so `make spec` and
+   `make verify-static` always rebuilt it as a debug build (fixed).
+   Docs: development.md (macOS baselines), gotchas.md (macOS),
+   architecture.md, persistent-cache.md, tools README, README.
+   `make grammar-check` on macOS: 1634/1646 with Crystal 1.22.2 (1635
+   with 1.22.0): `libevent/event.cr` gained a known gap (`&.x=(v)`); the
+   vendored runtime fails the same 12 files as CLI 0.27.1.
+   *Done on Linux* (EPYC, Crystal 1.22.0; release builds of 0.14.0 and
+   this branch run interleaved): `make spec` 351 examples (after the
+   fix below), every Neovim check with output equal to 0.14.0's except
+   the new `dirs` counter in `cache`, `verify-static` OK (and no longer
+   rebuilds the release binary), book diff identical (540 + 25, 0
+   mismatches), `make grammar-check` 1635/1646. Marten, 0.14.0 → 0.15.0:
+   startup probe load median ~780 → ~783 ms uncached (12 runs each,
+   701–919 vs 722–856), 389–792 → 399–799 ms from the global cache,
+   `detect` median ~42 → ~31 ms; `warm.py` warm start 235–254 →
+   209–239 ms, warm-up 7.5–8 s, 310–318 MB RSS, references after it
+   80–90 ms both; soak RSS after 100 specs + 10 searches 245–261 →
+   242–245 MB, hover p99 during a search 46–79 → 71–76 ms over 5 runs
+   (noise: ~22 samples, p99 is the max); sweep 60 s 0 errors, the same
+   single hover over 300 ms (`template/tag/super.cr:23`) on both.
+   Found on the way: the step 7 spec assumed two checkouts' `dep.cr`
+   get different mtimes; on ext4 files written back to back mostly
+   share one (93 of 100), so `b`'s copy was taken by stat (failed 3 of
+   4 full runs). The spec now sets it a minute back (10 of 10). The
+   multi-folder compiler flakes (gotchas.md) didn't show in 4 Linux
+   full runs; still open.
+
+Exit criteria: every tool, probe and Neovim check runs unchanged on
+Linux and macOS; `make spec` green on both; Marten warm start < 250 ms
+on the M3 Pro (`warm.py`); no Linux regression (startup probe,
+`warm.py`, soak within noise of the Phase 14 numbers).
+
+Status: done. Every tool, probe and Neovim check runs unchanged on
+both systems; `make spec` green on both; Marten warm start on the M3
+Pro 280–363 → 174–237 ms; on Linux no regression (startup probe and
+soak within noise) and a faster warm start (235–254 → 209–239 ms).
+0.15.0.
+
+Not yet: the two multi-folder compiler specs that failed once each in
+~10 full macOS runs ([gotchas.md](gotchas.md#macos)).
+
 ## Testing approach
 
 - Snapshot tests for representations (`dump-cst`, later items and HIR).

@@ -153,3 +153,52 @@ changing it. Grammar quirks are in
 - `FeatureClient` defaults to `compiler: {enabled: false}`. `request` waits
   for deferred responses, and `cleanup` sends `shutdown`, which removes the
   exporter temp file.
+
+## macOS
+
+- **Endpoint agents tax `open()`.** On the M3 Pro used for Phase 15
+  (endpoint agent installed), `open()` from a freshly built binary costs
+  ~110 µs (~15 µs from Python on the same paths) and doesn't get faster
+  beyond 2 threads; `stat` and `readdir` stay cheap. The first launch of
+  a new binary is ~0.5 s slower. Compare builds interleaved (A, B, A,
+  B), never a first run against a warm one, and avoid opening unchanged
+  files and directories (the walk and global-layer caches).
+- **Memory is the physical footprint, not RSS.** macOS RSS counts
+  freed malloc regions the kernel reclaims under pressure (Marten after
+  indexing: 153 MB RSS, 103 MB footprint). `lsp_client.py` reports
+  `footprint -p` there; `malloc_zone_pressure_relief` (a `malloc_trim`
+  equivalent) freed nothing measurable.
+- **`/var` and `/tmp` are symlinks** to `/private/...`, and `$TMPDIR`
+  ends in `/` (`"$TMPDIR/x"` has `//`). The compiler reports real paths
+  (or the given ones, depending on how it was invoked), Neovim names
+  buffers by real path but keeps a folder's given path. Compare paths
+  through `VFS#canonical_uri`; specs that compare compiler paths use
+  `File.realpath` of their temp dir.
+- **Don't `Path#normalize` paths.** Homebrew's `CRYSTAL_PATH` is
+  `.../crystal/1.22.2/bin/../share/crystal/src`: every stdlib path
+  contains `..`, and normalising it in one place (it was tried in
+  `VFS.path_for`) splits file identities: references 3× slower, warm-up
+  3× longer. `path_for` only collapses `//`.
+- **Homebrew ships a shared `libtree-sitter`** (0.27): an ad-hoc build
+  without `PKG_CONFIG_PATH=build/pkgconfig` links it silently instead
+  of the vendored static 0.26.9. `make verify-static` checks `otool -L`.
+- Mach-O symbols start with `_` (`_tree_sitter_crystal`); GNU
+  `timeout`, `ldd` and `/proc` don't exist (`tools/` falls back).
+- **Release binaries and `make`:** `$(BIN)` used to depend on the phony
+  `deps`, so `make spec` and `make verify-static` rebuilt
+  `bin/clear-ls` as a debug build even right after `make release` (a
+  3× "regression" in a timing). Fixed in Phase 15; still, `make spec`
+  rebuilds it (debug) whenever sources changed: run `make release` last
+  before timing.
+- **mtime shortcuts and coarse timestamps** (Linux too): files written
+  back to back often share one mtime (93 of 100 on ext4 on the EPYC),
+  so specs that rely on two copies having different mtimes must set
+  them (`File.touch(path, time)`). The caches trust size + mtime (and a
+  directory's mtime for its listing), like `make` and git's index: a
+  same-size edit within one timestamp tick of the cached stat is
+  missed until the file changes again.
+- **Flaky compiler specs (open):** twice in ~10 full runs a
+  multi-folder spec that runs the real compiler failed (`checks each
+  folder's programs in its own directory`, `keeps compiler facts in
+  the index of the entry's root`); 2 of 25 repeated runs once, then 0 of
+  140 (with and without debug logs). Not explained yet.

@@ -30,7 +30,9 @@ describe "long requests as jobs" do
   end
 
   it "cancels on $/cancelRequest and on edits of files it read" do
-    with_client(jobs_app, PRELUDE_FILES) do |c|
+    # Enough candidates that the search outlasts the 5 ms sleep below on
+    # a fast machine (40 finished first on an M3 Pro).
+    with_client(jobs_app(400), PRELUDE_FILES) do |c|
       u = c.open("src/app.cr")
       rid = c.send_request("textDocument/references", refs_params(c))
       c.notify("$/cancelRequest", {id: rid})

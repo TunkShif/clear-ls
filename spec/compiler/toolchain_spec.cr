@@ -114,6 +114,8 @@ describe Toolchain do
   it "checks a program with the installed crystal" do
     root = File.tempname("clear-ls-tc")
     Dir.mkdir_p(root)
+    # The compiler reports real paths (macOS: /var is /private/var).
+    root = File.realpath(root)
     File.write(File.join(root, "bad.cr"), "def bar\n  1.nope\nend\nbar\n")
     tc = Toolchain.new(ENV["CRYSTAL"]? || "crystal", root)
     result = tc.check("bad.cr").wait

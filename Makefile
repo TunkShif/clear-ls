@@ -53,9 +53,14 @@ all: build
 
 build: $(BIN)
 
-deps: lib/tree_sitter $(TS_PC) $(GRAMMAR_PC)
+# The files `deps` makes: real prerequisites, unlike the phony `deps`,
+# which would rebuild every target that names it (a debug `$(BIN)` over
+# a release one on each `make spec` or `make verify-static`).
+DEP_FILES := lib/tree_sitter $(TS_PC) $(GRAMMAR_PC)
 
-$(BIN): deps $(SOURCES)
+deps: $(DEP_FILES)
+
+$(BIN): $(DEP_FILES) $(SOURCES)
 	@mkdir -p bin
 	$(CRYSTAL) build $(CRYSTAL_FLAGS) src/main.cr -o $(BIN)
 
@@ -103,8 +108,10 @@ $(GRAMMAR_PC): $(GRAMMAR_LIB)
 verify-static: $(BIN)
 	@if command -v ldd >/dev/null 2>&1 && ldd $(BIN) | grep -q tree-sitter; then \
 	  echo "FAIL: dynamic tree-sitter dependency"; ldd $(BIN); exit 1; fi
-	@nm $(BIN) | grep -q ' T tree_sitter_crystal$$' || { echo "FAIL: grammar not embedded"; exit 1; }
-	@nm $(BIN) | grep -q ' T ts_parser_new$$' || { echo "FAIL: runtime not embedded"; exit 1; }
+	@if command -v otool >/dev/null 2>&1 && otool -L $(BIN) | grep -q tree-sitter; then \
+	  echo "FAIL: dynamic tree-sitter dependency"; otool -L $(BIN); exit 1; fi
+	@nm $(BIN) | grep -qE ' T _?tree_sitter_crystal$$' || { echo "FAIL: grammar not embedded"; exit 1; }
+	@nm $(BIN) | grep -qE ' T _?ts_parser_new$$' || { echo "FAIL: runtime not embedded"; exit 1; }
 	@echo "OK: tree-sitter runtime and crystal grammar statically linked"
 
 STDLIB := $(shell $(CRYSTAL) env CRYSTAL_PATH 2>/dev/null | tr ':' '\n' | grep -v '^lib$$' | tail -1)
@@ -122,7 +129,7 @@ PROBES := $(patsubst tools/probes/%.cr,bin/probes/%,$(wildcard tools/probes/*.cr
 
 probes: $(PROBES)
 
-bin/probes/%: tools/probes/%.cr deps $(SOURCES)
+bin/probes/%: tools/probes/%.cr $(DEP_FILES) $(SOURCES)
 	@mkdir -p bin/probes
 	$(CRYSTAL) build --release $(CRYSTAL_FLAGS) $< -o $@
 

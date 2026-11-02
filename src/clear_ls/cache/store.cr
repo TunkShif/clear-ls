@@ -9,6 +9,11 @@ module ClearLS::Cache
   # shard version (`shard-<name>-<version>`). An entry is used only when
   # the file's size and content hash match, so a patched file in `lib/`
   # is re-parsed (and not written back: the pristine entry stays shared).
+  # Entries also keep the mtime of the checkout that wrote them: while
+  # size and mtime match, the file isn't read (`#lookup_unchanged`).
+  # Other checkouts of a shard (and touched files) are checked by
+  # content; entries aren't re-stamped, or two checkouts would rewrite
+  # the pack on alternating starts.
   #
   # Packs are read before indexing starts; `#lookup` is then read-only
   # and safe to call from index workers. `#record` and `#flush` run on the
@@ -20,6 +25,8 @@ module ClearLS::Cache
     getter dir : String
     getter hits = 0
     getter misses = 0
+    # Hits by size and mtime (included in `hits`).
+    getter unchanged_hits = 0
 
     # A stdlib/shard directory and the pack its files go to.
     private record Area, prefix : String, key : String, kind : PackKind
@@ -30,6 +37,7 @@ module ClearLS::Cache
     @added = {} of String => Hash(String, {FileMeta, Items::ItemTree})
     @hit_count = Atomic(Int32).new(0)
     @miss_count = Atomic(Int32).new(0)
+    @unchanged_count = Atomic(Int32).new(0)
 
     def initialize(@dir : String, stdlib_dir : String?, crystal_version : String?, project_root : String)
       if stdlib_dir && Dir.exists?(stdlib_dir)
@@ -104,6 +112,23 @@ module ClearLS::Cache
       miss
     end
 
+    # The cached tree for *path* when its size and mtime match the entry's
+    # (no read needed). A miss here is not counted: the caller falls back
+    # to `#lookup` by content.
+    def lookup_unchanged(path : String, size : Int64, mtime : Int64) : Items::ItemTree?
+      area = area_of(path) || return nil
+      pack = @packs[area.key]? || return nil
+      rel = path[area.prefix.size..]
+      meta = pack.meta?(rel) || return nil
+      return nil unless meta.mtime == mtime && meta.size == size
+      tree = pack.payload(rel).try(&.tree) || return nil
+      @hit_count.add(1)
+      @unchanged_count.add(1)
+      tree
+    rescue FormatError
+      nil
+    end
+
     private def miss : Nil
       @miss_count.add(1)
       nil
@@ -124,6 +149,7 @@ module ClearLS::Cache
     # logged, never raised: the cache is an optimisation.
     def flush : Nil
       @hits, @misses = @hit_count.get, @miss_count.get
+      @unchanged_hits = @unchanged_count.get
       @added.each do |key, entries|
         area = @areas.find { |a| a.key == key } || next
         w = Writer.new(area.kind, key)

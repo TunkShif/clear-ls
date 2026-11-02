@@ -69,6 +69,39 @@ describe "persistent cache" do
     end
   end
 
+  it "lists unchanged directories from the cache" do
+    with_dirs do |root, cache|
+      symbols = ->(c : FeatureClient, q : String) { c.request("workspace/symbol", {query: q}).as_a.map(&.["name"].as_s) }
+      session(root, FILES, cache) { |c| c.server.index.local.not_nil!.dir_misses.should eq 2 } # root, src
+      # The first session created `.clear-ls/` in the root after listing it.
+      session(root, FILES, cache) do |c|
+        local = c.server.index.local.not_nil!
+        {local.dir_hits, local.dir_misses}.should eq({1, 1})
+      end
+      session(root, FILES, cache) do |c|
+        local = c.server.index.local.not_nil!
+        {local.dir_hits, local.dir_misses}.should eq({2, 0})
+      end
+      Dir.mkdir(File.join(root, "src/sub"))
+      File.write(File.join(root, "src/sub/deep.cr"), "class Deep; end\n")
+      session(root, FILES, cache) do |c|
+        c.server.index.local.not_nil!.dir_misses.should eq 2 # src changed, sub new
+        symbols.call(c, "Deep").should eq ["Deep"]
+      end
+      File.rename(File.join(root, "src/sub/deep.cr"), File.join(root, "src/sub/deep.txt"))
+      session(root, FILES, cache) do |c|
+        local = c.server.index.local.not_nil!
+        {local.dir_hits, local.dir_misses}.should eq({2, 1})
+        symbols.call(c, "Deep").should be_empty
+      end
+      File.rename(File.join(root, "src/sub/deep.txt"), File.join(root, "src/sub/deep.cr"))
+      File.write(File.join(root, "src/sub/shard.yml"), "name: sub\n")
+      session(root, FILES, cache) do |c|
+        symbols.call(c, "Deep").should be_empty # a nested project now
+      end
+    end
+  end
+
   it "ignores a corrupt pack and a pack of another build" do
     with_dirs do |root, cache|
       session(root, FILES, cache) { }

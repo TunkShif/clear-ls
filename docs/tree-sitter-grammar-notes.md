@@ -6,7 +6,10 @@ Grammar: `tree-sitter-crystal` at `50ca9e6`, tree-sitter CLI 0.26.9.
 
 Parsing the Crystal 1.22.0 standard library (`share/crystal/src`, 1646 files,
 ~9 MB) gives 1635 error-free files (99.33%) at about 4.3 MB/s on one thread.
-`make grammar-check` re-runs this and lists failures.
+`make grammar-check` re-runs this and lists failures. Crystal 1.22.2
+(macOS, CLI 0.27.1; the vendored 0.26.9 runtime fails the same files):
+1634, the new failure being `crystal/event_loop/libevent/event.cr`,
+which 1.22.1/1.22.2 changed to use a setter call in a short block (below).
 
 ## Known gaps
 
@@ -14,7 +17,7 @@ Parsing the Crystal 1.22.0 standard library (`share/crystal/src`, 1646 files,
 |---|---|
 | Keyword as accessor name | `getter begin : B` (`range.cr`), `property end : Bool` (`compiler/crystal/codegen/crystal_llvm_builder.cr`) |
 | Short block with setter | `.tap &.keyword = keyword` (`compiler/crystal/syntax/ast.cr`), `value.tap(&.ensure = ensure_body)` (`syntax/parser.cr`) |
-| Short block with setter call syntax | `.tap(&.flush_on_newline=(true))` (`crystal/system/unix/file_descriptor.cr`), `inner.try &.color=(color)` (`semantic/exception.cr`) |
+| Short block with setter call syntax | `.tap(&.flush_on_newline=(true))` (`crystal/system/unix/file_descriptor.cr`), `inner.try &.color=(color)` (`semantic/exception.cr`), `@timeout_data.try &.timeout_select_action=(timeout_select_action)` (`crystal/event_loop/libevent/event.cr`, since 1.22.1) |
 | Short block with index-query | `filters1.try(&.pos[name]?)` (`semantic/filters.cr`) |
 | Underscore block-call argument | `each_abbrev(bytes, _) do \|abbrev\|` (`crystal/dwarf/abbrev.cr`) |
 | Unnamed proc-type `fun` parameter | `fun BIO_meth_set_create(BioMethod*, (Bio*) -> Int)` (`openssl/lib_crypto.cr`) |

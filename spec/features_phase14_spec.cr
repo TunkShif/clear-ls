@@ -36,6 +36,23 @@ private def definition(c : FeatureClient, path : String, needle : String, shift 
   r.as_a.map { |l| l["uri"].as_s }
 end
 
+# Opens *path* (relative to the temp dir) under the URI *uri* and asks
+# for the definition at *needle*.
+private def definition_as(c : FeatureClient, uri : String, path : String, needle : String, shift = 0) : Array(String)
+  c.notify("textDocument/didOpen", {textDocument: {uri: uri, languageId: "crystal", version: 1, text: File.read(File.join(c.root, path))}})
+  r = c.request("textDocument/definition", {textDocument: {uri: uri}, position: c.pos(path, needle, shift)})
+  r.as_a.map { |l| l["uri"].as_s }
+end
+
+# A symlink to the temp dir, deleted after the block.
+private def with_link(c : FeatureClient, &)
+  link = File.tempname("clear-ls-link")
+  File.symlink(c.root, link)
+  yield link
+ensure
+  File.delete(link) if link && File.symlink?(link)
+end
+
 describe "multi-root workspaces" do
   it "indexes every workspace folder as its own project" do
     with_folders(TWO, ["app", "tool"]) do |c|
@@ -182,6 +199,82 @@ describe "multi-root workspaces" do
     end
   end
 
+  # macOS `$TMPDIR` ends in `/`, so `"$TMPDIR/x"` folder paths have `//`;
+  # buffer URIs from the client don't.
+  it "matches a folder URI with redundant slashes to its files" do
+    with_folders(TWO, ["app"]) do |c|
+      tool = "file://#{URI.encode_path(c.root)}//tool"
+      c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [{uri: tool, name: "tool"}], removed: [] of String}})
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app"), File.join(c.root, "tool")]
+      definition(c, "tool/src/tool.cr", "Dep.v2", 4).should eq [c.uri("tool/lib/dep/src/dep.cr")]
+      # The client names the document the same way.
+      doc = "file://#{URI.encode_path(c.root)}//tool/src/tool.cr"
+      r = c.request("textDocument/definition", {textDocument: {uri: doc}, position: c.pos("tool/src/tool.cr", "Dep.v2", 4)})
+      r.as_a.map(&.["uri"].as_s).should eq [c.uri("tool/lib/dep/src/dep.cr")]
+      c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [] of String, removed: [{uri: tool, name: "tool"}]}})
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app")]
+    end
+  end
+
+  # Neovim on macOS: the folder named through a symlink (`/var/...`),
+  # its buffers by real path (`/private/var/...`).
+  it "matches a folder named through a symlink to files named by real path" do
+    with_folders(TWO, ["app"]) do |c|
+      with_link(c) do |link|
+        c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [{uri: VFS.uri_for(File.join(link, "tool")), name: "tool"}], removed: [] of String}})
+        doc = VFS.uri_for(File.join(File.realpath(c.root), "tool/src/tool.cr"))
+        definition_as(c, doc, "tool/src/tool.cr", "Dep.v2", 4).should eq [VFS.uri_for(File.join(link, "tool/lib/dep/src/dep.cr"))]
+        # One file, not a second copy under the real path.
+        c.request("workspace/symbol", {query: "tool_only"}).as_a.size.should eq 1
+      end
+    end
+  end
+
+  it "moves a buffer opened by real path into a folder added through a symlink" do
+    with_folders(TWO, ["app"]) do |c|
+      with_link(c) do |link|
+        doc = VFS.uri_for(File.join(File.realpath(c.root), "tool/src/tool.cr"))
+        definition_as(c, doc, "tool/src/tool.cr", "Dep.v2", 4).should be_empty
+        folder = [{uri: VFS.uri_for(File.join(link, "tool")), name: "tool"}]
+        c.notify("workspace/didChangeWorkspaceFolders", {event: {added: folder, removed: [] of String}})
+        r = c.request("textDocument/definition", {textDocument: {uri: doc}, position: c.pos("tool/src/tool.cr", "Dep.v2", 4)})
+        r.as_a.map(&.["uri"].as_s).should eq [VFS.uri_for(File.join(link, "tool/lib/dep/src/dep.cr"))]
+        c.request("workspace/symbol", {query: "tool_only"}).as_a.size.should eq 1
+        c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [] of String, removed: folder}})
+        c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app")]
+        r = c.request("textDocument/definition", {textDocument: {uri: doc}, position: c.pos("tool/src/tool.cr", "Dep.v2", 4)})
+        r.as_a.should be_empty
+        # Added again by its real path: that name is the files' name now.
+        real = File.join(File.realpath(c.root), "tool")
+        c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [{uri: VFS.uri_for(real), name: "tool"}], removed: [] of String}})
+        r = c.request("textDocument/definition", {textDocument: {uri: doc}, position: c.pos("tool/src/tool.cr", "Dep.v2", 4)})
+        r.as_a.map(&.["uri"].as_s).should eq [VFS.uri_for(File.join(real, "lib/dep/src/dep.cr"))]
+        c.request("workspace/symbol", {query: "tool_only"}).as_a.size.should eq 1
+      end
+    end
+  end
+
+  it "matches a document named through a symlink to its folder" do
+    with_folders(TWO, ["app", "tool"]) do |c|
+      with_link(c) do |link|
+        doc = VFS.uri_for(File.join(link, "tool/src/tool.cr"))
+        definition_as(c, doc, "tool/src/tool.cr", "Dep.v2", 4).should eq [c.uri("tool/lib/dep/src/dep.cr")]
+        c.request("workspace/symbol", {query: "tool_only"}).as_a.size.should eq 1
+      end
+    end
+  end
+
+  it "keeps a folder and its documents named through one symlink" do
+    with_folders(TWO, ["app"]) do |c|
+      with_link(c) do |link|
+        c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [{uri: VFS.uri_for(File.join(link, "tool")), name: "tool"}], removed: [] of String}})
+        doc = VFS.uri_for(File.join(link, "tool/src/tool.cr"))
+        definition_as(c, doc, "tool/src/tool.cr", "Dep.v2", 4).should eq [VFS.uri_for(File.join(link, "tool/lib/dep/src/dep.cr"))]
+        c.request("workspace/symbol", {query: "tool_only"}).as_a.size.should eq 1
+      end
+    end
+  end
+
   it "keeps an edited buffer of a removed folder" do
     with_folders(TWO, ["app", "tool"]) do |c|
       u = c.open("tool/src/tool.cr")
@@ -222,6 +315,39 @@ describe "multi-root workspaces" do
       # The app's diagnostics stay.
       c.diagnostics("app/src/app.cr").not_nil!.size.should eq 1
     end
+  end
+
+  # Neovim's sequence: every folder named through a symlink, the buffer
+  # by real path, opened (and checked as a loose file) before its folder
+  # is added.
+  it "clears diagnostics of a buffer opened by real path when its symlinked folder goes" do
+    real_root = File.tempname("clear-ls-real")
+    Dir.mkdir_p(real_root)
+    link = File.tempname("clear-ls-link")
+    File.symlink(real_root, link)
+    c = FeatureClient.new(broken, STD, compiler, root: link, folders: ["app"])
+    real = File.join(File.realpath(real_root), "tool/src/tool.cr")
+    names = [VFS.uri_for(real), c.uri("tool/src/tool.cr")]
+    # Diagnostics as a client that keys them by URI sees them.
+    last = ->(name : String) { c.notifications("textDocument/publishDiagnostics").reverse.find { |n| n["uri"].as_s == name }.try(&.["diagnostics"].as_a) }
+    errors = -> { names.flat_map { |n| last.call(n) || [] of JSON::Any }.map(&.["message"].as_s) }
+    c.wait_compiler
+    c.notify("textDocument/didOpen", {textDocument: {uri: names[0], languageId: "crystal", version: 1, text: File.read(real)}})
+    c.wait_compiler
+    folder = [{uri: c.uri("tool"), name: "tool"}]
+    c.notify("workspace/didChangeWorkspaceFolders", {event: {added: folder, removed: [] of String}})
+    c.wait_compiler
+    errors.call.should eq ["undefined method 'tool_error' for Int32"]
+    c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [] of String, removed: folder}})
+    c.wait_compiler
+    errors.call.should be_empty
+    # The buffer's own program (checked while it was a loose file, under
+    # its real path) went with the folder too.
+    c.server.checker.not_nil!.problems(real).should be_empty
+  ensure
+    c.try(&.cleanup(keep: true))
+    File.delete(link) if link && File.symlink?(link)
+    FileUtils.rm_rf(real_root) if real_root
   end
 
   it "applies edits to the index that owns the file" do

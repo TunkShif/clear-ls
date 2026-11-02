@@ -26,11 +26,22 @@ module ClearLS::Cache
     @used = Set(String).new
     @dirty = false
 
+    # Directory listings (`dirs.pack`): path → names, by the directory's
+    # mtime, which changes when an entry is added, removed or renamed. A
+    # hit doesn't open the directory: opens are what the walk costs (~110 µs
+    # each under a macOS endpoint agent; 818 directories on Marten).
+    @dirs : Pack? = nil
+    @listed = {} of String => {Int64, Array(String)}
+    @dirs_changed = false
+    getter dir_hits = 0
+    getter dir_misses = 0
+
     # *key* identifies what the entries depend on besides file contents
     # (Crystal version, target): a pack with another key is ignored.
     def initialize(@root : String, @key : String)
       @dir = File.join(Local.dir_for(@root), "cache")
       @pack = read(items_path)
+      @dirs = read(dirs_path)
     end
 
     def self.dir_for(root : String) : String
@@ -43,6 +54,38 @@ module ClearLS::Cache
 
     def facts_path : String
       File.join(@dir, "facts.pack")
+    end
+
+    def dirs_path : String
+      File.join(@dir, "dirs.pack")
+    end
+
+    # Names in *dir* (like `Dir.children`), from the cache while the
+    # directory's mtime matches. Main fiber only.
+    def children(dir : String) : Array(String)
+      mtime = Local.mtime(File.info(dir)) # before listing: a change in between is a miss next time
+      if cached = @listed[dir]?
+        return cached[1] if cached[0] == mtime
+      end
+      names = cached_children(dir, mtime) || begin
+        @dir_misses += 1
+        @dirs_changed = true
+        Dir.children(dir)
+      end
+      @listed[dir] = {mtime, names}
+      names
+    end
+
+    private def cached_children(dir : String, mtime : Int64) : Array(String)?
+      pack = @dirs || return nil
+      meta = pack.meta?(dir) || return nil
+      return nil unless meta.mtime == mtime
+      r = pack.payload(dir) || return nil
+      names = Array(String).new(r.u32) { r.str! }
+      @dir_hits += 1
+      names
+    rescue FormatError
+      nil
     end
 
     # The cached entry of *path* when its size and mtime still match.
@@ -84,6 +127,7 @@ module ClearLS::Cache
     # Writes the pack when files were added, changed or dropped since it
     # was read. Errors are logged.
     def flush : Nil
+      flush_dirs
       @hits, @misses = @hit_count.get, @miss_count.get
       old = @pack
       dropped = old ? old.files.each_key.any? { |p| !@used.includes?(p) } : false
@@ -106,6 +150,27 @@ module ClearLS::Cache
       @dirty = false
     rescue ex
       Log.warn { "cache: cannot write #{items_path}: #{ex.message}" }
+    end
+
+    # Rewrites `dirs.pack` with this session's listings when one was read
+    # from disk or a cached directory wasn't walked.
+    private def flush_dirs : Nil
+      return if @listed.empty?
+      dropped = @dirs.try { |d| d.files.each_key.any? { |p| !@listed.has_key?(p) } } || false
+      return unless @dirs_changed || dropped
+      w = Writer.new(PackKind::Local, @key)
+      @listed.each do |dir, (mtime, names)|
+        w.add(FileMeta.new(dir, 0_i64, mtime, 0_u64)) do |p|
+          p.u32(names.size.to_u32)
+          names.each { |n| p.str(n) }
+        end
+      end
+      ensure_dir
+      w.write(dirs_path)
+      @dirs = Pack.read(dirs_path)
+      @dirs_changed = false
+    rescue ex
+      Log.warn { "cache: cannot write #{dirs_path}: #{ex.message}" }
     end
 
     # Compiler facts per entry point from the last session (empty when
