@@ -97,7 +97,9 @@ module ClearLS::LSP
     # projects too).
     private def forget_root(root : String) : Nil
       prefix = root.ends_with?('/') ? root : root + "/"
-      gone = ->(e : String) { e.starts_with?(prefix) && owner_index(e).nil? }
+      # An entry may be named as the compiler or client named it (a real
+      # path for a root added through a symlink).
+      gone = ->(e : String) { c = canonical_path(e); c.starts_with?(prefix) && owner_index(c).nil? }
       @checker.try(&.forget { |e| gone.call(e) })
       @checked.reject! { |e| gone.call(e) }
       @entry_facts.reject! { |e, _| gone.call(e) }
@@ -244,11 +246,28 @@ module ClearLS::LSP
       end
     end
 
+    # *path* under the name the server uses for it (`VFS#canonical_uri`).
+    private def canonical_path(path : String) : String
+      VFS.path_for(@vfs.canonical_uri(VFS.uri_for(path))) || path
+    end
+
+    # Per real file, the URI its diagnostics were last published under. A
+    # file can change names (the compiler and the client name files
+    # differently, a folder alias appears): the old name is cleared, or a
+    # client that keys diagnostics by URI keeps them.
+    @published_uris = {} of String => String
+
     private def publish_problems(file : String, problems : Array(Compiler::Problem)) : Nil
       lines = File.file?(file) ? LineIndex.new(File.read(file)) : LineIndex.new("")
       diagnostics = problems.map { |p| diagnostic_json(p, lines) }
+      uri = @vfs.canonical_uri(VFS.uri_for(file))
+      key = File.realpath(file) rescue file
+      if (old = @published_uris[key]?) && old != uri
+        @transport.write(JsonRpc.notification("textDocument/publishDiagnostics", {uri: old, diagnostics: [] of String}))
+      end
+      @published_uris[key] = uri
       @transport.write(JsonRpc.notification("textDocument/publishDiagnostics",
-        {uri: VFS.uri_for(file), diagnostics: diagnostics}))
+        {uri: uri, diagnostics: diagnostics}))
     rescue ex
       Log.error(exception: ex) { "publishing diagnostics for #{file} failed" }
     end
@@ -257,7 +276,7 @@ module ClearLS::LSP
       related = p.trace.compact_map do |f|
         next if f.message == Compiler::Output::MACRO_FRAME && f.file == p.file && f.line == p.frame.line
         index = f.file == p.file ? lines : (File.file?(f.file) ? LineIndex.new(File.read(f.file)) : next)
-        {location: {uri: VFS.uri_for(f.file), range: frame_range(f, index)}, message: f.message}
+        {location: {uri: @vfs.canonical_uri(VFS.uri_for(f.file)), range: frame_range(f, index)}, message: f.message}
       end
       {
         range:              frame_range(p.frame, lines),

@@ -13,10 +13,11 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 fixture="$repo/tools/fixtures/$name"
 script="$repo/tools/nvim/$name.lua"
 [ -d "$fixture" ] && [ -f "$script" ] || { echo "unknown check: $name" >&2; exit 2; }
-# Real path: on macOS $TMPDIR is under the /var -> /private/var symlink and
-# ends in `/`, and Neovim names buffers by real path while folders keep the
-# given one.
-work=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/clear-ls-$name.XXXXXX")" && pwd -P)
+# On macOS $TMPDIR is under the /var -> /private/var symlink (kept: the
+# server must match the folder to buffers Neovim names by real path) and
+# ends in `/` (dropped: the scripts cut $work off paths by its length).
+tmp=${TMPDIR:-/tmp}
+work=$(mktemp -d "${tmp%/}/clear-ls-$name.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 cp -R "$fixture/." "$work/"
 cd "$work"

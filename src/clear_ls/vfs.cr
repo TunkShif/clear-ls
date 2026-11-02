@@ -77,9 +77,59 @@ module ClearLS
     # Line indexes for files that are not loaded (location conversion only).
     @line_indexes = {} of FileId => LineIndex
 
-    # Interns *uri*. Normalised so `file:///a/../b.cr` and `file:///b.cr` match.
-    def id_for(uri : String) : FileId
+    # Other names of workspace files: {from, to} URI prefixes ending in
+    # `/` (a root's real path, when the client named it through a
+    # symlink), and single URIs (a document opened through a symlink).
+    @dir_aliases = [] of {String, String}
+    @file_aliases = {} of String => String
+
+    # Interns files under *from* (a directory) as under *to*. Files
+    # already interned under *from* (a buffer opened before its folder
+    # was added) keep their id under the new name.
+    def alias_dir(from : String, to : String) : Nil
+      f = VFS.uri_for(from).rchop('/') + "/"
+      t = VFS.uri_for(to).rchop('/') + "/"
+      return if f == t || @dir_aliases.includes?({f, t})
+      @dir_aliases << {f, t}
+      # Longest first: a nested root's alias wins over its parent's.
+      @dir_aliases.sort_by! { |(from, _)| -from.size }
+      @ids.select { |key, _| key.starts_with?(f) }.each { |key, id| rename(id, key, t + key[f.size..]) }
+    end
+
+    # Makes *root* the name of its files again: an alias from it (the
+    # folder was added before under its other name) is turned around.
+    # Aliases are kept when a folder is removed: both names still mean
+    # the same files, and open buffers keep their ids.
+    def claim(root : String) : Nil
+      r = VFS.uri_for(root).rchop('/') + "/"
+      @dir_aliases.select { |(from, _)| from == r }.each do |(from, to)|
+        @dir_aliases.delete({from, to})
+        @file_aliases.reject! { |_, dest| dest.starts_with?(to) }
+        VFS.path_for(to).try { |other| alias_dir(other, root) }
+      end
+    end
+
+    def alias_file(from : String, to : String) : Nil
+      f = VFS.normalize_uri(from)
+      t = VFS.normalize_uri(to)
+      @file_aliases[f] = t unless f == t
+    end
+
+    # *uri* normalised and under the name the server uses for it.
+    def canonical_uri(uri : String) : String
       key = VFS.normalize_uri(uri)
+      return key if @dir_aliases.empty? && @file_aliases.empty?
+      if dest = @file_aliases[key]?
+        return dest
+      end
+      @dir_aliases.each { |(from, to)| return to + key[from.size..] if key.starts_with?(from) }
+      key
+    end
+
+    # Interns *uri*. Normalised so `file:///a/../b.cr` and `file:///b.cr`
+    # match, and aliased (`#canonical_uri`).
+    def id_for(uri : String) : FileId
+      key = canonical_uri(uri)
       @ids[key] ||= begin
         @uris << key
         FileId.new((@uris.size - 1).to_u32)
@@ -92,7 +142,7 @@ module ClearLS
 
     # Current state of a file, or `nil` if neither open nor loaded.
     def file?(uri : String) : FileState?
-      @ids[VFS.normalize_uri(uri)]?.try { |id| @files[id]? }
+      @ids[canonical_uri(uri)]?.try { |id| @files[id]? }
     end
 
     def open?(uri : String) : Bool
@@ -232,6 +282,22 @@ module ClearLS
       @files[id] = state
       bump
       state
+    end
+
+    # Re-interns *id* as *to* unless that name has an id of its own; its
+    # states get the new URI and a new revision.
+    private def rename(id : FileId, from : String, to : String) : Nil
+      return if @ids.has_key?(to)
+      @ids.delete(from)
+      @ids[to] = id
+      @uris[id.value] = to
+      {@files, @disk}.each do |states|
+        if old = states[id]?
+          states[id] = FileState.new(id, to, next_revision(id), old.version, old.tree)
+        end
+      end
+      @files[id] = @disk[id] if @disk[id]? && !@files[id]?.try(&.overlay?)
+      bump
     end
 
     private def next_revision(id : FileId) : UInt64

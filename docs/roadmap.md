@@ -2076,6 +2076,30 @@ Steps (one commit each):
    symlink with documents by real path, and the reverse; both
    consistent forms keep working. Neovim `multiroot` with the
    symlinked `$TMPDIR` (no `pwd -P` in `run.sh`).
+   *Done:* the root keeps the client's name (consistent clients
+   unchanged). `VFS#alias_dir` maps a root's real path to it, and
+   `alias_file` maps one document opened through a symlink into a root
+   (checked on `didOpen` of a file under no root: one `realpath`).
+   `VFS#canonical_uri` applies both in `id_for`/`file?`, and
+   `Server#canonicalize` rewrites `textDocument.uri` once per message.
+   Files interned before their alias (a buffer opened before its
+   folder was added) are re-keyed and keep their id. Aliases outlive
+   their folder (open buffers keep their ids); adding the folder again
+   under its other name turns its alias around (`VFS#claim`).
+   Diagnostics: a removed root also forgets entries named by real path
+   (the buffer's loose-file program); publications follow
+   `canonical_uri`, and a file whose name changed gets an empty
+   publication under its old URI (the compiler names files neither
+   like the client nor consistently). Specs: both directions, the
+   consistent symlink, a buffer opened before its folder is added and
+   the folder added again by real path, and the full Neovim sequence
+   with the compiler (each fails without its change; the `forget_root`
+   one only through the checker's state). `run.sh` uses the symlinked
+   `$TMPDIR` again (only the trailing `/` dropped): every check passes,
+   `multiroot` as in Phase 14 (tool diagnostics cleared on removal).
+   Sweep A/B vs step 4: equal within noise. `make spec` 347 examples;
+   one compiler spec failed once under load (`wait_compiler`), 8 of 8
+   alone.
 6. **Directory listing cache.** The local layer stores each walked
    directory's mtime and entries; an unchanged directory isn't opened
    (entries added, removed or renamed change its mtime). Specs: new,
