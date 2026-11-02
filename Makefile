@@ -103,8 +103,10 @@ $(GRAMMAR_PC): $(GRAMMAR_LIB)
 verify-static: $(BIN)
 	@if command -v ldd >/dev/null 2>&1 && ldd $(BIN) | grep -q tree-sitter; then \
 	  echo "FAIL: dynamic tree-sitter dependency"; ldd $(BIN); exit 1; fi
-	@nm $(BIN) | grep -q ' T tree_sitter_crystal$$' || { echo "FAIL: grammar not embedded"; exit 1; }
-	@nm $(BIN) | grep -q ' T ts_parser_new$$' || { echo "FAIL: runtime not embedded"; exit 1; }
+	@if command -v otool >/dev/null 2>&1 && otool -L $(BIN) | grep -q tree-sitter; then \
+	  echo "FAIL: dynamic tree-sitter dependency"; otool -L $(BIN); exit 1; fi
+	@nm $(BIN) | grep -qE ' T _?tree_sitter_crystal$$' || { echo "FAIL: grammar not embedded"; exit 1; }
+	@nm $(BIN) | grep -qE ' T _?ts_parser_new$$' || { echo "FAIL: runtime not embedded"; exit 1; }
 	@echo "OK: tree-sitter runtime and crystal grammar statically linked"
 
 STDLIB := $(shell $(CRYSTAL) env CRYSTAL_PATH 2>/dev/null | tr ':' '\n' | grep -v '^lib$$' | tail -1)

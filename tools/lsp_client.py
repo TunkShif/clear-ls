@@ -102,10 +102,16 @@ class Client:
         return {"textDocument": {"uri": "file://" + path}, "position": {"line": line, "character": character}}
 
     def rss_mb(self):
-        with open(f"/proc/{self.p.pid}/status") as f:
-            for line in f:
-                if line.startswith("VmRSS:"):
-                    return int(line.split()[1]) // 1024
+        try:
+            with open(f"/proc/{self.p.pid}/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1]) // 1024
+        except FileNotFoundError:
+            # No procfs (macOS): ps reports RSS in KiB.
+            out = subprocess.run(["ps", "-o", "rss=", "-p", str(self.p.pid)],
+                                 capture_output=True, text=True).stdout.strip()
+            return int(out) // 1024 if out else -1
         return -1
 
     def close(self):

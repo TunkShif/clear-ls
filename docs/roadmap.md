@@ -2044,6 +2044,11 @@ Steps (one commit each):
    back to `gtimeout` or a Perl alarm and copies fixtures to a real
    path; `verify-static` matches `_`-prefixed symbols and checks
    `otool -L`.
+   *Done:* soak.py and warm.py run on macOS (every criterion passes
+   except the warm start, step 6), `make nvim-check` runs all 9 checks
+   and `make verify-static` reports OK. With the real-path work dir,
+   `multiroot` shows `Dep.v2 -> tool/lib/dep/src/dep.cr` after the add
+   (symlinked folders: step 5).
 2. **Specs on macOS.** Real temp path in the toolchain spec; enough
    candidates that the cancel spec's search outlives its sleep.
 3. **Repeated slashes in client paths.** `VFS.path_for` collapses
