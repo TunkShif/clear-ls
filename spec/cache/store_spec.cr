@@ -95,6 +95,7 @@ describe Cache::Store do
       {a.hits, a.unchanged_hits, a.misses}.should eq({3, 2, 0})
       # Another checkout of the same shard version: its dep.cr has its own
       # mtime, so it is found by content; the stamp of the first stays.
+      File.touch(File.join(base, "b/lib/dep/src/dep.cr"), Time.utc - 1.minute)
       b = index(File.join(base, "b"), stdlib, cache).store.not_nil!
       {b.hits, b.unchanged_hits}.should eq({3, 1})
       a = index(File.join(base, "a"), stdlib, cache).store.not_nil!
