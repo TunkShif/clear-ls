@@ -2171,17 +2171,40 @@ Steps (one commit each):
    `make grammar-check` on macOS: 1634/1646 with Crystal 1.22.2 (1635
    with 1.22.0): `libevent/event.cr` gained a known gap (`&.x=(v)`); the
    vendored runtime fails the same 12 files as CLI 0.27.1.
-   *Not yet:* the same run on Linux (EPYC), 0.15.0. Open: two multi-folder
-   compiler specs failed once each in ~10 full runs (gotchas.md).
+   *Done on Linux* (EPYC, Crystal 1.22.0; release builds of 0.14.0 and
+   this branch run interleaved): `make spec` 351 examples (after the
+   fix below), every Neovim check with output equal to 0.14.0's except
+   the new `dirs` counter in `cache`, `verify-static` OK (and no longer
+   rebuilds the release binary), book diff identical (540 + 25, 0
+   mismatches), `make grammar-check` 1635/1646. Marten, 0.14.0 → 0.15.0:
+   startup probe load median ~780 → ~783 ms uncached (12 runs each,
+   701–919 vs 722–856), 389–792 → 399–799 ms from the global cache,
+   `detect` median ~42 → ~31 ms; `warm.py` warm start 235–254 →
+   209–239 ms, warm-up 7.5–8 s, 310–318 MB RSS, references after it
+   80–90 ms both; soak RSS after 100 specs + 10 searches 245–261 →
+   242–245 MB, hover p99 during a search 46–79 → 71–76 ms over 5 runs
+   (noise: ~22 samples, p99 is the max); sweep 60 s 0 errors, the same
+   single hover over 300 ms (`template/tag/super.cr:23`) on both.
+   Found on the way: the step 7 spec assumed two checkouts' `dep.cr`
+   get different mtimes; on ext4 files written back to back mostly
+   share one (93 of 100), so `b`'s copy was taken by stat (failed 3 of
+   4 full runs). The spec now sets it a minute back (10 of 10). The
+   multi-folder compiler flakes (gotchas.md) didn't show in 4 Linux
+   full runs; still open.
 
 Exit criteria: every tool, probe and Neovim check runs unchanged on
 Linux and macOS; `make spec` green on both; Marten warm start < 250 ms
 on the M3 Pro (`warm.py`); no Linux regression (startup probe,
 `warm.py`, soak within noise of the Phase 14 numbers).
 
-Status: steps 1–8 done; step 9 done on macOS, where the criteria are
-met (every tool and check runs; warm start 174–237 ms, from 280–363).
-Linux verification and 0.15.0 remain.
+Status: done. Every tool, probe and Neovim check runs unchanged on
+both systems; `make spec` green on both; Marten warm start on the M3
+Pro 280–363 → 174–237 ms; on Linux no regression (startup probe and
+soak within noise) and a faster warm start (235–254 → 209–239 ms).
+0.15.0.
+
+Not yet: the two multi-folder compiler specs that failed once each in
+~10 full macOS runs ([gotchas.md](gotchas.md#macos)).
 
 ## Testing approach
 

@@ -109,19 +109,20 @@ paths. Per-phase numbers are in the roadmap.
 
 | What | Value |
 |---|---|
-| Startup index | cold 0.4–0.63 s (≈490 files: prelude closure + shards + workspace); warm from the cache: Marten ~0.24 s to the first answer (`tools/warm.py`) |
+| Startup index | cold 0.4–0.63 s (≈490 files: prelude closure + shards + workspace); warm from the cache: Marten 0.21–0.24 s to the first answer (`tools/warm.py`, Phase 15) |
 | Stdlib | 1646 files parse in 2.3 s single-thread; items 0.35 s; 15k defs to HIR 0.33 s |
 | Inference coverage (`coverage`) | ~94% this repo, ~72% stdlib; repo defs 0.75 s cold, stdlib sample 3.4 s; worst stdlib def ~70 ms cold |
 | Completion / hover | 1–3 ms / 0.1–0.3 ms warm; semantic tokens ~4 ms on a 520-line file |
 | Compiler check | ~1.9 s this repo, ~0.7 s small project; hover during a check: median 0.2 ms |
 | DefMap rebuild | ~4 ms; with compiler facts 5–7 ms |
 | Grammar (`make grammar-check`) | 1635/1646 stdlib files parse cleanly |
-| Spec suite (`make spec`) | 324 examples, ~1.5 min (Phase 13 case fixtures run the real compiler, the stdlib require round trip) |
+| Spec suite (`make spec`) | 351 examples, ~1.7–2 min (Phase 13 case fixtures run the real compiler, the stdlib require round trip) |
 | Block form round trip (full stdlib) | 5195 blocks: 5109 convert, 86 refused, ~4 min with `BLOCK_FILES=9999 BLOCKS_PER_FILE=9999` |
 | Book parity (`tools/book_diff.py`) | 565 markers: 540 match, 25 accepted, 0 mismatches |
-| Marten soak (`tools/soak.py`) | index 0.82–0.84 s cold (`CLEAR_LS_ARGS=--no-cache`) / ~130 MB RSS; 100 specs + 10 searches 234–244 MB; hover p99 during a search 38–80 ms |
-| Marten warm-up (`tools/warm.py`) | ~7.5 s idle, RSS 300 MB; first references after it 88 ms (cold 1.3 s, warm 36–44 ms) |
-| Marten sweep (`tools/sweep.py`, 120 s) | 64,696 requests, 0 errors, 1 answer over 300 ms |
+| Marten soak (`tools/soak.py`) | index 0.82–0.90 s cold (`CLEAR_LS_ARGS=--no-cache`) / ~130 MB RSS; 100 specs + 10 searches 234–261 MB; hover p99 during a search 38–80 ms |
+| Marten warm-up (`tools/warm.py`) | ~7.5 s idle, RSS 300–318 MB; first references after it 88 ms (cold 1.3 s, warm 36–44 ms) |
+| Marten sweep (`tools/sweep.py`, 120 s) | 64,696 requests, 0 errors, 1 answer over 300 ms (hover at `template/tag/super.cr:23`, 0.6–0.9 s) |
+| Startup probe, Marten (`bin/probes/startup`) | load median ~780 ms uncached (700–920), 390–800 ms from the global cache; `detect` 17–44 ms (Phase 15: both commands at once) |
 
 The numbers above are Linux (AMD EPYC 7K62, 16 cores / 32 threads).
 macOS, Apple M3 Pro (6 performance + 6 efficiency cores), end of Phase

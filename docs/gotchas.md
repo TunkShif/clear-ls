@@ -190,6 +190,13 @@ changing it. Grammar quirks are in
   3× "regression" in a timing). Fixed in Phase 15; still, `make spec`
   rebuilds it (debug) whenever sources changed: run `make release` last
   before timing.
+- **mtime shortcuts and coarse timestamps** (Linux too): files written
+  back to back often share one mtime (93 of 100 on ext4 on the EPYC),
+  so specs that rely on two copies having different mtimes must set
+  them (`File.touch(path, time)`). The caches trust size + mtime (and a
+  directory's mtime for its listing), like `make` and git's index: a
+  same-size edit within one timestamp tick of the cached stat is
+  missed until the file changes again.
 - **Flaky compiler specs (open):** twice in ~10 full runs a
   multi-folder spec that runs the real compiler failed (`checks each
   folder's programs in its own directory`, `keeps compiler facts in
