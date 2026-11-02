@@ -3,7 +3,9 @@
 ## Setup
 
 Crystal 1.22 (1.21.0 crashed at startup), a C compiler, `git`, `make`;
-Neovim ≥ 0.11 and Python 3 for the checks in `tools/`.
+Neovim ≥ 0.11 and Python 3 for the checks in `tools/`. Linux and macOS
+(Homebrew Crystal) both work with the same commands; the `tree-sitter`
+CLI for `make grammar-check` is `brew install tree-sitter-cli` there.
 
 ```sh
 make && make spec      # all green; ~9 s (some specs run the real compiler)
@@ -120,3 +122,19 @@ paths. Per-phase numbers are in the roadmap.
 | Marten soak (`tools/soak.py`) | index 0.82–0.84 s cold (`CLEAR_LS_ARGS=--no-cache`) / ~130 MB RSS; 100 specs + 10 searches 234–244 MB; hover p99 during a search 38–80 ms |
 | Marten warm-up (`tools/warm.py`) | ~7.5 s idle, RSS 300 MB; first references after it 88 ms (cold 1.3 s, warm 36–44 ms) |
 | Marten sweep (`tools/sweep.py`, 120 s) | 64,696 requests, 0 errors, 1 answer over 300 ms |
+
+The numbers above are Linux (AMD EPYC 7K62, 16 cores / 32 threads).
+macOS, Apple M3 Pro (6 performance + 6 efficiency cores), end of Phase
+15, same tools (memory is physical footprint, RSS in parentheses;
+see [gotchas.md](gotchas.md#macos) before comparing):
+
+| What | Value |
+|---|---|
+| Stdlib | 1646 files parse in 0.56–0.67 s single-thread |
+| Inference coverage (`coverage`) | this repo 0.47 s, stdlib 1.25 s |
+| Compiler check | 0.93 s this repo |
+| Startup probe, Marten | load 350–480 ms (4–12 workers within noise), `detect` 18–20 ms |
+| Marten soak (`--no-cache`) | index ~0.5 s (a new binary's first run ~1.2 s), 102 MB (151 MB); 100 specs + 10 searches 224–228 MB (274–278 MB); hover p99 during a search 43 ms |
+| Marten `warm.py` | warm start 174–237 ms; warm-up ~5.6 s, 295 MB (302 MB); first references after it 48 ms (cold 787 ms, warm 17–20 ms) |
+| Marten sweep (60 s) | 64,696 requests, 0 errors, 0 answers over 300 ms |
+| Spec suite | 351 examples, ~50 s |

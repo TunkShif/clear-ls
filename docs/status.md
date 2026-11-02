@@ -30,10 +30,15 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 15 steps 4–9 ([roadmap.md](roadmap.md#phase-15--macos)).
-- **In progress:** Phase 15 — macOS: tools, specs and checks portable
-  between Linux and macOS, then the macOS costs and bugs they showed
-  (symlinked folders, warm start file opens).
+- **Next:** Phase 15 step 9 on Linux: `make spec`, `make nvim-check`,
+  soak, sweep, `warm.py`, startup probe against the Phase 14 numbers;
+  then 0.15.0 ([roadmap.md](roadmap.md#phase-15--macos)).
+- **In progress:** Phase 15 — macOS. Done: portable tools (footprint
+  as the macOS memory metric), specs green on macOS, folders and
+  documents named through symlinks or with `//`, directory listings
+  and unchanged stdlib/shard files from the cache, concurrent compiler
+  detection; Marten warm start on an M3 Pro 280–363 → 174–237 ms.
+  Version 0.14.1.
 
 ## Resume
 

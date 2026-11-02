@@ -68,5 +68,9 @@ assert; read the output against the expectations below.
 | `compiler` | `compiler/` (shard with target) | hover before the check, `@label : String` before the check (assignment rule), async diagnostic at 15:8, inlay hints `12: Int32 13: String` refreshed after the check, 1 diagnostic after `:e`, generated methods/ivars typed after it, cleared after fix+save, `compiler:` types for `twice`, `getter` expansion, formatting edit |
 
 Shared helpers (`start`, `req`, `hover`, `set_line`, `finish`) are in
-`tools/nvim/common.lua`. A new phase adds a fixture directory and a script
+`tools/nvim/common.lua`. Every tool runs unchanged on Linux and macOS:
+platform differences are handled inside them (RSS vs footprint,
+`timeout`/`gtimeout`/perl, `ldd`/`otool`). On macOS the fixture copies
+live under the `/var` → `/private/var` symlink on purpose (the server
+must match a folder to buffers Neovim names by real path). A new phase adds a fixture directory and a script
 with the same name.

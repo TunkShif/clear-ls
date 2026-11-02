@@ -2158,11 +2158,28 @@ Steps (one commit each):
    `/var` symlink and `$TMPDIR`'s slash, `make spec` overwriting the
    release binary, Homebrew's `libtree-sitter`, RSS vs footprint);
    README; 0.15.0.
+   *Done on macOS:* `make spec` 351 examples, every Neovim check
+   (`multiroot` as in Phase 14 with the symlinked work dir),
+   `verify-static` OK, book diff 540 match + 25 accepted (0
+   mismatches), soak (hover p99 43 ms, footprint 224 MB, cancel OK),
+   `warm.py` (warm start 174–237 ms, first references after warm-up 48
+   ms vs 17–20 warm), sweep 60 s (0 errors, 0 over 300 ms). Found on
+   the way: `$(BIN)` depended on the phony `deps`, so `make spec` and
+   `make verify-static` always rebuilt it as a debug build (fixed).
+   Docs: development.md (macOS baselines), gotchas.md (macOS),
+   architecture.md, persistent-cache.md, tools README, README.
+   *Not yet:* the same run on Linux (EPYC), `make grammar-check` on
+   macOS (needs the `tree-sitter` CLI), 0.15.0. Open: two multi-folder
+   compiler specs failed once each in ~10 full runs (gotchas.md).
 
 Exit criteria: every tool, probe and Neovim check runs unchanged on
 Linux and macOS; `make spec` green on both; Marten warm start < 250 ms
 on the M3 Pro (`warm.py`); no Linux regression (startup probe,
 `warm.py`, soak within noise of the Phase 14 numbers).
+
+Status: steps 1–8 done; step 9 done on macOS, where the criteria are
+met (every tool and check runs; warm start 174–237 ms, from 280–363).
+Linux verification and 0.15.0 remain.
 
 ## Testing approach
 

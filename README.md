@@ -88,7 +88,7 @@ See [docs/status.md](docs/status.md) for where development stands,
 
 ## Build
 
-Requires Crystal ≥ 1.22, a C compiler, `git`, and `make`.
+Requires Crystal ≥ 1.22, a C compiler, `git`, and `make`; Linux or macOS.
 
 ```sh
 make            # fetch pinned deps into vendor/, build bin/clear-ls (debug)

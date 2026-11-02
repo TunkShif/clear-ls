@@ -178,6 +178,16 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
 - `didChangeWorkspaceFolders`: `add_root` (+ facts, checks, warm-up),
   `remove_root` (index, typings, jobs, `forget_root`:
   `Checker#forget` clears diagnostics only that root reported).
+- Other names of a root's files (Phase 15): a root keeps the client's
+  name; `VFS#alias_dir` maps its real path to it (`add_root`), and
+  `alias_file` one document opened through a symlink into a root
+  (`Server#alias_document`, on `didOpen`). `VFS#canonical_uri` applies
+  them in `id_for`/`file?`; `Server#canonicalize` rewrites
+  `textDocument.uri` once per message (`dispatch`). Files interned
+  before their alias keep their id (re-keyed). Aliases outlive their
+  folder; `VFS#claim` turns one around when the folder comes back under
+  its other name. Compiler diagnostics are published under canonical
+  URIs; `@published_uris` clears a file's old URI when its name changes.
 
 ### Snippets and require completion (Phase 13)
 
@@ -216,10 +226,12 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
 ### Startup and caches (Phase 11)
 
 - `Index#load` → `index_files`: a work queue over a parallel execution
-  context; workers read, look up the cache (`Store#lookup` by size +
-  content hash for stdlib/shard files, `Local#lookup` by size + mtime
-  for the rest), else parse and lower, then resolve requires and collect
-  word sets. The indexing fiber adds entries, queues new requires and
+  context; workers read, look up the cache (`Store#lookup_unchanged` by
+  size + mtime, else `Store#lookup` by size + content hash for
+  stdlib/shard files; `Local#lookup` by size + mtime for the rest), else
+  parse and lower, then resolve requires and collect word sets. The
+  source walk lists directories through `Project#children`
+  (`Local#children`: `dirs.pack`, names by directory mtime). The indexing fiber adds entries, queues new requires and
   hands misses to their layer; `flush_cache` writes packs after `load`
   and at shutdown.
 - `Cache::Pack` layout and `Cache::BUILD_ID` (commit, dirty digest,

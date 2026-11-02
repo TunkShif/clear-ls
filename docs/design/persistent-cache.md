@@ -67,8 +67,17 @@ projects, while resolved requires and word sets cannot.
   size, mtime and a content hash. Shards are cloned per project (each
   `lib/` has its own mtimes) and people do patch files in `lib/`, so a
   global entry is used only if the size and content hash match. mtime is
-  only a shortcut for the local layer: same size and mtime → trust it
-  without hashing.
+  a shortcut: in the local layer same size and mtime → trust it without
+  hashing; in the global layer an entry keeps the mtime of the checkout
+  that wrote it, and that checkout's unchanged files are trusted
+  without reading (Phase 15: ~600 reads per Marten warm start). Other
+  checkouts and touched files are checked by content; entries aren't
+  re-stamped (two checkouts would rewrite the pack on alternating
+  starts).
+- **Directory listings** (Phase 15): `<root>/.clear-ls/cache/dirs.pack`
+  keeps the names of each walked directory by its mtime (which changes
+  on add, remove or rename), so an unchanged directory isn't opened.
+  Children are still `stat`-ed (kinds, nested `shard.yml`).
 - **Path dependencies** (`path:` in `shard.yml`; `lib/<name>` is a
   symlink) change like project code: they go into the local layer.
 - **The stdlib pack grows.** Projects require different parts of the
