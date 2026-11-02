@@ -53,9 +53,14 @@ all: build
 
 build: $(BIN)
 
-deps: lib/tree_sitter $(TS_PC) $(GRAMMAR_PC)
+# The files `deps` makes: real prerequisites, unlike the phony `deps`,
+# which would rebuild every target that names it (a debug `$(BIN)` over
+# a release one on each `make spec` or `make verify-static`).
+DEP_FILES := lib/tree_sitter $(TS_PC) $(GRAMMAR_PC)
 
-$(BIN): deps $(SOURCES)
+deps: $(DEP_FILES)
+
+$(BIN): $(DEP_FILES) $(SOURCES)
 	@mkdir -p bin
 	$(CRYSTAL) build $(CRYSTAL_FLAGS) src/main.cr -o $(BIN)
 
@@ -124,7 +129,7 @@ PROBES := $(patsubst tools/probes/%.cr,bin/probes/%,$(wildcard tools/probes/*.cr
 
 probes: $(PROBES)
 
-bin/probes/%: tools/probes/%.cr deps $(SOURCES)
+bin/probes/%: tools/probes/%.cr $(DEP_FILES) $(SOURCES)
 	@mkdir -p bin/probes
 	$(CRYSTAL) build --release $(CRYSTAL_FLAGS) $< -o $@
 
