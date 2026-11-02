@@ -2142,6 +2142,14 @@ Steps (one commit each):
 8. **Detection.** `crystal env` and `crystal --version` concurrently,
    or one result per `crystal` executable (real path, size, mtime) in
    the global cache dir. Spec: a changed executable is detected again.
+   *Done:* concurrently. Not cached: `crystal` may be a version
+   manager's shim that resolves per directory (why Phase 14 runs it in
+   the root), so the executable's identity says nothing about the
+   Crystal it runs. Both processes start before either is read
+   (outputs fit the pipe buffer). `Project.detect` with the real
+   compiler: 22–27 → 12–13 ms per root. Specs: a fake `crystal` taking
+   0.3 s per command is detected in < 0.55 s (0.68 s before), with its
+   version, target and path; no compiler falls back to `lib`.
 9. **Verification and docs.** Both systems: `make spec`, `make
    nvim-check`, `make verify-static`, `tools/book_diff.py`, soak,
    sweep, `warm.py`, startup probe; `make grammar-check` on macOS

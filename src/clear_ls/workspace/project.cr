@@ -29,11 +29,16 @@ module ClearLS::Workspace
     # Queries the `crystal` executable (`crystal env`, `crystal --version`).
     # Falls back to `lib` only when no compiler is found. Runs in *root*,
     # so a version manager picks that project's Crystal (`.tool-versions`).
+    # Both commands run at once (13–15 ms each). Not cached per executable:
+    # `crystal` may be a version manager's shim that picks a Crystal per
+    # directory.
     def self.detect(root : String, crystal : String = ENV["CRYSTAL"]? || "crystal") : Project
-      env = run(crystal, ["env", "CRYSTAL_PATH", "CRYSTAL_VERSION"], root).try(&.lines) || [] of String
+      env_run = start(crystal, ["env", "CRYSTAL_PATH", "CRYSTAL_VERSION"], root)
+      version_run = start(crystal, ["--version"], root)
+      env = finish(env_run).try(&.lines) || [] of String
       path = (env[0]? || "lib").split(Process::PATH_DELIMITER, remove_empty: true)
       version = env[1]?.presence
-      triple = run(crystal, ["--version"], root).try { |text| text[/Default target: (\S+)/, 1]? } || default_triple
+      triple = finish(version_run).try { |text| text[/Default target: (\S+)/, 1]? } || default_triple
       stdlib = path.map { |p| File.expand_path(p, root) }.find { |p| File.file?(File.join(p, "prelude.cr")) }
       Log.info { "project #{root}: crystal #{version || "?"} target #{triple} stdlib #{stdlib || "not found"}" }
       new(root, path, stdlib, version, triple)
@@ -112,12 +117,20 @@ module ClearLS::Workspace
     rescue File::Error
     end
 
-    private def self.run(cmd : String, args : Array(String), dir : String) : String?
-      buffer = IO::Memory.new
+    # Starts *cmd*; `finish` reads its output (small enough for the pipe
+    # buffer, so several can run before any is read).
+    private def self.start(cmd : String, args : Array(String), dir : String) : Process?
       dir = Dir.current unless Dir.exists?(dir)
-      status = Process.run(cmd, args, output: buffer, error: Process::Redirect::Close, chdir: dir)
-      status.success? ? buffer.to_s : nil
+      Process.new(cmd, args, output: Process::Redirect::Pipe, error: Process::Redirect::Close, chdir: dir)
     rescue File::NotFoundError | IO::Error
+      nil
+    end
+
+    private def self.finish(process : Process?) : String?
+      process = process || return nil
+      text = process.output.gets_to_end
+      process.wait.success? ? text : nil
+    rescue IO::Error
       nil
     end
 
