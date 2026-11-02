@@ -30,8 +30,10 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** usage feedback; every planned phase is done.
-- **In progress:** nothing.
+- **Next:** Phase 15 steps 4–9 ([roadmap.md](roadmap.md#phase-15--macos)).
+- **In progress:** Phase 15 — macOS: tools, specs and checks portable
+  between Linux and macOS, then the macOS costs and bugs they showed
+  (symlinked folders, warm start file opens).
 
 ## Resume
 
