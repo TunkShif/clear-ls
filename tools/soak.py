@@ -6,12 +6,12 @@ baseline and exit criteria).
 
 Against tools/external/marten (or SOAK_ROOT), with bin/clear-ls (or
 CLEAR_LS_BIN). Reports:
-- index time and RSS;
-- RSS after opening N spec files (one hover each);
+- index time and memory (RSS; physical footprint on macOS);
+- memory after opening N spec files (one hover each);
 - references cold/warm on a few methods and types;
 - hover latency while a long references search runs (p50/p99), and
   whether $/cancelRequest ends that search early;
-- RSS after the searches.
+- memory after the searches.
 Prints `EXIT ok|FAIL <criterion>` lines for the Phase 10 exit criteria.
 """
 import argparse, glob, os, sys, threading, time
@@ -32,7 +32,7 @@ c = Client(root)
 req_file = os.path.join(root, "src/marten/http/request.cr")
 text = c.open(req_file)
 c.request("textDocument/documentSymbol", {"textDocument": {"uri": "file://" + req_file}}, timeout=300)
-print(f"index: {(time.time() - t0) * 1000:.0f}ms, RSS {c.rss_mb()} MB")
+print(f"index: {(time.time() - t0) * 1000:.0f}ms, {c.mem_text()}")
 
 specs = sorted(glob.glob(os.path.join(root, "spec/marten/**/*_spec.cr"), recursive=True))
 t = time.time()
@@ -40,7 +40,7 @@ for s in specs[:args.specs]:
     c.open(s)
     c.request("textDocument/hover", c.at(s, 2, 2), timeout=300)
 per = (time.time() - t) * 1000 / max(1, min(args.specs, len(specs)))
-print(f"opened {min(args.specs, len(specs))} specs: {per:.0f}ms each, RSS {c.rss_mb()} MB")
+print(f"opened {min(args.specs, len(specs))} specs: {per:.0f}ms each, {c.mem_text()}")
 
 targets = [("def method", 4, "Request#method"), ("def headers", 4, "Request#headers"),
            ("class Request", 6, "Request (type)"), ("def host", 4, "Request#host")]
@@ -58,8 +58,8 @@ for i in range(args.searches):
     print(f"references {label:16} {'cold' if i < len(targets) else 'warm'}: {ms:7.0f}ms  {n}")
     if longest is None or ms > longest[0]:
         longest = (ms, params, label)
-print(f"after {args.searches} searches: RSS {c.rss_mb()} MB")
-results["rss"] = c.rss_mb()
+print(f"after {args.searches} searches: {c.mem_text()}")
+results["mem"] = c.mem_mb()
 c.close()
 
 # Hover during a long search, on a fresh server (cold search, the worst
@@ -105,5 +105,5 @@ results["cancelled"] = code == -32800
 c.close()
 
 print(f"EXIT {'ok' if results['hover_p99'] < 100 else 'FAIL'} hover p99 during search < 100ms ({results['hover_p99']:.0f}ms)")
-print(f"EXIT {'ok' if results['rss'] < 400 else 'FAIL'} RSS after {args.specs} specs + {args.searches} searches < 400 MB ({results['rss']} MB)")
+print(f"EXIT {'ok' if results['mem'] < 400 else 'FAIL'} {c.MEM} after {args.specs} specs + {args.searches} searches < 400 MB ({results['mem']} MB)")
 print(f"EXIT {'ok' if results['cancelled'] else 'FAIL'} $/cancelRequest answers RequestCancelled")

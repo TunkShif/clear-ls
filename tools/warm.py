@@ -8,7 +8,7 @@ CLEAR_LS_BIN), using a temp global cache dir and the project's
 .clear-ls/cache (cleared first). Reports:
 - start time to the first answer: cold (no cache), then warm;
 - references cold (no warm-up), warm (repeated), and first search after
-  the background warm-up, with how long the warm-up took and RSS.
+  the background warm-up, with how long the warm-up took and memory (RSS; physical footprint on macOS).
 Prints `EXIT ok|FAIL` lines.
 """
 import os, re, shutil, subprocess, sys, tempfile, time
@@ -58,19 +58,19 @@ results["start"] = min(starts)
 
 c, _ = start(True)
 t = time.time()
-# The warm-up runs while idle; poll its log line through RSS growth
-# settling: wait until RSS is stable for 2 s (no hover requests: they
+# The warm-up runs while idle; poll its log line through memory growth
+# settling: wait until memory is stable for 2 s (no hover requests: they
 # would delay it).
 last, stable = -1, 0
 while time.time() - t < 300 and stable < 4:
     time.sleep(0.5)
-    rss = c.rss_mb()
-    stable = stable + 1 if rss == last else 0
-    last = rss
+    mem = c.mem_mb()
+    stable = stable + 1 if mem == last else 0
+    last = mem
 wait_s = time.time() - t - 2
 after, _ = refs(c)
 again, _ = refs(c)
-print(f"warm-up settled after ~{wait_s:.1f}s, RSS {c.rss_mb()} MB; references after warm-up {after:.0f}ms, again {again:.0f}ms")
+print(f"warm-up settled after ~{wait_s:.1f}s, {c.mem_text()}; references after warm-up {after:.0f}ms, again {again:.0f}ms")
 results["after"] = after
 results["warm"] = max(warm, again)
 c.close()

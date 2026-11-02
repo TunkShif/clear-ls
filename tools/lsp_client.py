@@ -1,6 +1,6 @@
 """Minimal stdio LSP client for tool scripts (threaded reader, notifications
 kept, requests with timeouts). Used by soak.py and sweep.py."""
-import json, os, queue, subprocess, threading, time
+import json, os, queue, re, subprocess, sys, threading, time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.environ.get("CLEAR_LS_BIN", os.path.join(REPO, "bin", "clear-ls"))
@@ -113,6 +113,29 @@ class Client:
                                  capture_output=True, text=True).stdout.strip()
             return int(out) // 1024 if out else -1
         return -1
+
+    # Memory criteria use what the kernel can't take back: VmRSS on Linux,
+    # physical footprint on macOS (its RSS also counts freed malloc
+    # regions it reclaims under pressure: ~155 vs ~105 MB on Marten).
+    MEM = "footprint" if sys.platform == "darwin" else "RSS"
+
+    def footprint_mb(self):
+        out = subprocess.run(["footprint", "-p", str(self.p.pid)],
+                             capture_output=True, text=True).stdout
+        m = re.search(r"phys_footprint:\s+([\d.]+)\s*(B|KB|MB|GB)", out)
+        if not m:
+            return -1
+        scale = {"B": 1 / 1048576, "KB": 1 / 1024, "MB": 1, "GB": 1024}[m.group(2)]
+        return int(float(m.group(1)) * scale)
+
+    def mem_mb(self):
+        return self.footprint_mb() if self.MEM == "footprint" else self.rss_mb()
+
+    def mem_text(self):
+        """`RSS N MB`; on macOS `footprint N MB (RSS M MB)`."""
+        if self.MEM == "footprint":
+            return f"footprint {self.footprint_mb()} MB (RSS {self.rss_mb()} MB)"
+        return f"RSS {self.rss_mb()} MB"
 
     def close(self):
         try:

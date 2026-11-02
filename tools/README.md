@@ -38,12 +38,13 @@ Example: `bin/probes/coverage $PWD $PWD/src`, or with the stdlib as PREFIX
 `tools/external.sh` clones pinned external projects (Marten, 1955 indexed
 files) into `tools/external/` (gitignored) and installs their shards.
 The scripts use `tools/lsp_client.py` (warm-up off unless asked) and `bin/clear-ls` (`make
-release` first; `CLEAR_LS_BIN` overrides).
+release` first; `CLEAR_LS_BIN` overrides). Memory is RSS on Linux and
+physical footprint on macOS (`footprint -p`; RSS printed next to it).
 
 | Script | Use |
 |---|---|
-| `soak.py [--specs N] [--searches N]` | index time and RSS, RSS after opening N specs, references cold/warm, hover p50/p99 while a references search runs, `$/cancelRequest`; prints `EXIT ok/FAIL` for the Phase 10 exit criteria |
-| `warm.py` | Phase 11 criteria: cold vs warm start (persistent cache, temp global dir), first references after the background warm-up vs warm, RSS; prints `EXIT ok/FAIL` |
+| `soak.py [--specs N] [--searches N]` | index time and memory, memory after opening N specs, references cold/warm, hover p50/p99 while a references search runs, `$/cancelRequest`; prints `EXIT ok/FAIL` for the Phase 10 exit criteria |
+| `warm.py` | Phase 11 criteria: cold vs warm start (persistent cache, temp global dir), first references after the background warm-up vs warm, memory; prints `EXIT ok/FAIL` |
 | `sweep.py [--seconds S]` | random-position hover/definition/completion/... over source files: internal errors and timeouts (exit 1), p50/p99/max per method, answers over 300 ms |
 
 ## Headless Neovim checks (`tools/nvim/`, `tools/fixtures/`)

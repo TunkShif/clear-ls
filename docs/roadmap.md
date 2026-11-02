@@ -2065,6 +2065,11 @@ Steps (one commit each):
 4. **Memory metric.** `lsp_client.py` reports physical footprint on
    macOS (`footprint`/`vmmap`, cheap enough for `warm.py`'s polling, or
    a separate call); soak and warm print it; Linux unchanged.
+   *Done:* `Client.mem_mb`/`mem_text`: `footprint -p` (~16 ms; `vmmap`
+   takes 0.5–0.75 s) on macOS, `VmRSS` on Linux with the same output as
+   before. Marten soak: footprint 103 / 173 / 226 MB (RSS 153 / 223 /
+   276 MB) after indexing / 100 specs / 10 searches; after warm-up
+   footprint 299 MB (RSS 307 MB).
 5. **Symlinked folders.** A file belongs to a root when its path or its
    real path is under the root's given or real path (real paths
    computed once per root and cached per file id). Specs: folder by
