@@ -2059,6 +2059,9 @@ Steps (one commit each):
    Homebrew's stdlib path, `.../bin/../share/...`, and change file
    identities). Spec: a folder URI with `//` and a document named
    through it.
+   *Done:* fails without the change (the root kept `//`). Sweep and
+   `warm.py` A/B against the previous release build: equal within
+   noise (completion p50 0.8 ms, cold references 0.73–0.84 s).
 4. **Memory metric.** `lsp_client.py` reports physical footprint on
    macOS (`footprint`/`vmmap`, cheap enough for `warm.py`'s polling, or
    a separate call); soak and warm print it; Linux unchanged.

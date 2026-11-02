@@ -197,9 +197,15 @@ module ClearLS
       uri
     end
 
+    # Repeated slashes collapsed: paths are compared by prefix with roots,
+    # and clients send `a//b` as given (macOS `$TMPDIR` ends in `/`). Not
+    # `Path#normalize`: `..` stays (stdlib paths are `.../bin/../share/...`
+    # everywhere), and this is hot.
     def self.path_for(uri : String) : String?
       parsed = URI.parse(uri)
-      URI.decode(parsed.path) if parsed.scheme == "file"
+      return nil unless parsed.scheme == "file"
+      path = URI.decode(parsed.path)
+      path.includes?("//") ? path.squeeze('/') : path
     rescue URI::Error
       nil
     end

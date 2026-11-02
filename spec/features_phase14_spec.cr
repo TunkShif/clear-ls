@@ -182,6 +182,23 @@ describe "multi-root workspaces" do
     end
   end
 
+  # macOS `$TMPDIR` ends in `/`, so `"$TMPDIR/x"` folder paths have `//`;
+  # buffer URIs from the client don't.
+  it "matches a folder URI with redundant slashes to its files" do
+    with_folders(TWO, ["app"]) do |c|
+      tool = "file://#{URI.encode_path(c.root)}//tool"
+      c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [{uri: tool, name: "tool"}], removed: [] of String}})
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app"), File.join(c.root, "tool")]
+      definition(c, "tool/src/tool.cr", "Dep.v2", 4).should eq [c.uri("tool/lib/dep/src/dep.cr")]
+      # The client names the document the same way.
+      doc = "file://#{URI.encode_path(c.root)}//tool/src/tool.cr"
+      r = c.request("textDocument/definition", {textDocument: {uri: doc}, position: c.pos("tool/src/tool.cr", "Dep.v2", 4)})
+      r.as_a.map(&.["uri"].as_s).should eq [c.uri("tool/lib/dep/src/dep.cr")]
+      c.notify("workspace/didChangeWorkspaceFolders", {event: {added: [] of String, removed: [{uri: tool, name: "tool"}]}})
+      c.server.indexes.map(&.project.root).should eq [File.join(c.root, "app")]
+    end
+  end
+
   it "keeps an edited buffer of a removed folder" do
     with_folders(TWO, ["app", "tool"]) do |c|
       u = c.open("tool/src/tool.cr")
