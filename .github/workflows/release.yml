@@ -1,0 +1,182 @@
+name: Release
+
+# Builds clear-ls for Linux (x86_64, aarch64) and macOS (Apple Silicon) and
+# uploads the binaries to a GitHub release.
+#
+#   git tag v0.16.0 && git push origin v0.16.0   # workflow runs, leaves a draft
+#   gh release edit v0.16.0 --draft=false        # publish it
+#
+# Or run it by hand: Actions → Release → Run workflow, with a tag that already
+# exists (e.g. to redo a failed run).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.16.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  # Minimum Crystal version (shard.yml). The workflow installs the newest
+  # official release, which is always >= this.
+  CRYSTAL_MIN: "1.22.0"
+
+jobs:
+  check:
+    name: Check tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # For workflow_dispatch checkout the input tag, not the branch.
+          ref: ${{ inputs.tag || github.ref }}
+      - id: tag
+        env:
+          REF: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="${INPUT_TAG:-$REF}"
+          # Accept v1.2.3 or 1.2.3; strip an optional leading v for the version.
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$tag' is not a version tag like v0.16.0"
+            exit 1
+          fi
+          version="${tag#v}"
+          # The tag must point at a commit whose VERSION matches.
+          want=$(sed -n 's/.*VERSION = "\([^"]*\)".*/\1/p' src/clear_ls/version.cr | head -1)
+          if [ "$version" != "$want" ]; then
+            echo "::error::tag $tag is version $version but src/clear_ls/version.cr says $want"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing clear-ls $version"
+
+  spec:
+    name: Specs (ubuntu)
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.tag }}
+      - uses: ./.github/actions/setup-crystal
+        with:
+          os: linux
+          arch: x86_64
+          min-crystal: ${{ env.CRYSTAL_MIN }}
+      - name: Run specs
+        run: make spec
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+            triple: x86_64-unknown-linux-gnu
+            os: linux
+            arch: x86_64
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            triple: aarch64-unknown-linux-gnu
+            os: linux
+            arch: aarch64
+          - platform: macos-arm64
+            runner: macos-15
+            triple: aarch64-apple-darwin
+            os: darwin
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      RELEASE_VERSION: ${{ needs.check.outputs.version }}
+      TARGET_TRIPLE: ${{ matrix.triple }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.tag }}
+      - uses: ./.github/actions/setup-crystal
+        with:
+          os: ${{ matrix.os }}
+          arch: ${{ matrix.arch }}
+          min-crystal: ${{ env.CRYSTAL_MIN }}
+      - name: Build release binary
+        run: make release
+      - name: Verify static Tree-sitter
+        run: make verify-static
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cat > dist/README <<EOF
+          clear-ls ${RELEASE_VERSION} for ${TARGET_TRIPLE}.
+
+          Extract the archive and put the \`clear-ls\` binary on your PATH:
+
+            tar -xzf clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz
+            install -m 755 clear-ls ~/.local/bin/
+
+          Requires the \`crystal\` executable on PATH (or set CRYSTAL=/path/to/crystal,
+          or the compiler.path setting) for diagnostics and formatting.
+          EOF
+          cp bin/clear-ls dist/
+          tar -czf "clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz" -C dist .
+          shasum -a 256 "clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz" \
+            > "clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz.sha256"
+          cat "clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clear-ls-${{ matrix.platform }}
+          path: |
+            clear-ls-${{ env.RELEASE_VERSION }}-${{ matrix.triple }}.tar.gz
+            clear-ls-${{ env.RELEASE_VERSION }}-${{ matrix.triple }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish release
+    needs: [check, spec, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: clear-ls-*
+          merge-multiple: true
+      - name: List assets
+        run: ls -la
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          name: clear-ls ${{ needs.check.outputs.version }}
+          draft: true
+          generate_release_notes: true
+          files: |
+            *.tar.gz
+            *.tar.gz.sha256
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,67 @@
+name: Setup Crystal
+description: >-
+  Install the latest official Crystal release tarball and put it on PATH.
+  Linux uses the "-bundled" tarball (libgc and libpcre2 included); macOS uses
+  the universal tarball whose bin/crystal wrapper sets CRYSTAL_PATH and
+  CRYSTAL_LIBRARY_PATH itself.
+
+inputs:
+  os:
+    description: linux or darwin
+    required: true
+  arch:
+    description: x86_64 or aarch64 (linux); ignored on darwin (universal build)
+    required: true
+  min-crystal:
+    description: Minimum acceptable Crystal version (shard.yml requires >= 1.22.0)
+    required: false
+    default: "1.22.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Crystal
+      shell: bash
+      env:
+        CRYSTAL_OS: ${{ inputs.os }}
+        CRYSTAL_ARCH: ${{ inputs.arch }}
+        CRYSTAL_MIN: ${{ inputs.min-crystal }}
+      run: |
+        set -euo pipefail
+        tag=$(curl -fsSL https://api.github.com/repos/crystal-lang/crystal/releases/latest | jq -r .tag_name)
+        case "$CRYSTAL_OS" in
+          linux)  pat="crystal-[0-9.]+-[0-9]+-linux-${CRYSTAL_ARCH}-bundled[.]tar[.]gz$" ;;
+          darwin) pat="crystal-[0-9.]+-[0-9]+-darwin-universal[.]tar[.]gz$" ;;
+          *) echo "::error::unsupported os $CRYSTAL_OS"; exit 1 ;;
+        esac
+        asset=$(curl -fsSL "https://api.github.com/repos/crystal-lang/crystal/releases/tags/$tag" \
+          | jq -r --arg pat "$pat" '.assets[].name | select(test($pat))' | head -1)
+        [ -n "$asset" ] || { echo "::error::no crystal asset matching $pat in $tag"; exit 1; }
+        echo "Installing $asset"
+        curl -fsSL "https://github.com/crystal-lang/crystal/releases/download/$tag/$asset" -o /tmp/crystal.tar.gz
+        mkdir -p /tmp/crystal
+        tar -xzf /tmp/crystal.tar.gz -C /tmp/crystal
+        root=$(find /tmp/crystal -mindepth 1 -maxdepth 1 -type d | head -1)
+        [ -n "$root" ] || { echo "::error::unexpected tarball layout"; exit 1; }
+        if [ "$CRYSTAL_OS" = linux ]; then
+          echo "$root/bin" >> "$GITHUB_PATH"
+          echo "CRYSTAL_PATH=$root/share/crystal/src" >> "$GITHUB_ENV"
+          echo "CRYSTAL_LIBRARY_PATH=$root/lib/crystal" >> "$GITHUB_ENV"
+        else
+          # bin/crystal is a wrapper that exports CRYSTAL_PATH and
+          # CRYSTAL_LIBRARY_PATH; embedded/bin/crystal is the real binary and
+          # embedded/bin/shards the shards CLI (passed to make via $SHARDS).
+          echo "$root/bin" >> "$GITHUB_PATH"
+          echo "SHARDS=$root/embedded/bin/shards" >> "$GITHUB_ENV"
+        fi
+        crystal --version
+        v=$(crystal --version | sed -n 's/^Crystal \([0-9.]*\).*/\1/p')
+        # Portable >= check for X.Y.Z versions (no `sort -V` on macOS).
+        ok=$(awk -v a="$CRYSTAL_MIN" -v b="$v" 'BEGIN{
+          split(a, x, "."); split(b, y, ".");
+          for (i = 1; i <= 3; i++) {
+            if (y[i] + 0 < x[i] + 0) { print "no"; exit }
+            if (y[i] + 0 > x[i] + 0) { print "yes"; exit }
+          }
+          print "yes" }')
+        [ "$ok" = yes ] || { echo "::error::need crystal >= $CRYSTAL_MIN, got $v"; exit 1; }
