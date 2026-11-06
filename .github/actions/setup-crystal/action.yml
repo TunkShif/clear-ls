@@ -1,9 +1,8 @@
 name: Setup Crystal
 description: >-
   Install the latest official Crystal release tarball and put it on PATH.
-  Linux uses the "-bundled" tarball (libgc and libpcre2 included); macOS uses
-  the universal tarball whose bin/crystal wrapper sets CRYSTAL_PATH and
-  CRYSTAL_LIBRARY_PATH itself.
+  Linux uses the "-bundled" tarball, whose libgc and libpcre2 static archives
+  end up in the released binary; macOS uses the universal tarball.
 
 inputs:
   os:
@@ -26,36 +25,76 @@ runs:
         CRYSTAL_OS: ${{ inputs.os }}
         CRYSTAL_ARCH: ${{ inputs.arch }}
         CRYSTAL_MIN: ${{ inputs.min-crystal }}
+        # Authenticate the API calls. Unauthenticated requests from shared
+        # runner IPs run into the 60/hour limit often enough to be a flake.
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        tag=$(curl -fsSL https://api.github.com/repos/crystal-lang/crystal/releases/latest | jq -r .tag_name)
+
+        [ -n "${GH_TOKEN:-}" ] || { echo "::error::github.token is empty"; exit 1; }
+
+        api() {
+          curl -fsSL -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" "$@"
+        }
+
+        tag=$(api https://api.github.com/repos/crystal-lang/crystal/releases/latest \
+          | jq -r .tag_name)
         case "$CRYSTAL_OS" in
           linux)  pat="crystal-[0-9.]+-[0-9]+-linux-${CRYSTAL_ARCH}-bundled[.]tar[.]gz$" ;;
           darwin) pat="crystal-[0-9.]+-[0-9]+-darwin-universal[.]tar[.]gz$" ;;
           *) echo "::error::unsupported os $CRYSTAL_OS"; exit 1 ;;
         esac
-        asset=$(curl -fsSL "https://api.github.com/repos/crystal-lang/crystal/releases/tags/$tag" \
-          | jq -r --arg pat "$pat" '.assets[].name | select(test($pat))' | head -1)
+        # `first` rather than `head -1`: a terminated pipe is a SIGPIPE failure
+        # under `set -o pipefail`.
+        asset=$(api "https://api.github.com/repos/crystal-lang/crystal/releases/tags/$tag" \
+          | jq -r --arg pat "$pat" '[.assets[].name | select(test($pat))] | first // ""')
         [ -n "$asset" ] || { echo "::error::no crystal asset matching $pat in $tag"; exit 1; }
+
         echo "Installing $asset"
-        curl -fsSL "https://github.com/crystal-lang/crystal/releases/download/$tag/$asset" -o /tmp/crystal.tar.gz
+        curl -fsSL "https://github.com/crystal-lang/crystal/releases/download/$tag/$asset" \
+          -o /tmp/crystal.tar.gz
         mkdir -p /tmp/crystal
         tar -xzf /tmp/crystal.tar.gz -C /tmp/crystal
-        root=$(find /tmp/crystal -mindepth 1 -maxdepth 1 -type d | head -1)
+        root=$(find /tmp/crystal -mindepth 1 -maxdepth 1 -type d -print -quit)
         [ -n "$root" ] || { echo "::error::unexpected tarball layout"; exit 1; }
-        if [ "$CRYSTAL_OS" = linux ]; then
-          echo "$root/bin" >> "$GITHUB_PATH"
-          echo "CRYSTAL_PATH=$root/share/crystal/src" >> "$GITHUB_ENV"
-          echo "CRYSTAL_LIBRARY_PATH=$root/lib/crystal" >> "$GITHUB_ENV"
-        else
-          # bin/crystal is a wrapper that exports CRYSTAL_PATH and
-          # CRYSTAL_LIBRARY_PATH; embedded/bin/crystal is the real binary and
-          # embedded/bin/shards the shards CLI (passed to make via $SHARDS).
-          echo "$root/bin" >> "$GITHUB_PATH"
-          echo "SHARDS=$root/embedded/bin/shards" >> "$GITHUB_ENV"
+
+        # $GITHUB_PATH only takes effect in later steps, so set PATH here too.
+        export PATH="$root/bin:$PATH"
+        echo "$root/bin" >> "$GITHUB_PATH"
+
+        # The tarballs resolve CRYSTAL_PATH and CRYSTAL_LIBRARY_PATH relative to
+        # their own bin/ ($ORIGIN), so leave both alone: overriding CRYSTAL_PATH
+        # drops the `lib` entry that shard requires need. macOS is the one
+        # exception: its bin/crystal is a wrapper around embedded/bin/crystal
+        # and the shards CLI only exists under embedded/bin, so name it for make.
+        if [ "$CRYSTAL_OS" = darwin ]; then
+          shards_bin="$root/embedded/bin/shards"
+          [ -x "$shards_bin" ] || { echo "::error::no shards in $root/embedded/bin"; exit 1; }
+          export SHARDS="$shards_bin"
+          echo "SHARDS=$SHARDS" >> "$GITHUB_ENV"
         fi
+
+        # The Linux tarball ships libgc and libpcre2 as static archives but
+        # leaves libyaml to the system, which would make the released binary
+        # depend on libyaml-0.so.2. Put libyaml.a in the toolchain's own lib
+        # directory instead: `-L$root/lib/crystal` comes first on the link
+        # line, so -lyaml resolves to the archive and links statically.
+        if [ "$CRYSTAL_OS" = linux ]; then
+          as_root=""
+          [ "$(id -u)" -eq 0 ] || as_root="sudo -n"
+          $as_root apt-get update -qq
+          $as_root apt-get install -y -qq --no-install-recommends libyaml-dev
+          yaml_a=$(find /usr/lib -name libyaml.a -print -quit)
+          [ -n "$yaml_a" ] || { echo "::error::no libyaml.a after installing libyaml-dev"; exit 1; }
+          libdir=$(crystal env CRYSTAL_LIBRARY_PATH | cut -d: -f1)
+          [ -d "$libdir" ] || { echo "::error::no crystal lib dir at $libdir"; exit 1; }
+          cp "$yaml_a" "$libdir/"
+        fi
+
         crystal --version
         v=$(crystal --version | sed -n 's/^Crystal \([0-9.]*\).*/\1/p')
+        [ -n "$v" ] || { echo "::error::cannot parse version from crystal --version"; exit 1; }
         # Portable >= check for X.Y.Z versions (no `sort -V` on macOS).
         ok=$(awk -v a="$CRYSTAL_MIN" -v b="$v" 'BEGIN{
           split(a, x, "."); split(b, y, ".");

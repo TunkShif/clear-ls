@@ -7,7 +7,8 @@ name: Release
 #   gh release edit v0.16.0 --draft=false        # publish it
 #
 # Or run it by hand: Actions → Release → Run workflow, with a tag that already
-# exists (e.g. to redo a failed run).
+# exists (e.g. to redo a failed run). The tag carries this workflow and
+# .github/actions, so a manual run of an older tag uses that tag's CI files.
 
 on:
   push:
@@ -41,7 +42,7 @@ jobs:
       version: ${{ steps.tag.outputs.version }}
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # For workflow_dispatch checkout the input tag, not the branch.
           ref: ${{ inputs.tag || github.ref }}
@@ -73,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.check.outputs.tag }}
       - uses: ./.github/actions/setup-crystal
@@ -112,7 +113,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.check.outputs.version }}
       TARGET_TRIPLE: ${{ matrix.triple }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.check.outputs.tag }}
       - uses: ./.github/actions/setup-crystal
@@ -141,11 +142,16 @@ jobs:
           or the compiler.path setting) for diagnostics and formatting.
           EOF
           cp bin/clear-ls dist/
-          tar -czf "clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz" -C dist .
-          shasum -a 256 "clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz" \
-            > "clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz.sha256"
-          cat "clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
+          name="clear-ls-${RELEASE_VERSION}-${TARGET_TRIPLE}.tar.gz"
+          tar -czf "$name" -C dist .
+          # sha256sum on Linux, shasum on macOS; both print "<hash>  <file>".
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$name" > "$name.sha256"
+          else
+            shasum -a 256 "$name" > "$name.sha256"
+          fi
+          cat "$name.sha256"
+      - uses: actions/upload-artifact@v7
         with:
           name: clear-ls-${{ matrix.platform }}
           path: |
@@ -162,13 +168,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: clear-ls-*
           merge-multiple: true
       - name: List assets
         run: ls -la
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.check.outputs.tag }}
           name: clear-ls ${{ needs.check.outputs.version }}
