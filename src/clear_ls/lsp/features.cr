@@ -56,6 +56,7 @@ module ClearLS::LSP
         inlayHintProvider:       true,
         implementationProvider:  true,
         documentFormattingProvider: true,
+        documentRangeFormattingProvider: true,
         callHierarchyProvider:   true,
         typeHierarchyProvider:   true,
         codeActionProvider:      {codeActionKinds: ["quickfix", "refactor.rewrite"]},
@@ -91,6 +92,7 @@ module ClearLS::LSP
       when "textDocument/signatureHelp"  then signature_help(params)
       when "textDocument/implementation" then implementation(params)
       when "textDocument/formatting"     then formatting(params)
+      when "textDocument/rangeFormatting" then range_formatting(params)
       when "textDocument/prepareCallHierarchy" then prepare_call_hierarchy(params)
       when "callHierarchy/outgoingCalls" then outgoing_calls(params)
       when "callHierarchy/incomingCalls" then incoming_calls(params)

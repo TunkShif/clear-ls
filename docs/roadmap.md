@@ -2289,6 +2289,22 @@ Steps (one commit each; pause at the end of each):
    def's indentation; an untouched hunk elsewhere stays; a pair kept
    together; an already-formatted range gives no edits; a syntax
    error gives no edits.
+   *Done:* `Server.line_hunks` (Myers on the lines between the common
+   prefix and suffix; the trace keeps only diagonals `-d..d` per step)
+   and `Server.hunks_in_range` (conform's rule: overlap, an insertion
+   at or right after the window, the window grows to each kept hunk's
+   end). A range ending at column 0 of a line leaves that line out
+   (linewise selections in clients send the next line's start).
+   `textDocument/formatting` is unchanged (one prefix/suffix edit).
+   Specs: hunks, a 200-case random check that applying every hunk
+   gives the new text, range selection, the LSP handler (selected
+   hunk with the def's indentation, alignment against the first line
+   of a hash, formatted range, column-0 end, syntax error).
+   `make spec` 368 examples. A mangled `string.cr` (5929 lines,
+   1261 hunks): diff 104 ms (release; 261 ms before trimming the
+   trace), a 10-line range 0.95 s end to end, mostly `tool format`;
+   applying all hunks of a whole-file range equals the formatter's
+   output.
 3. **Verification and docs.** Neovim check: `vim.lsp.buf.type_definition`
    and `declaration`, `vim.lsp.buf.format({range = …})` without conform;
    README feature list, status, architecture; 0.16.0.
