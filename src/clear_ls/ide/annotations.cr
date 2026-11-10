@@ -51,6 +51,40 @@ module ClearLS::IDE
 
     BY_NAME = BUILTINS.to_h { |b| {b.name, b} }
 
+    # Arguments of stdlib annotations, by full name, as their macros read
+    # them (`ann[:key]` in json/serialization.cr, yaml/serialization.cr,
+    # uri/params/serializable.cr; Crystal 1.22). Docs from the
+    # `Serializable` modules. Used only when the annotation is declared
+    # in the stdlib.
+    private IGNORE = Arg.new("ignore", "Bool", "skip this field in serialization and deserialization (default `false`)")
+    private IGNORE_SER = Arg.new("ignore_serialize", "Bool", "if truthy, skip this field in serialization (default `false`); any Crystal expression, evaluated at runtime")
+    private IGNORE_DESER = Arg.new("ignore_deserialize", "Bool", "skip this field in deserialization (default `false`)")
+    private PRESENCE = Arg.new("presence", "Bool", "generate a `@{{key}}_present` instance variable, true when the key was present (even with a `null` value); default `false`")
+    private EMIT_NULL = Arg.new("emit_null", "Bool", "emit `null` for a nilable property (default: nulls are not emitted)")
+    private EMIT_NULLS = Arg.new("emit_nulls", "Bool", "emit `null` for all nilable properties (default: nulls are not emitted)")
+
+    STDLIB_ARGS = {
+      "JSON::Field" => [
+        IGNORE, IGNORE_SER, IGNORE_DESER,
+        Arg.new("key", "String", "key in the JSON object (default: the instance variable's name)"),
+        Arg.new("root", "String", "the value is inside a JSON object under this key (see `Object.from_json(string_or_io, root)`)"),
+        Arg.new("converter", "", "type used for parsing and generation: defines `from_json(JSON::PullParser)` and `to_json(value, JSON::Builder)` (e.g. `Time::EpochConverter`)"),
+        PRESENCE, EMIT_NULL,
+      ],
+      "YAML::Field" => [
+        IGNORE, IGNORE_SER, IGNORE_DESER,
+        Arg.new("key", "String", "key in the YAML object (default: the instance variable's name)"),
+        Arg.new("converter", "", "type used for parsing and generation: defines `from_yaml(YAML::ParseContext, YAML::Nodes::Node)` and `to_yaml(value, YAML::Nodes::Builder)` (e.g. `Time::EpochConverter`)"),
+        PRESENCE, EMIT_NULL,
+      ],
+      "URI::Params::Field" => [
+        IGNORE, IGNORE_SER, IGNORE_DESER,
+        Arg.new("converter", "", "type used for parsing: defines `.from_www_form(params : URI::Params, name : String)`"),
+      ],
+      "JSON::Serializable::Options" => [EMIT_NULLS],
+      "YAML::Serializable::Options" => [EMIT_NULLS],
+    }
+
     # Single-segment names the compiler resolves at the top level inside
     # `@[…]`, whatever the scope (`semantic_visitor.cr`: `File::Flags`
     # would shadow `Flags` otherwise).

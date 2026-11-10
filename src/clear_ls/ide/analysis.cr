@@ -261,8 +261,8 @@ module ClearLS::IDE
       name_node = ann.named_child(0) || return nil
       map = def_map
       ns = map.namespace_at(@state.id, ann.start_byte)
-      docs_of = ->(f : FileId) { AnnotationArgs.file_docs(@index, f) }
-      full, args = AnnotationArgs.for_path(map, ns, name_node.text, docs_of) || return nil
+      std = ->(f : FileId) { @index.stdlib_file?(f) }
+      full, args = AnnotationArgs.for_path(map, ns, name_node.text, std) || return nil
       if arg.kind.named_expr?
         key = arg.field(Syntax::Field::Name) || return nil
         return nil unless key.range.touches?(offset)

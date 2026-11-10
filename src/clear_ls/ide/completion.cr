@@ -238,8 +238,8 @@ module ClearLS::IDE
     private def annotation_args(ctx : AnnotationContext::Args) : Array(CompletionItem)?
       map = @typing.def_map
       ns = map.namespace_at(@state.id, ctx.start)
-      docs_of = ->(f : FileId) { AnnotationArgs.file_docs(@index, f) }
-      full, args = AnnotationArgs.for_path(map, ns, ctx.name, docs_of) || return nil
+      std = ->(f : FileId) { @index.stdlib_file?(f) }
+      full, args = AnnotationArgs.for_path(map, ns, ctx.name, std) || return nil
       return nil if args.empty?
       range = TextRange.new(ctx.start, ctx.start + ctx.prefix.bytesize)
       args.compact_map do |a|

@@ -252,6 +252,12 @@ module ClearLS::Workspace
       @entries[file]?.try { |e| library_path?(e.path) } || false
     end
 
+    # In the stdlib (`Project#stdlib_dir`), not a shard.
+    def stdlib_file?(file : FileId) : Bool
+      dir = @project.stdlib_dir || return false
+      @entries[file]?.try { |e| e.path.starts_with?(dir.ends_with?('/') ? dir : dir + "/") } || false
+    end
+
     private def library_path?(path : String) : Bool
       @project.crystal_path.any? { |d| path.starts_with?(d.ends_with?('/') ? d : d + "/") }
     end

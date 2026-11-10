@@ -272,10 +272,12 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
   position of the cursor inside `@[…]`, by scanning the text back to
   `@[` (half-typed annotations are `ERROR` nodes).
 - `IDE::AnnotationArgs` (`annotation_args.cr`): arguments of an
-  annotation type: built-in table, else doc conventions (bold bullets
-  near a line naming it in any doc of its files; code bullets or
-  `### name` + `**Type:**` in its own doc). Used by
-  `Completion#annotation_args` and `Analysis#annotation_arg_hover`.
+  annotation type from tables only: `Annotations::BUILTINS` (top-level
+  compiler annotations) and `Annotations::STDLIB_ARGS` (`JSON::Field`,
+  `YAML::Field`, `URI::Params::Field`, `*::Serializable::Options`,
+  applied only when every declaration is in the stdlib). Docs are not
+  parsed. Used by `Completion#annotation_args` and
+  `Analysis#annotation_arg_hover`.
 - `DefMap#lookup_path_raw` follows an alias in the middle of a path
   (`ADI::Register`), as the compiler does.
 

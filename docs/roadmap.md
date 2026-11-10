@@ -2495,6 +2495,29 @@ Status: done. `make spec` 393 examples; every Neovim check passes
 Not yet: argument names of undocumented user annotations (`ann[:key]`
 in macros, not approved); positional values only for built-ins.
 
+### Fix round after Phase 17: annotation arguments from tables only (done)
+
+Review of step 3: doc formats vary per shard (Athena alone uses two,
+the stdlib a third), so parsing them is fragile. Tracing the macros
+that read an annotation (`x.annotation(ADI::Register)`, then
+`ann[:key]`) links use and reader only by name at expansion time, and
+misses `ann.named_args` loops (42 in Athena) and annotations passed
+through variables: also a heuristic, plus an index over every macro.
+
+Decision: argument completion and hover only for the compiler's
+annotations and the stdlib's own. The stdlib ones are a table
+(`Annotations::STDLIB_ARGS`, from the `ann[:…]` reads of
+json/serialization.cr, yaml/serialization.cr,
+uri/params/serializable.cr in Crystal 1.22: `JSON::Field` 8,
+`YAML::Field` 7, `URI::Params::Field` 4, `JSON::Serializable::Options`
+and `YAML::Serializable::Options` 1), used only when the annotation is
+the stdlib's declaration. Doc parsing removed (bold bullets, Athena's
+code bullets and `### name` + `**Type:**` sections). Kept: annotation
+names for every annotation (from declarations), the alias-in-path fix,
+namespace aliases after `@[`. Shard and user annotations fall back to
+ordinary completion items. Specs updated (25 in
+`features_phase17_spec.cr`). 0.17.1.
+
 Exit criterion: inside `@[…]` completion offers only annotations and
 their arguments; built-in annotations and argument names hover; no
 regressions (`make spec`, `make nvim-check`, `make verify-static`).

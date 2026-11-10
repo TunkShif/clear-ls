@@ -132,22 +132,12 @@ private ANN_STD = STD.merge({
       annotation Field
       end
 
-      # `JSON::Serializable`
-      #
-      # `JSON::Field` properties:
-      # * **key**: the value of the key
-      # * **emit_null**: if `true`, emits a `null` value
-      #
-      # ### Class annotation `JSON::Serializable::Options`
-      #
-      # supported properties:
-      # * **emit_nulls**: if `true`, emits nulls for all
       module Serializable
         annotation Options
         end
       end
 
-      # A field with its own doc.
+      # Not in the stdlib table: its documented bullets are not read.
       #
       # * **name**: the name
       annotation Named
@@ -256,11 +246,20 @@ describe "phase 17 annotation arguments" do
     end
   end
 
-  it "reads the stdlib's property bullets" do
-    arg_labels("@[JSON::Field(‸\ndef f; end\n").should eq %w(emit_null: key:)
-    arg_labels("@[JSON::Field(key: \"a\", ‸\ndef f; end\n").should eq %w(emit_null:)
+  it "completes the stdlib annotations from the table" do
+    arg_labels("@[JSON::Field(‸\ndef f; end\n").should eq %w(converter: emit_null: ignore: ignore_deserialize: ignore_serialize: key: presence: root:)
+    arg_labels("@[JSON::Field(key: \"a\", ig‸\ndef f; end\n").should eq %w(ignore: ignore_deserialize: ignore_serialize:)
     arg_labels("@[JSON::Serializable::Options(‸\nclass A\nend\n").should eq %w(emit_nulls:)
-    arg_labels("@[JSON::Named(‸\ndef f; end\n").should eq %w(name:)
+  end
+
+  it "reads no docs: other annotations have no argument items" do
+    # Documented in the stdlib's format, but not a stdlib table entry.
+    arg_labels("x = 1\n@[JSON::Named(‸\ndef f; end\n").should contain("x")
+    # A user `JSON::Field` (not the stdlib's) gets nothing from the table.
+    with_client({"src/app.cr" => "module JSON\n  annotation Field\n  end\nend\n@[JSON::Field(key: 1)]\ndef f; end\n"}) do |c|
+      c.open("src/app.cr")
+      hover_text(c, "key:").should be_nil
+    end
   end
 
   it "leaves annotations without known arguments alone" do
@@ -276,14 +275,15 @@ describe "phase 17 annotation arguments" do
       h.should start_with("```crystal\nldflags : String\n```\n\nargument of `Link`")
       h.should contain("passed to the linker as is")
       hover_text(c, "\"m\"", 1).not_nil!.should contain("lib : String\n```\n\nargument of `Link` (positional #1)")
-      hover_text(c, "key:").not_nil!.should eq "```crystal\nkey\n```\n\nargument of `JSON::Field`\n\nthe value of the key"
+      hover_text(c, "key:").not_nil!.should eq "```crystal\nkey : String\n```\n\nargument of `JSON::Field`\n\nkey in the JSON object (default: the instance variable's name)"
       hover_text(c, "\"use g\"", 1).not_nil!.should contain("message : String")
       hover_text(c, "\"-lm\"", 1).should be_nil # a value, not the name
     end
   end
 end
 
-# Doc forms of an annotation-heavy shard (Athena 0.4–0.5).
+# An annotation-heavy shard (Athena 0.4–0.5): aliases in paths, and
+# documented arguments that are deliberately not read.
 private ATHENA = <<-CR
   module Athena::DependencyInjection
     # Registers a service.
@@ -335,7 +335,7 @@ describe "phase 17 annotation-heavy shards" do
       hover_text(c, "Register(public").not_nil!.should start_with("```crystal\nannotation Athena::DependencyInjection::Register\n```")
       defs(c, "Register(public").should eq [{"app.cr", 12}]
       defs(c, "Inject\n").should eq [{"app.cr", 15}]
-      hover_text(c, "public: true").not_nil!.should eq "```crystal\npublic : Bool\n```\n\nargument of `Athena::DependencyInjection::Register`\n\nIf the service is public."
+      hover_text(c, "public: true").should be_nil
     end
   end
 
@@ -345,13 +345,9 @@ describe "phase 17 annotation-heavy shards" do
     names(ATHENA + "\n@[ADI::‸\nclass S; end\n").should eq %w(Inject Register)
   end
 
-  it "reads `name : Type` bullets and `### name` + **Type:** sections" do
-    arg_labels(ATHENA + "\n@[ADI::Register(‸\nclass S; end\n").should eq %w(name: public:)
-    arg_labels(ATHENA + "\n@[ACONA::AsCommand(\"x\", ‸\nclass S; end\n").should eq %w(hidden: name:)
-    with_client({"src/app.cr" => ATHENA + "\n@[ACONA::AsCommand(name: \"x\")]\nclass S; end\n"}, ANN_STD) do |c|
-      c.open("src/app.cr")
-      hover_text(c, "name: \"x\"").not_nil!.should eq "```crystal\nname : String\n```\n\nargument of `Athena::Console::Annotations::AsCommand`\n\nThe name of the command. May be positional."
-    end
+  it "offers no arguments for shard annotations, whatever their docs say" do
+    arg_labels(ATHENA + "\nx = 1\n@[ADI::Register(‸\nclass S; end\n").should contain("x")
+    arg_labels(ATHENA + "\nx = 1\n@[ACONA::AsCommand(\"x\", ‸\nclass S; end\n").should contain("x")
   end
 end
 
