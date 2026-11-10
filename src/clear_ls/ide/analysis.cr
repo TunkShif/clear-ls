@@ -2,6 +2,7 @@ require "../workspace/index"
 require "./locals"
 require "./typing"
 require "./type_params"
+require "./annotations"
 
 module ClearLS::IDE
   # A location in a file, as byte ranges. The LSP layer converts to
@@ -219,6 +220,9 @@ module ClearLS::IDE
         return HoverInfo.new("```crystal\n#{tp.name}\n```\n\n#{role}", tp.range)
       end
       results = resolve_path_at(offset)
+      if hit = builtin_annotation_hover(offset, results.first?)
+        return hit
+      end
       first = results.first? || return nil
       md = String.build do |io|
         first[:sites].first(1).each { |s| describe(s.item, first[:full_name], io) }
@@ -227,6 +231,33 @@ module ClearLS::IDE
         end
       end
       HoverInfo.new(md, first[:range])
+    end
+
+    # The `constant` naming the annotation in `@[Name(...)]` at *offset*.
+    def annotation_name_at(offset : UInt32) : Syntax::Node?
+      node = tree.root.descendant(offset, offset, named: true) || return nil
+      node = node.parent.not_nil! if !node.kind.constant? && node.parent.try(&.kind.constant?)
+      return nil unless node.kind.constant?
+      parent = node.parent || return nil
+      parent.kind.annotation_node? && parent.named_child(0) == node ? node : nil
+    end
+
+    # A compiler annotation (`Annotations::BUILTINS`) under the cursor:
+    # the table's doc and arguments, with the stdlib declaration's doc
+    # when there is one. Nil when the name resolves to something else
+    # (a user `annotation Raises` in scope wins, as in the compiler).
+    private def builtin_annotation_hover(offset : UInt32, first) : HoverInfo?
+      node = annotation_name_at(offset) || return nil
+      b = IDE::Annotations.builtin?(node.text) || return nil
+      start = node.start_byte + (node.text.starts_with?("::") ? 2 : 0)
+      range = TextRange.new(start.to_u32, node.end_byte)
+      return nil if offset < start
+      unless first
+        return HoverInfo.new(IDE::Annotations.markdown(b), range)
+      end
+      return nil unless first[:full_name] == b.name
+      site = first[:sites].find(&.item.kind.annotation?) || return nil
+      HoverInfo.new(IDE::Annotations.markdown(b, site.item.doc), first[:range])
     end
 
     private def describe(item : Items::Item, full_name : String, io : IO) : Nil
@@ -282,6 +313,11 @@ module ClearLS::IDE
       # enclosing namespace, like the compiler.
       if (decl = node.parent) && (decl.kind.class_def? || decl.kind.struct_def? || decl.kind.module_def?)
         ns = map[ns].namespace || Semantics::DefMap::PROGRAM
+      end
+      # `@[Primitive]`, `@[Flags]`: the compiler takes the top-level
+      # annotation whatever is in scope (`File::Flags` is an enum).
+      if (decl = node.parent) && decl.kind.annotation_node? && IDE::Annotations::TOP_LEVEL.includes?(text)
+        ns = Semantics::DefMap::PROGRAM
       end
 
       # Aliases are not followed: definition and hover of `Env` go to

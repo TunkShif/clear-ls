@@ -2400,6 +2400,20 @@ Steps (one commit each; pause at the end of each):
 1. **Built-in annotations.** The table; hover and completion items
    for the built-ins; `@[AlwaysInline]`, `@[Raises]` hover. Specs:
    each built-in hovers; a declared one keeps its source doc.
+
+   *Done:* `IDE::Annotations` (15 entries: doc, where it applies,
+   arguments with type, position and whether named) and
+   `Analysis#builtin_annotation_hover`: a built-in with no
+   declaration hovers from the table (no definition); a declared one
+   (`Link`, `Flags`, ...) keeps its stdlib doc plus "Applies to" and
+   the argument list. A declared annotation in scope with a built-in's
+   name (`Own::Raises`) wins, as in the compiler. Also fixed: in
+   `@[Primitive]` and `@[Flags]` the compiler always takes the
+   top-level annotation (semantic_visitor.cr), but clear-ls resolved
+   `File::Flags` (the enum) inside `class File` and `Int::Primitive`
+   (an alias) on stdlib number methods. The completion items moved to
+   step 2 (they need the `@[` context). Specs
+   `features_phase17_spec.cr` (5). `make spec` 373 examples.
 2. **Annotation name completion.** Context detection and filtering;
    an annotation completion kind. Specs: `@[`, `@[|]`, `@[Li` (only
    `Link`), `@[Pa` (only `Packed`), `@[JSON::` (only `Field` and

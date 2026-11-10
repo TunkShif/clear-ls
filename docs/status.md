@@ -40,8 +40,9 @@ stops mid-phase). History and per-phase details are in
 - **Next:** Phase 17 — annotations
   ([roadmap.md](roadmap.md#phase-17--annotations)), then Phase 18 — C
   bindings, then Phase 19 — own tree-sitter-crystal.
-- **In progress:** Phases 17–19 planned on `dev/next` (Phase 16 also
-  there, not merged into `main`); no step started.
+- **In progress:** Phase 17 step 1 done (built-in annotations) on
+  `dev/next` (Phase 16 also
+  there, not merged into `main`); next: step 2.
 
 ## Resume
 
