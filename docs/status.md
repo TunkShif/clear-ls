@@ -4,7 +4,9 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–15 (last: macOS: every tool, spec and Neovim
+- **Done:** Phases 0–16 (last: type definition from inferred types,
+  declaration, range formatting from the formatter's hunks; before that,
+  macOS: every tool, spec and Neovim
   check runs unchanged on Linux and macOS, folders and documents named
   through symlinks or with `//`, directory listings and unchanged
   stdlib/shard files taken from the cache by mtime, concurrent compiler
@@ -35,10 +37,8 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 16 — type definition, declaration, range formatting
-  ([roadmap.md](roadmap.md#phase-16--type-definition-declaration-range-formatting)).
-- **In progress:** Phase 16 planned on `dev/navigation-range-format`;
-  steps 1 (type definition, declaration) and 2 (range formatting) done.
+- **Next:** usage feedback; every planned phase is done.
+- **In progress:** nothing.
 
 ## Resume
 

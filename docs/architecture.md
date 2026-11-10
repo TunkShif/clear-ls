@@ -247,6 +247,21 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
   `References#method_refs` reads instead of keeping each body's `Infer`
   (460 MB on Marten).
 
+### Type definition and range formatting (Phase 16)
+
+- `IDE::TypeInfo#type_at`: the type under the cursor through the hover
+  paths (`local_type`, `ivar_type`, `self_type_at`, `literal_type`,
+  `call_at`). `Navigation#type_definitions` maps it to sites: unions per
+  member, metaclass to its instance, tuple/named tuple/proc to their
+  structs, generic arguments not followed; a type's first site plus the
+  first in each other workspace file (library reopenings skipped).
+  `declaration` is answered by `definition`.
+- `lsp/formatting.cr`: `rangeFormatting` formats the whole buffer;
+  `Server.line_hunks` (Myers line diff) gives every hunk and
+  `hunks_in_range` keeps those touching the requested lines, growing the
+  window over each kept hunk. `formatting` still sends one
+  prefix/suffix edit (`line_diff`).
+
 ### Compiler integration (Phase 7)
 
 - `Compiler::Job`: subprocess with timeout and cancel. `wait` yields, so

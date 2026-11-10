@@ -2309,9 +2309,27 @@ Steps (one commit each; pause at the end of each):
    and `declaration`, `vim.lsp.buf.format({range = …})` without conform;
    README feature list, status, architecture; 0.16.0.
 
+   *Done:* Neovim check `navigation` (fixture
+   `tools/fixtures/navigation`, in `make nvim-check`) through
+   `vim.lsp.buf`, no conform: type definition of a local
+   (`demo.cr:1`), a `Point?` (`nil.cr:44, demo.cr:1`), a call result on
+   the real stdlib (`string.cr:147`); declaration of `find`;
+   `vim.lsp.buf.format({range})` on one line of an unformatted def
+   reformats that def's hunk (lines 19–22) and leaves the next def
+   alone, which whole formatting then fixes. README (navigation,
+   formatting and its limits), architecture, tools/README, status;
+   0.16.0.
+
 Exit criterion: type definition and declaration answer from the
 inferred types; range formatting changes only the selected hunks; no
 regressions (`make spec`, `make nvim-check`, `make verify-static`).
+
+Status: done. `make spec` 368 examples; every Neovim check passes
+(`navigation` added); `make verify-static` OK. 0.16.0.
+
+Not yet: range formatting needs the whole buffer to parse (formatter
+limitation); a hunk can reach past the selection, and alignment split
+into separate hunks is applied only where selected.
 
 ## Testing approach
 
