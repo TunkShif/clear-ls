@@ -2419,6 +2419,22 @@ Steps (one commit each; pause at the end of each):
    `Link`), `@[Pa` (only `Packed`), `@[JSON::` (only `Field` and
    the `Serializable` namespace for `Options`), user annotations,
    inside a class body and before a `fun` in a `lib`.
+
+   *Done:* `IDE::AnnotationContext` scans back from the cursor to the
+   last `@[` (at most 4 KB) and lexes strings, chars, comments and
+   nested brackets: `Name` (qualifier, prefix) or `Args` (annotation,
+   prefix, named arguments written, positional count; used in step 3);
+   nil once the annotation closes or inside a value. Inside a string or
+   comment (checked on the CST) nothing changes. `Completion#annotation_names`:
+   annotation types of the enclosing namespaces and their ancestors,
+   namespaces holding an annotation (`JSON`, `Serializable`), the
+   members of a written path (`@[JSON::`, `@[::`), and the built-ins;
+   no other types (`Path`, `Thread`, `LibC` are gone). New
+   `CompletionKind::Annotation` sent as LSP 8 (`Interface`), so clients
+   show annotations apart from classes. `[` is now a trigger character;
+   an automatic `[` request outside `@[` (`xs[`) gets nothing, an
+   explicit one is unchanged (`context.triggerCharacter`). Specs: 10 more
+   in `features_phase17_spec.cr` (15). `make spec` 383 examples.
 3. **Arguments.** Named-argument completion and hover from the
    table and doc bullets. Specs: `@[Link(` → `ldflags:` …,
    `@[Link("m", pk` → `pkg_config:`, `@[JSON::Field(ke` → `key:`,

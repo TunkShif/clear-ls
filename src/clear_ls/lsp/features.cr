@@ -52,7 +52,7 @@ module ClearLS::LSP
         documentHighlightProvider: true,
         referencesProvider:      true,
         renameProvider:          {prepareProvider: true},
-        completionProvider:      {triggerCharacters: [".", ":", "@", "\"", "/"], resolveProvider: false},
+        completionProvider:      {triggerCharacters: [".", ":", "@", "\"", "/", "["], resolveProvider: false},
         inlayHintProvider:       true,
         implementationProvider:  true,
         documentFormattingProvider: true,
@@ -363,7 +363,7 @@ module ClearLS::LSP
       IDE::CompletionKind::Field => 5, IDE::CompletionKind::Class => 7, IDE::CompletionKind::Struct => 22,
       IDE::CompletionKind::Module => 9, IDE::CompletionKind::Enum => 13, IDE::CompletionKind::EnumMember => 20,
       IDE::CompletionKind::Constant => 21, IDE::CompletionKind::Keyword => 14, IDE::CompletionKind::Snippet => 15,
-      IDE::CompletionKind::Macro => 3, IDE::CompletionKind::File => 17,
+      IDE::CompletionKind::Macro => 3, IDE::CompletionKind::File => 17, IDE::CompletionKind::Annotation => 8,
     }
 
     private def completion(params : JSON::Any)
@@ -374,7 +374,8 @@ module ClearLS::LSP
         do_snippet: @settings.bool("completion.doSnippet"), case_snippets: @settings.bool("completion.caseSnippets"),
         definition_snippets: @settings.bool("completion.definitionSnippets"),
         control_flow_snippets: @settings.bool("completion.controlFlowSnippets"))
-      items = IDE::Completion.new(state, index, typing(state), opts).complete(off)
+      trigger = params.dig?("context", "triggerCharacter").try(&.as_s?)
+      items = IDE::Completion.new(state, index, typing(state), opts).complete(off, trigger)
       {
         isIncomplete: items.size >= IDE::Completion::MAX_ITEMS,
         items:        items.map { |i| completion_item_json(state, i) },

@@ -4,6 +4,8 @@ require "./signature_help"
 require "./references"
 require "./statement_site"
 require "./require_completion"
+require "./annotation_context"
+require "./annotations"
 
 module ClearLS::IDE
   enum CompletionKind
@@ -21,6 +23,7 @@ module ClearLS::IDE
     Snippet
     Macro
     File
+    Annotation
   end
 
   record CompletionItem,
@@ -68,11 +71,18 @@ module ClearLS::IDE
     def initialize(@state : FileState, @index : Workspace::Index, @typing : Typing, @options = CompletionOptions.new)
     end
 
-    def complete(offset : UInt32) : Array(CompletionItem)
+    # *trigger*: the client's `triggerCharacter`, when typing one asked
+    # for completion. `[` is one only for `@[`: elsewhere (`a[`) the
+    # automatic request gets nothing; an explicit request still works.
+    def complete(offset : UInt32, trigger : String? = nil) : Array(CompletionItem)
       text = @state.text
       if ctx = RequireCompletion.context(text, offset)
         return require_items(ctx)
       end
+      if (actx = AnnotationContext.at(text, offset)).is_a?(AnnotationContext::Name) && !in_comment_or_string?(actx.start)
+        return annotation_names(actx)
+      end
+      return [] of CompletionItem if trigger == "["
       # Inside any other string or a comment nothing is offered for `"`
       # and `/` (trigger characters of require completion).
       if offset > 0 && text.byte_at(offset - 1).chr.in?('"', '/')
@@ -147,6 +157,86 @@ module ClearLS::IDE
     # Up to the first blank line, so a long module doc stays short.
     private def first_paragraph(doc : String) : String
       doc.split(/\n\s*\n/, 2).first.strip
+    end
+
+    # -- `@[|` ----------------------------------------------------------------------
+
+    # Annotation types, and namespaces that hold one, visible from the
+    # cursor (`@[Li`) or inside the written path (`@[JSON::`); the
+    # compiler's undeclared annotations at the top level. Nothing else:
+    # the compiler rejects anything but an annotation type there.
+    private def annotation_names(ctx : AnnotationContext::Name) : Array(CompletionItem)
+      map = @typing.def_map
+      items = [] of CompletionItem
+      seen = Set(String).new
+      range = TextRange.new(ctx.start, ctx.start + ctx.prefix.bytesize)
+      if ctx.qualifier.empty?
+        cur = map.namespace_at(@state.id, ctx.start).as(Semantics::TypeId?)
+        while c = cur
+          map.ancestors(c).each do |anc|
+            map[anc].types.each { |name, id| add_annotation_name(items, seen, range, name, id) if name.starts_with?(ctx.prefix) }
+          end
+          cur = map[c].namespace
+        end
+      end
+      if !ctx.qualifier.empty?
+        target = ctx.qualifier == "::" ? Semantics::DefMap::PROGRAM : (map.lookup_path(ctx.qualifier, map.namespace_at(@state.id, ctx.start)) || return items)
+        map[target].types.each { |name, id| add_annotation_name(items, seen, range, name, id) if name.starts_with?(ctx.prefix) }
+      end
+      if ctx.qualifier.empty? || ctx.qualifier == "::"
+        Annotations::BUILTINS.each do |b|
+          next unless b.name.starts_with?(ctx.prefix) && seen.add?(b.name)
+          items << CompletionItem.new(b.name, CompletionKind::Annotation, detail: "#{b.name} (built-in)", documentation: Annotations.markdown(b), sort_text: "0#{b.name}", edit_range: range)
+        end
+      end
+      items.first(MAX_ITEMS)
+    end
+
+    private def add_annotation_name(items : Array(CompletionItem), seen : Set(String), range : TextRange, name : String, id : Semantics::TypeId) : Nil
+      map = @typing.def_map
+      t = map[id]
+      return if t.private_type? || seen.includes?(name)
+      if t.kind.annotation?
+        doc = t.doc
+        if b = Annotations.builtin?(t.full_name)
+          doc = Annotations.markdown(b, doc)
+        end
+        seen << name
+        items << CompletionItem.new(name, CompletionKind::Annotation, detail: t.full_name, documentation: doc, sort_text: "0#{name}", edit_range: range)
+      elsif holds_annotation?(id)
+        seen << name
+        items << CompletionItem.new(name, type_kind(t.kind), detail: t.full_name, documentation: t.doc, sort_text: "1#{name}", edit_range: range)
+      end
+    end
+
+    # Whether *offset* is inside a comment or a string literal (`"@["`,
+    # `# @[Link]` in a doc).
+    private def in_comment_or_string?(offset : UInt32) : Bool
+      return false if offset == 0
+      node = @state.tree.root.descendant(offset - 1, offset - 1)
+      while n = node
+        return true if n.kind.comment? || n.kind.string_node? || n.kind.char_node? || n.kind.heredoc_body?
+        return false if n.kind.annotation_node?
+        node = n.parent
+      end
+      false
+    end
+
+    @holds_annotation = {} of Semantics::TypeId => Bool
+
+    # Whether an annotation is declared in *id* or below it.
+    private def holds_annotation?(id : Semantics::TypeId, depth = 0) : Bool
+      return false if depth > 8
+      if (known = @holds_annotation[id]?) != nil
+        return known.not_nil!
+      end
+      @holds_annotation[id] = false # cycle guard
+      map = @typing.def_map
+      t = map[id]
+      found = !t.kind.alias? && t.types.any? do |name, sub|
+        sub != id && !map[sub].private_type? && (map[sub].kind.annotation? || holds_annotation?(sub, depth + 1))
+      end
+      @holds_annotation[id] = found
     end
 
     # -- receiver members (`x.|`) ---------------------------------------------------
