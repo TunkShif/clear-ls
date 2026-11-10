@@ -57,6 +57,12 @@ guessing from names. Wrong answers do more damage than missing ones.
   are shown by the alias's name.
 - **Signature help** that shows the overloads matching the arguments typed
   so far.
+- **Annotations**: hover on the compiler's built-in annotations (which
+  have no source) and on annotation arguments (`ldflags:`, `key:`, the
+  `"m"` of `@[Link("m")]`). Argument names come from the compiler for
+  built-ins, else from the annotation's docs: `* **name**: text`
+  (stdlib `JSON::Field`), `` * `name : Type` - text ``, or a `### name`
+  heading with `**Type:**` (Athena).
 - **Semantic tokens** for parameters, locals, instance variables, types and
   declarations.
 
@@ -74,6 +80,10 @@ guessing from names. Wrong answers do more damage than missing ones.
   shard dependencies. Every suggestion is checked to resolve.
 - Optional `class`/`def`/`if`/... skeletons, offered only where Crystal
   accepts them (off by default).
+- **Annotations**: inside `@[` only annotations (and the namespaces or
+  aliases that hold one, `@[ADI::`) are offered, including the compiler's
+  own (`Raises`, `Packed`, ...); inside `@[Name(` its named arguments,
+  minus those already given.
 
 ### Refactoring and code actions
 

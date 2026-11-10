@@ -262,6 +262,23 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
   window over each kept hunk. `formatting` still sends one
   prefix/suffix edit (`line_diff`).
 
+### Annotations (Phase 17)
+
+- `IDE::Annotations` (`annotations.cr`): the compiler's annotations
+  (doc, targets, arguments with type and position). `Analysis` hovers a
+  built-in from it (a declared one keeps its source doc), and resolves
+  `@[Primitive]`/`@[Flags]` at the top level like the compiler.
+- `IDE::AnnotationContext` (`annotation_context.cr`): name or argument
+  position of the cursor inside `@[…]`, by scanning the text back to
+  `@[` (half-typed annotations are `ERROR` nodes).
+- `IDE::AnnotationArgs` (`annotation_args.cr`): arguments of an
+  annotation type: built-in table, else doc conventions (bold bullets
+  near a line naming it in any doc of its files; code bullets or
+  `### name` + `**Type:**` in its own doc). Used by
+  `Completion#annotation_args` and `Analysis#annotation_arg_hover`.
+- `DefMap#lookup_path_raw` follows an alias in the middle of a path
+  (`ADI::Register`), as the compiler does.
+
 ### Compiler integration (Phase 7)
 
 - `Compiler::Job`: subprocess with timeout and cancel. `wait` yields, so

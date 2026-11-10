@@ -4,7 +4,9 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–16 (last: type definition from inferred types,
+- **Done:** Phases 0–17 (last: annotations: completion inside `@[`
+  and its arguments, hover on built-in annotations and arguments,
+  aliases inside type paths; before that, type definition from inferred types,
   declaration, range formatting from the formatter's hunks; before that,
   macOS: every tool, spec and Neovim
   check runs unchanged on Linux and macOS, folders and documents named
@@ -37,13 +39,11 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 17 — annotations
-  ([roadmap.md](roadmap.md#phase-17--annotations)), then Phase 18 — C
-  bindings, then Phase 19 — own tree-sitter-crystal.
-- **In progress:** Phase 17 steps 1–3 done (built-in annotations, name
-  completion, arguments) on
-  `dev/next` (Phase 16 also
-  there, not merged into `main`); next: step 4.
+- **Next:** Phase 18 — C bindings
+  ([roadmap.md](roadmap.md#phase-18--c-bindings-lib-fun)), then Phase 19 —
+  own tree-sitter-crystal.
+- **In progress:** nothing; Phases 16–17 on `dev/next`, not merged into
+  `main`.
 
 ## Resume
 

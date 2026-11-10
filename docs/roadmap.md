@@ -2458,6 +2458,43 @@ Steps (one commit each; pause at the end of each):
    fixture (completion inside `@[`, hover on an argument); README,
    status, architecture; 0.17.0.
 
+   *Done:* Neovim check `annotations` (fixture
+   `tools/fixtures/annotations`, in `make nvim-check`): `[` is a trigger
+   character; typing `@[` with `vim.lsp.completion` autotrigger opens
+   the 16 annotations, `@[JSON::` gives `Field Serializable`, `xs = [`
+   opens nothing; explicit requests for arguments; hovers on `Raises`,
+   `"m"`, `ldflags`, `emit_null`.
+
+   Real check on Athena (annotation-heavy: DI, serializer, console,
+   ORM, routing; `athena-dependency_injection` 0.4.6,
+   `athena-serializer` 0.4.4, `athena-console` 0.5.0 as shards of a
+   small app). Found and fixed (`fix(semantics)` commit):
+   - **Aliases inside a path.** Athena writes `@[ADI::Register]` with
+     `alias ADI = Athena::DependencyInjection`; `DefMap#lookup_path_raw`
+     didn't follow an alias in a middle segment, so hover, definition
+     and completion on `Register` gave nothing (also `OI::K` in plain
+     code). The compiler follows it. On the app's shards: 264 locals
+     typed that were unknown, 0 regressions; repo source and stdlib
+     unchanged (types dump diff).
+   - `@[` offered no namespace aliases (`ADI`, `ASRA`, `ACONA`); now
+     with the target's kind.
+   - Argument docs in two more forms, in the annotation's own doc only:
+     `` * `name : Type` - text `` (`ADI::Register`, `ASRA::Name`) and a
+     `### name` heading followed by `**Type:** `T`` (`ACONA::AsCommand`,
+     `ARTA::Route`, every ORM mapping annotation). 20 of Athena's 67
+     annotations document arguments; all 20 are read (`ADI::Register`
+     6, `ARTA::Route` 12, `AORMA::Column` 12, ...). The other 47 take
+     no arguments or describe them only in prose.
+
+   README (completion, information), architecture, tools/README,
+   status; 0.17.0. `make spec` 393 examples.
+
+Status: done. `make spec` 393 examples; every Neovim check passes
+(`annotations` added); `make verify-static` OK. 0.17.0.
+
+Not yet: argument names of undocumented user annotations (`ann[:key]`
+in macros, not approved); positional values only for built-ins.
+
 Exit criterion: inside `@[…]` completion offers only annotations and
 their arguments; built-in annotations and argument names hover; no
 regressions (`make spec`, `make nvim-check`, `make verify-static`).
