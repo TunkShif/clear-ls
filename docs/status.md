@@ -37,8 +37,11 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** usage feedback; every planned phase is done.
-- **In progress:** nothing.
+- **Next:** Phase 17 — annotations
+  ([roadmap.md](roadmap.md#phase-17--annotations)), then Phase 18 — C
+  bindings, then Phase 19 — own tree-sitter-crystal.
+- **In progress:** Phases 17–19 planned on `dev/next` (Phase 16 also
+  there, not merged into `main`); no step started.
 
 ## Resume
 

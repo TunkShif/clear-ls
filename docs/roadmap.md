@@ -2210,7 +2210,7 @@ Not yet: the two multi-folder compiler specs that failed once each in
 
 Small LSP gaps found while comparing with Lattice (a Liger fork built
 on the compiler's parser plus regex symbol scans). Branch
-`dev/navigation-range-format`.
+`dev/navigation-range-format` (renamed `dev/next`).
 
 **Today (0.15.0):** no `typeDefinitionProvider`, no
 `declarationProvider`, no `documentRangeFormattingProvider`. Formatting
@@ -2330,6 +2330,217 @@ Status: done. `make spec` 368 examples; every Neovim check passes
 Not yet: range formatting needs the whole buffer to parse (formatter
 limitation); a hunk can reach past the selection, and alignment split
 into separate hunks is applied only where selected.
+
+### Phase 17 — annotations
+
+Found while probing C bindings (`syntax/grammar.cr`): annotation
+names work, everything around them doesn't. Branch
+`dev/next` (shared by Phases 16–19 until merged).
+
+**Today (0.16.0):** hover and definition on the annotation name work
+for annotations declared in source (`Link`, `Deprecated`,
+`JSON::Field`, user `annotation MyAnn`). Measured gaps:
+
+- The compiler's own annotations have no declaration
+  (`Program#initialize`, compiler/crystal/program.cr:270–284):
+  `AlwaysInline`, `CallConvention`, `Extern`, `Naked`, `NoInline`,
+  `Packed`, `Primitive`, `Raises`, `ReturnsTwice`, `ThreadLocal` give
+  no hover, no definition, no completion (`@[Al` → nothing). `Link`,
+  `Flags`, `Deprecated`, `Experimental`, `TargetFeature` are also
+  declared in `annotations.cr` and work.
+- Completion does not know it is inside `@[…]`: `@[` gives the
+  ordinary expression items (`sleep`, `puts`, … 69–120 items);
+  `@[Li` mixes `Link` with every `Lib*` module, `@[Pa` offers the
+  `Path` struct, `@[JSON::` lists every `JSON` type. Annotations use
+  the `Class` completion kind.
+- Arguments: `@[Link(` and `@[JSON::Field(` give expression items,
+  `@[Link("m", pk` and `@[JSON::Field(ke` give nothing. Hover on a
+  named argument (`ldflags:`, `pkg_config:`, `key:`, `emit_null:`)
+  or a positional one (`"m"`) gives nothing.
+- Half-typed annotations parse as `ERROR` (`@[` alone is an empty
+  `ERROR`; `@[JSON::` swallows the next `def`), so the context must
+  come from the text before the cursor, as `RequireCompletion` does.
+
+**Design decisions:**
+
+1. **Built-in annotation table.** One table for the compiler's
+   annotations: name, short doc, where it applies (lib, fun, def,
+   struct, ivar, …), arguments (name, type, doc) as the compiler
+   reads them: `Link` (`lib`, `ldflags`, `static`, `framework`,
+   `pkg_config`, `wasm_import_module`, `dll`; codegen/link.cr),
+   `Extern(union:)` (top_level_visitor.cr:215), `TargetFeature(cpu:)`
+   (1271), `CallConvention(String)`, `Deprecated(String)`,
+   `Experimental(String)`, `Primitive(Symbol)`. Hover on a built-in
+   with no source has no definition location. A declared annotation
+   (`annotations.cr`) keeps its source doc; the table only adds the
+   arguments.
+2. **Annotation context.** `IDE::AnnotationCompletion.context(text,
+   offset)` from the line before the cursor: in the name (`@[`,
+   `@[Na`, `@[A::`) or in the arguments (`@[Name(…`, after `(` or
+   `,`). In the name: annotation types reachable from the cursor's
+   namespace, plus namespaces that contain one (`JSON` for
+   `JSON::Field`), plus the built-ins; nothing else.
+3. **Argument names** for source annotations come from the doc
+   convention the stdlib uses: `* **name**: text` bullets in the doc
+   of the annotation or of the module that reads it (`JSON::Field`'s
+   are on `JSON::Serializable`: 8; `YAML::Field`: 8;
+   `URI::Params::Field`: 4). Where the bullets live is found from the
+   `ann = x.annotation(::JSON::Field)` sites in macro code of the
+   same file. Names already written are not offered again.
+4. **Hover** on a named argument: its name, type when known, and the
+   doc line. On a positional argument of a built-in with one
+   (`@[Link("m")]` → `lib`): the same.
+
+**Undecided (needs approval):** argument names from `ann[:key]` reads
+in macro bodies (covers user annotations without docs; means scanning
+`macro_content` text).
+
+Steps (one commit each; pause at the end of each):
+
+1. **Built-in annotations.** The table; hover and completion items
+   for the built-ins; `@[AlwaysInline]`, `@[Raises]` hover. Specs:
+   each built-in hovers; a declared one keeps its source doc.
+2. **Annotation name completion.** Context detection and filtering;
+   an annotation completion kind. Specs: `@[`, `@[|]`, `@[Li` (only
+   `Link`), `@[Pa` (only `Packed`), `@[JSON::` (only `Field` and
+   the `Serializable` namespace for `Options`), user annotations,
+   inside a class body and before a `fun` in a `lib`.
+3. **Arguments.** Named-argument completion and hover from the
+   table and doc bullets. Specs: `@[Link(` → `ldflags:` …,
+   `@[Link("m", pk` → `pkg_config:`, `@[JSON::Field(ke` → `key:`,
+   written names skipped, hover on `emit_null:` and on `"m"`.
+4. **Verification and docs.** Neovim check with an annotation
+   fixture (completion inside `@[`, hover on an argument); README,
+   status, architecture; 0.17.0.
+
+Exit criterion: inside `@[…]` completion offers only annotations and
+their arguments; built-in annotations and argument names hover; no
+regressions (`make spec`, `make nvim-check`, `make verify-static`).
+
+### Phase 18 — C bindings (`lib`, `fun`)
+
+Probed on `syntax/grammar.cr` and a fixture covering funs, `$vars`,
+lib structs, unions, enums, aliases, `type`, variadic funs and proc
+parameters. Branch `dev/next`.
+
+**Today (0.16.0):** hover/definition on `lib`, lib `alias`, `type`,
+`struct`, `union`, `enum`; document symbols list funs, `$vars`,
+fields; inference types C calls by name and arity
+(`Infer#lib_member_call`: `LibX.cos(1.0)` → `Float64`, variadic,
+`out`, struct field get/set). Measured gaps, by cause:
+
+- **R1 — `lib_c/<target>` not on the require path.** The compiler
+  adds `<entry>/lib_c/<arch>-<os>` to `CRYSTAL_PATH`
+  (`CrystalPath#add_target_path`); `Workspace::RequireResolver`
+  doesn't, so `require "c/string"` etc. never resolve: only
+  `lib_c.cr`'s own aliases exist. `LibC::UInt32T`, `SizeT`, `PidT`,
+  `SSizeT` don't resolve, and every fun returning one is untyped
+  (`LibC.strlen`, `LibC.malloc`, `LibTreeSitter.ts_language_abi_version`,
+  `ts_language_symbol_count`). Confirmed with a `crystal` wrapper
+  that adds the directory: `UInt32T` → `stdint.cr:8`, `strlen` →
+  `UInt64`, `PidT` → `types.cr:16`.
+- **R2 — C calls reach inference only.** `TypeInfo#call_at` uses the
+  ordinary call resolution, which has no funs: hover on `LibX.cos`
+  says `LibX.class#cos : Float64 … built-in (no source
+  declaration)`; definition, references, signature help, rename are
+  empty; completion after `LibX.` offers only `new`. Same for
+  `$var` (`LibX.errno_v`) and lib struct fields (`pt.x`).
+- **R3 — no hover on declarations.** `TypeInfo#def_hover` takes
+  `method_def`, `abstract_method_def`, `macro_def` only: a `fun`
+  name, a `$var`, a struct/union field name hover nothing.
+- **R4 — compiler-only types and pseudo-methods.** `Void` and
+  `NoReturn` are built into the compiler; their only docs are
+  `struct CRYSTAL_PSEUDO__Void` / `__NoReturn` in
+  `docs_pseudo_methods.cr`, which also documents `sizeof`,
+  `instance_sizeof`, `alignof`, `instance_alignof`, `pointerof`,
+  `offsetof`, `typeof`. None hover. `Pointer(Void)` shows as
+  `Pointer(?)`.
+
+**Design decisions:**
+
+1. **Target path** from `Project#target_triple` mapped as the
+   compiler's `Codegen::Target#architecture`-`#os_name`
+   (`x86_64-unknown-linux-gnu` → `x86_64-linux-gnu`, macOS →
+   `aarch64-darwin`, BSDs/android/solaris by OS name, else the
+   environment part), under the first `CRYSTAL_PATH` entry that has
+   it, appended once. Changes what is indexed: cache patch bump.
+2. **One fun lookup.** The lookup `lib_member_call` does (lib
+   metaclass receiver, member by name and arity; struct/union field
+   by name) is shared with IDE features, so hover, definition,
+   references, rename, signature help and completion use the same
+   site the type came from. Hover shows `fun LibX.cos(x : Float64) :
+   Float64`, the C name when `fun a = "c_name"`, and the doc.
+3. **Pseudo docs** are read from the stdlib's `docs_pseudo_methods.cr`
+   (the compiler's own source for these docs), not copied. `Void`
+   prints as `Void` in types.
+
+**Undecided (needs approval):**
+
+- `{% if flag?(…) %}` inside def bodies (R6): body HIR treats
+  `macro_content` as opaque, so `LibC.free(ptr)` in
+  `Syntax.free_native` has no hover. Items already reparse macro
+  bodies with `parse_ranges`; bodies would need the same. Not
+  specific to C bindings.
+- `asm(…)` hover: the operand layout (`template : outputs : inputs
+  : clobbers : options`, `::` for no outputs) and which section the
+  cursor is in. Keywords are not hover targets today.
+
+Steps (one commit each; pause at the end of each):
+
+1. **lib_c target path (R1).** Specs: `LibC::UInt32T` hover and
+   definition, `LibC.strlen` typed `UInt64`, `require "c/string"`
+   resolves, a missing target directory changes nothing.
+2. **Fun navigation (R2).** Hover, definition, references, rename,
+   signature help on fun, `$var` and field uses; fun and `$var`
+   completion after `LibX.`. Specs on the fixture's shapes
+   (reopened lib, variadic, `out`, proc param, enum return, real
+   name).
+3. **Declaration hover (R3).** `fun` name, `$var`, field.
+4. **Pseudo types and methods (R4).** Hover for `Void`, `NoReturn`,
+   `sizeof` & co.; `Pointer(Void)` in hovers and hints.
+5. **Verification and docs.** Neovim check with a lib fixture; a
+   hover probe over `lib_c/x86_64-linux-gnu` and
+   `syntax/grammar.cr`; README, status, architecture; 0.18.0.
+
+Exit criterion: a C call hovers, navigates and completes like a
+method call; `LibC` target types resolve; no regressions (`make spec`,
+`make nvim-check`, `make verify-static`).
+
+Moved to Phase 19: `fun f(self : T*, …)` parses as `self`, `ERROR`,
+the rest (38 funs in the tree-sitter binding; `ts_language_symbol_type`
+is untyped because of it).
+
+### Phase 19 — own tree-sitter-crystal
+
+Starts after Phases 17 and 18. Replaces the policy in
+[tree-sitter-grammar-notes.md](tree-sitter-grammar-notes.md) ("fixes
+belong upstream; clear-ls does not patch it locally"): clear-ls
+maintains its own grammar as a vendored dependency and fixes gaps
+there, offering fixes upstream where they fit.
+
+**Today (0.16.0):** the Makefile clones
+`crystal-lang-tools/tree-sitter-crystal` at `50ca9e6` into `vendor/`
+(gitignored) and compiles its generated `parser.c`/`scanner.c`;
+`make syntax-gen` regenerates `kinds.cr` from `node-types.json`.
+`make grammar-check`: 1635/1646 stdlib files parse (99.33%), 11
+failures in 7 constructs (notes, "Known gaps"), plus the `self` fun
+parameter.
+
+To decide when the phase starts (bigger change; not planned in
+steps yet):
+
+- Form: a fork with clear-ls commits on top of `50ca9e6` (rebasable
+  onto upstream) or the grammar committed into this repository.
+- Who regenerates `parser.c`: committed generated output (no
+  tree-sitter CLI or Node.js to build clear-ls) versus generated in
+  the build. The pinned CLI is 0.26.9.
+- Which gaps first: the `self` fun parameter, unnamed proc-type fun
+  parameters (`openssl/lib_crypto.cr`), keyword accessor names
+  (`getter begin`), short-block setters; error recovery for
+  half-typed `@[…]` and `def foo(`.
+- Gate: `make grammar-check` must not lose files, grammar corpus
+  tests run in CI, `kinds.cr` regenerated and the Kind/Field
+  renames handled.
 
 ## Testing approach
 
