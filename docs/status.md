@@ -35,8 +35,10 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** usage feedback; every planned phase is done.
-- **In progress:** nothing.
+- **Next:** Phase 16 — type definition, declaration, range formatting
+  ([roadmap.md](roadmap.md#phase-16--type-definition-declaration-range-formatting)).
+- **In progress:** Phase 16 planned on `dev/navigation-range-format`;
+  no step started.
 
 ## Resume
 

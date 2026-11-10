@@ -2206,6 +2206,88 @@ soak within noise) and a faster warm start (235–254 → 209–239 ms).
 Not yet: the two multi-folder compiler specs that failed once each in
 ~10 full macOS runs ([gotchas.md](gotchas.md#macos)).
 
+### Phase 16 — type definition, declaration, range formatting
+
+Small LSP gaps found while comparing with Lattice (a Liger fork built
+on the compiler's parser plus regex symbol scans). Branch
+`dev/navigation-range-format`.
+
+**Today (0.15.0):** no `typeDefinitionProvider`, no
+`declarationProvider`, no `documentRangeFormattingProvider`. Formatting
+formats the whole buffer with `crystal tool format -` and sends one
+edit from the first changed line to the last (`Server.line_diff`).
+
+**Out of scope (decided):**
+
+- Live syntax diagnostics: diagnostics stay compiler-only, on save. A
+  half-typed buffer would only produce noise; no compiler-parser
+  dependency for this.
+- Lint-style inspections (unused variable, shadowing, empty rescue):
+  left to ameba-ls.
+- `codeLens`: no lens worth its cost yet.
+- `onTypeFormatting`: needs a parse mid-edit or a regex indent guess.
+
+**Design decisions:**
+
+1. **Type definition** goes to the declaration of the *type* of the
+   thing under the cursor. Sources, in order: a local, param or block
+   argument (the flow type `local_hover` shows), an ivar/cvar (the
+   `var_hover` type), a call (its return type at that call), a
+   literal; on a constant naming a type it is that type's definition.
+   Type → locations: `Named` gives the type's declaration sites
+   (reopenings: the first site of each file, at most 10; generic
+   arguments are not followed: `Array(String)` goes to `Array`);
+   `Union` gives each member's, `Nil` included (as the compiler sees
+   it); `Metaclass` its instance type; `Tuple`/`NamedTuple`/`Proc` the
+   stdlib struct. Unknown, `TypeParam`, `NoReturn` and `Pending`
+   give no result (never guessed).
+2. **Declaration** is an alias of definition: Crystal has no separate
+   declarations (an abstract def is a definition the implementations
+   override; `implementation` already covers that direction). It
+   exists so clients that bind it (Neovim `gD`) don't fail.
+3. **Range formatting** filters a whole-buffer format to its changed
+   hunks, the way conform.nvim does for formatters without range
+   support (`runner.lua` `apply_format`): format the whole buffer
+   with `crystal tool format -` (the formatter needs the full source:
+   indentation, `when`/hash/assignment/comment alignment); line-diff
+   the old and new text into hunks; keep the hunks whose original
+   lines touch the requested lines (an insertion touches when it is at
+   or next to them); each kept hunk extends the window to its end, so
+   a delete/insert pair both go. One `TextEdit` per kept hunk. A
+   syntax error anywhere (the formatter fails) gives no edits and a
+   log message, as formatting does now. Limits (documented): a kept
+   hunk can reach past the selection; a change that spans separate
+   hunks (alignment where the middle line is already right) is
+   applied only for the selected part.
+4. **Diff.** A line diff giving all hunks (LCS on the lines between
+   the common prefix and suffix; formatter output is close to its
+   input). `textDocument/formatting` keeps one edit for prefix/suffix
+   as now (cursor and marks stay; no behaviour change).
+
+Steps (one commit each; pause at the end of each):
+
+1. **Type definition and declaration.** `IDE::TypeInfo#type_at`
+   (the cursor's type, reusing the hover paths) and
+   `Navigation#type_definitions`; capabilities
+   `typeDefinitionProvider`, `declarationProvider`. Specs: local of a
+   user class, a call returning a stdlib type, a union with `Nil`
+   (both), a reopened class, `Foo.new` / constant `Foo`, ivar from a
+   declaration, block argument, unknown gives an empty result,
+   declaration = definition.
+2. **Range formatting.** `Server.line_hunks`, `rangeFormatting`
+   handler, capability. Specs: hunk diff (insert, delete, replace,
+   adjacent hunks); a selection inside a def formats only it with the
+   def's indentation; an untouched hunk elsewhere stays; a pair kept
+   together; an already-formatted range gives no edits; a syntax
+   error gives no edits.
+3. **Verification and docs.** Neovim check: `vim.lsp.buf.type_definition`
+   and `declaration`, `vim.lsp.buf.format({range = …})` without conform;
+   README feature list, status, architecture; 0.16.0.
+
+Exit criterion: type definition and declaration answer from the
+inferred types; range formatting changes only the selected hunks; no
+regressions (`make spec`, `make nvim-check`, `make verify-static`).
+
 ## Testing approach
 
 - Snapshot tests for representations (`dump-cst`, later items and HIR).
