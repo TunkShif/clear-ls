@@ -31,12 +31,7 @@ module ClearLS::IDE
       hit = Locals.new(@state, @bodies).binding_at(offset) || return nil
       body, b, ref = hit
       _, inf = @typing.infer_at(@state, @bodies, offset) || return nil
-      # Flow-sensitive: a read shows the type at its program point, a write
-      # the assigned type; params and block args (no expression) show their
-      # declared/joined type.
-      expr = body.exprs.find { |e| e.range == ref.range && e.binding == b.id }
-      t = expr.try { |e| inf.types[e.id]? } || inf.binding_type(b.id)
-      t = inf.binding_type(b.id) if table.unknown?(t) && !(ref.kind.read? && expr)
+      expr, t = local_type(body, b, ref, inf)
       ty = table.unknown?(t) ? b.restriction : table.to_s(t)
       aliased = table.unknown?(t) ? nil : alias_display(body, inf).try do |ad|
         if expr && (body.exprs.any? { |x| (x.kind.assign? || x.kind.type_decl?) && x.children.first? == expr.id })
@@ -53,6 +48,35 @@ module ClearLS::IDE
         md += " (declared `#{r}`)"
       end
       {md, ref.range}
+    end
+
+    # Flow-sensitive: a read has the type at its program point, a write
+    # the assigned type; params and block args (no expression) their
+    # declared/joined type.
+    private def local_type(body : HIR::Body, b : HIR::Binding, ref : HIR::Reference, inf : Types::Infer) : {HIR::Expr?, Types::TyId}
+      expr = body.exprs.find { |e| e.range == ref.range && e.binding == b.id }
+      t = expr.try { |e| inf.types[e.id]? } || inf.binding_type(b.id)
+      t = inf.binding_type(b.id) if table.unknown?(t) && !(ref.kind.read? && expr)
+      {expr, t}
+    end
+
+    # Type of the value under the cursor, for type definition: a local,
+    # `@x`/`@@x`, `self`, a literal, or a call's result. Nil when there is
+    # none or it is unknown.
+    def type_at(offset : UInt32) : Types::TyId?
+      t = if hit = Locals.new(@state, @bodies).binding_at(offset)
+            body, b, ref = hit
+            @typing.infer_at(@state, @bodies, offset).try { |(_, inf)| local_type(body, b, ref, inf)[1] }
+          elsif hit = ivar_type(offset)
+            hit[0]
+          elsif hit = self_type_at(offset)
+            hit[0]
+          elsif hit = literal_type(offset)
+            hit[0]
+          elsif hit = call_at(offset)
+            hit[2]
+          end
+      t && !table.unknown?(t) ? t : nil
     end
 
     KIND_NAMES = {
@@ -91,23 +115,10 @@ module ClearLS::IDE
     # its ancestors (`@x : T`, accessors, `initialize(@x : T)`), else the
     # type inferred at this expression.
     def var_hover(offset : UInt32) : {String, TextRange}?
-      node = @state.tree.root.descendant(offset, offset, named: true) || return nil
-      return nil unless node.kind.instance_var? || node.kind.class_var?
+      t, node, owner = ivar_type(offset) || return nil
       name = node.text
       cvar = node.kind.class_var?
       map = @typing.def_map
-      ns = map.namespace_at(@state.id, offset)
-      owner = ns == Semantics::DefMap::PROGRAM ? nil : ns
-      ctx = Types::DefContext.new(ns, @typing.self_type(ns), owner.try { |o| map[o].type_params } || [] of String)
-      t = Types::Infer.ivar_type(map, table, owner, name, cvar, ctx)
-      if table.unknown?(t) && (hit = @typing.infer_at(@state, @bodies, offset))
-        body, inf = hit
-        body.exprs.each do |e|
-          next unless e.range == node.range
-          et = inf.types[e.id]? || next
-          t = et unless table.unknown?(et)
-        end
-      end
       ty = table.unknown?(t) ? declared_text(owner, name, cvar) : table.to_s(t)
       kind = cvar ? "class variable" : "instance variable"
       owner_name = owner.try { |o| map[o].full_name }
@@ -123,6 +134,27 @@ module ClearLS::IDE
         io << " (type from the compiler at the last check)" if owner && compiler_ivar?(map, owner, name)
       end
       {md, node.range}
+    end
+
+    # `@x` / `@@x` under the cursor: its type (declared, else inferred at
+    # this expression), the node and the owner type.
+    private def ivar_type(offset : UInt32) : {Types::TyId, Syntax::Node, Semantics::TypeId?}?
+      node = @state.tree.root.descendant(offset, offset, named: true) || return nil
+      return nil unless node.kind.instance_var? || node.kind.class_var?
+      map = @typing.def_map
+      ns = map.namespace_at(@state.id, offset)
+      owner = ns == Semantics::DefMap::PROGRAM ? nil : ns
+      ctx = Types::DefContext.new(ns, @typing.self_type(ns), owner.try { |o| map[o].type_params } || [] of String)
+      t = Types::Infer.ivar_type(map, table, owner, node.text, node.kind.class_var?, ctx)
+      if table.unknown?(t) && (hit = @typing.infer_at(@state, @bodies, offset))
+        body, inf = hit
+        body.exprs.each do |e|
+          next unless e.range == node.range
+          et = inf.types[e.id]? || next
+          t = et unless table.unknown?(et)
+        end
+      end
+      {t, node, owner}
     end
 
     private def compiler_ivar?(map : Semantics::DefMap, owner : Semantics::TypeId, name : String) : Bool
@@ -178,23 +210,7 @@ module ClearLS::IDE
     # `def self.foo` / at class-body level. (`self` as a def receiver is
     # `def_hover`.)
     def self_hover(offset : UInt32) : {String, TextRange}?
-      node = @state.tree.root.descendant(offset, offset, named: true) || return nil
-      return nil unless node.kind.self_node?
-      parent = node.parent
-      return nil if parent && (parent.kind.method_def? || parent.kind.abstract_method_def?) &&
-                    parent.fields(Syntax::Field::ClassNode).includes?(node)
-      t = nil.as(Types::TyId?)
-      if hit = @typing.infer_at(@state, @bodies, offset)
-        body, inf = hit
-        e = body.exprs.find { |x| x.kind.self? && x.range == node.range }
-        t = e.try { |x| inf.types[x.id]? }
-      end
-      map = @typing.def_map
-      ns = map.namespace_at(@state.id, offset)
-      if t.nil? || table.unknown?(t)
-        # Class bodies (no def): self is the type itself.
-        t = ns == Semantics::DefMap::PROGRAM ? nil : table.metaclass(@typing.self_type(ns))
-      end
+      t, node, ns = self_type_at(offset) || return nil
       ty = t && !table.unknown?(t) ? table.to_s(t) : nil
       md = String.build do |io|
         io << "```crystal
@@ -218,6 +234,28 @@ the current instance"
       {md, node.range}
     end
 
+    # `self` under the cursor (not a def receiver): its type (nil at the
+    # top level when unknown), the node and the namespace.
+    private def self_type_at(offset : UInt32) : {Types::TyId?, Syntax::Node, Semantics::TypeId}?
+      node = @state.tree.root.descendant(offset, offset, named: true) || return nil
+      return nil unless node.kind.self_node?
+      parent = node.parent
+      return nil if parent && (parent.kind.method_def? || parent.kind.abstract_method_def?) &&
+                    parent.fields(Syntax::Field::ClassNode).includes?(node)
+      t = nil.as(Types::TyId?)
+      if hit = @typing.infer_at(@state, @bodies, offset)
+        body, inf = hit
+        e = body.exprs.find { |x| x.kind.self? && x.range == node.range }
+        t = e.try { |x| inf.types[x.id]? }
+      end
+      ns = @typing.def_map.namespace_at(@state.id, offset)
+      if t.nil? || table.unknown?(t)
+        # Class bodies (no def): self is the type itself.
+        t = ns == Semantics::DefMap::PROGRAM ? nil : table.metaclass(@typing.self_type(ns))
+      end
+      {t, node, ns}
+    end
+
     LITERAL_KINDS = [Syntax::Kind::Integer, Syntax::Kind::FloatNode, Syntax::Kind::CharNode,
                      Syntax::Kind::SymbolNode, Syntax::Kind::RegexNode, Syntax::Kind::NilNode,
                      Syntax::Kind::TrueNode, Syntax::Kind::FalseNode]
@@ -225,6 +263,11 @@ the current instance"
     # Number/char/symbol/regex/nil/bool literals: the literal's type
     # (`1_u8` → UInt8). Strings are left alone (hovering text is noise).
     def literal_hover(offset : UInt32) : {String, TextRange}?
+      t, node = literal_type(offset) || return nil
+      {"```crystal\n#{table.to_s(t)}\n```\n\nliteral", node.range}
+    end
+
+    private def literal_type(offset : UInt32) : {Types::TyId, Syntax::Node}?
       node = @state.tree.root.descendant(offset, offset, named: true) || return nil
       return nil unless LITERAL_KINDS.includes?(node.kind)
       t = nil.as(Types::TyId?)
@@ -234,7 +277,7 @@ the current instance"
       end
       t ||= Types::Infer.value_text_type(node.text, table, Semantics::DefMap::PROGRAM)
       return nil if table.unknown?(t)
-      {"```crystal\n#{table.to_s(t)}\n```\n\nliteral", node.range}
+      {t, node}
     end
 
     # `{name: v}` key: the value's type. `x += v` operator: the method it

@@ -45,6 +45,8 @@ module ClearLS::LSP
         foldingRangeProvider:    true,
         selectionRangeProvider:  true,
         definitionProvider:      true,
+        declarationProvider:     true,
+        typeDefinitionProvider:  true,
         hoverProvider:           true,
         documentLinkProvider:    {resolveProvider: false},
         documentHighlightProvider: true,
@@ -76,6 +78,8 @@ module ClearLS::LSP
       when "textDocument/foldingRange"   then folding_range(params)
       when "textDocument/selectionRange" then selection_range(params)
       when "textDocument/definition"     then definition(params)
+      when "textDocument/declaration"    then definition(params)
+      when "textDocument/typeDefinition" then type_definition(params)
       when "textDocument/hover"          then hover(params)
       when "textDocument/documentLink"   then document_link(params)
       when "textDocument/documentHighlight" then document_highlight(params)
@@ -412,6 +416,13 @@ module ClearLS::LSP
       state = document(params)
       off = offset(state, params["position"])
       navigation(state).implementations(off).compact_map { |s| location_json(IDE::Location.new(s.file, s.item.name_range)) }
+    end
+
+    private def type_definition(params : JSON::Any)
+      state = document(params)
+      off = offset(state, params["position"])
+      idx = index
+      navigation(state).type_definitions(off, ->(f : FileId) { idx.library_file?(f) }).compact_map { |s| location_json(IDE::Location.new(s.file, s.item.name_range)) }
     end
 
     private def prepare_call_hierarchy(params : JSON::Any)

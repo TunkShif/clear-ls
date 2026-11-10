@@ -2274,6 +2274,15 @@ Steps (one commit each; pause at the end of each):
    (both), a reopened class, `Foo.new` / constant `Foo`, ivar from a
    declaration, block argument, unknown gives an empty result,
    declaration = definition.
+   *Done:* `TypeInfo#type_at` shares the hover paths (`local_type`,
+   `ivar_type`, `self_type_at`, `literal_type`, `call_at`'s result);
+   `Navigation#type_definitions` maps the type to sites (falling back
+   to the constant under the cursor). Sites of a type: its first one
+   plus the first in each other *workspace* file; stdlib/shard
+   reopenings are skipped (`String` on the real stdlib went to four
+   files: `string.cr`, `grapheme.cr` twice, `utf16.cr`; now
+   `string.cr`). `declaration` is answered by `definition`. Specs
+   `features_phase16_spec.cr` (9). `make spec` 360 examples.
 2. **Range formatting.** `Server.line_hunks`, `rangeFormatting`
    handler, capability. Specs: hunk diff (insert, delete, replace,
    adjacent hunks); a selection inside a def formats only it with the

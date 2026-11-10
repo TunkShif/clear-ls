@@ -82,6 +82,47 @@ module ClearLS::IDE
       nil
     end
 
+    # -- type definition ----------------------------------------------------------------
+
+    MAX_TYPE_SITES = 10
+
+    # Declarations of the type of the value under the cursor (a union: of
+    # each member); on a constant naming a type, that type. Generic
+    # arguments are not followed. Unknown types give nothing.
+    # *library*: stdlib/shard files (their reopenings are skipped).
+    def type_definitions(offset : UInt32, library : FileId -> Bool) : Array(Semantics::Site)
+      ids = [] of Semantics::TypeId
+      if t = TypeInfo.new(@state, @bodies, @typing).type_at(offset)
+        collect_type_ids(t, ids)
+      elsif t = type_at(offset)
+        ids << t
+      end
+      ids.uniq.flat_map { |id| type_sites(id, library) }.first(MAX_TYPE_SITES)
+    end
+
+    private def collect_type_ids(t : Types::TyId, ids : Array(Semantics::TypeId)) : Nil
+      table = @typing.table
+      ty = table[t]
+      case ty.kind
+      when .named?     then ids << ty.def_id.not_nil!
+      when .union?     then ty.args.each { |a| collect_type_ids(a, ids) }
+      when .metaclass? then collect_type_ids(ty.args[0], ids)
+      when .tuple?       then map.lookup_path("::Tuple").try { |id| ids << id }
+      when .named_tuple? then map.lookup_path("::NamedTuple").try { |id| ids << id }
+      when .proc?        then map.lookup_path("::Proc").try { |id| ids << id }
+      end
+    end
+
+    # A type's declaration: its first site (where the program first sees
+    # it), plus the first reopening in each workspace file. Stdlib/shard
+    # reopenings (`String` in a dozen files) are left out.
+    private def type_sites(id : Semantics::TypeId, library : FileId -> Bool) : Array(Semantics::Site)
+      sites = map[id].sites
+      first = sites.first? || return [] of Semantics::Site
+      seen = Set{first.file}
+      [first] + sites.select { |s| !library.call(s.file) && seen.add?(s.file) }
+    end
+
     # -- outgoing calls -----------------------------------------------------------------
 
     # The def at *offset* (inside its body or on its name), as a call item.
