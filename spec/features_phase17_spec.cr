@@ -283,6 +283,78 @@ describe "phase 17 annotation arguments" do
   end
 end
 
+# Doc forms of an annotation-heavy shard (Athena 0.4–0.5).
+private ATHENA = <<-CR
+  module Athena::DependencyInjection
+    # Registers a service.
+    #
+    # ## Optional Arguments
+    #
+    # * `name : String`- The name of the service.
+    # * `public : Bool` - If the service is public.
+    #
+    # ## Examples
+    #
+    # * `not_an_arg` - a later list is not read
+    annotation Register; end
+
+    # No arguments.
+    annotation Inject; end
+  end
+
+  module Athena::Console::Annotations
+    # A command.
+    #
+    # ## Configuration
+    #
+    # ### name
+    #
+    # **Type:** `String` - **required**
+    #
+    # The name of the command.
+    # May be positional.
+    #
+    # ### hidden
+    #
+    # **Type:** `Bool`
+    #
+    # If hidden.
+    #
+    # ---
+    annotation AsCommand; end
+  end
+
+  alias ADI = Athena::DependencyInjection
+  alias ACONA = Athena::Console::Annotations
+  CR
+
+describe "phase 17 annotation-heavy shards" do
+  it "resolves annotations through an alias in the path" do
+    with_client({"src/app.cr" => ATHENA + "\n@[ADI::Register(public: true)]\nclass S; end\nx = ADI::Inject\n"}, ANN_STD) do |c|
+      c.open("src/app.cr")
+      hover_text(c, "Register(public").not_nil!.should start_with("```crystal\nannotation Athena::DependencyInjection::Register\n```")
+      defs(c, "Register(public").should eq [{"app.cr", 12}]
+      defs(c, "Inject\n").should eq [{"app.cr", 15}]
+      hover_text(c, "public: true").not_nil!.should eq "```crystal\npublic : Bool\n```\n\nargument of `Athena::DependencyInjection::Register`\n\nIf the service is public."
+    end
+  end
+
+  it "offers aliases to namespaces holding annotations, with the target's kind" do
+    got = labels_at(ATHENA + "\n@[AC‸\nclass S; end\n")
+    got.should eq [{"ACONA", 9_i64}]
+    names(ATHENA + "\n@[ADI::‸\nclass S; end\n").should eq %w(Inject Register)
+  end
+
+  it "reads `name : Type` bullets and `### name` + **Type:** sections" do
+    arg_labels(ATHENA + "\n@[ADI::Register(‸\nclass S; end\n").should eq %w(name: public:)
+    arg_labels(ATHENA + "\n@[ACONA::AsCommand(\"x\", ‸\nclass S; end\n").should eq %w(hidden: name:)
+    with_client({"src/app.cr" => ATHENA + "\n@[ACONA::AsCommand(name: \"x\")]\nclass S; end\n"}, ANN_STD) do |c|
+      c.open("src/app.cr")
+      hover_text(c, "name: \"x\"").not_nil!.should eq "```crystal\nname : String\n```\n\nargument of `Athena::Console::Annotations::AsCommand`\n\nThe name of the command. May be positional."
+    end
+  end
+end
+
 describe "phase 17 `[` trigger" do
   it "is a trigger character that answers only after `@`" do
     with_client({"src/app.cr" => "@[\nxs = [1]\nxs[\n"}, ANN_STD) do |c|

@@ -213,7 +213,8 @@ module ClearLS::IDE
         items << CompletionItem.new(name, CompletionKind::Annotation, detail: t.full_name, documentation: doc, sort_text: "0#{name}", edit_range: range)
       elsif holds_annotation?(id)
         seen << name
-        items << CompletionItem.new(name, type_kind(t.kind), detail: t.full_name, documentation: t.doc, sort_text: "1#{name}", edit_range: range)
+        kind = t.kind.alias? ? type_kind(map[map.resolve_alias(id)].kind) : type_kind(t.kind)
+        items << CompletionItem.new(name, kind, detail: t.kind.alias? ? map[map.resolve_alias(id)].full_name : t.full_name, documentation: t.doc, sort_text: "1#{name}", edit_range: range)
       end
     end
 
@@ -261,8 +262,13 @@ module ClearLS::IDE
       end
       @holds_annotation[id] = false # cycle guard
       map = @typing.def_map
+      # `alias ADI = Athena::DependencyInjection`: the target's.
+      if map[id].kind.alias?
+        target = map.resolve_alias(id)
+        return @holds_annotation[id] = (target != id && holds_annotation?(target, depth + 1))
+      end
       t = map[id]
-      found = !t.kind.alias? && t.types.any? do |name, sub|
+      found = t.types.any? do |name, sub|
         sub != id && !map[sub].private_type? && (map[sub].kind.annotation? || holds_annotation?(sub, depth + 1))
       end
       @holds_annotation[id] = found

@@ -11,6 +11,17 @@ module ClearLS::IDE
   module AnnotationArgs
     BULLET = /\A\s*\*\s+\*\*([a-z_]\w*)\*\*:\s*(.*)\z/
 
+    # In an annotation's own doc only (other docs list methods the same
+    # way): `` * `name : Type` - text `` / `` - `name` — text ``
+    # (Athena's `ADI::Register`, `ASRA::Name`).
+    CODE_BULLET = /\A\s*[*-]\s+`([a-z_]\w*)(?:\s*:\s*([^`]+))?`\s*[-—:]\s*(.*)\z/
+
+    # In an annotation's own doc only: a heading naming the argument,
+    # then `**Type:** `T`` within a few lines, then its text (Athena's
+    # `ACONA::AsCommand`, `ARTA::Route`, ORM annotations).
+    HEADING = /\A\s*\#{2,4}\s+([a-z_]\w*)\s*\z/
+    TYPE_LINE = /\A\s*\*\*Type:\*\*\s*`([^`]+)`/
+
     # How many lines may separate the line naming the annotation from
     # its first bullet (`supported properties:`, a blank line).
     MAX_GAP = 3
@@ -22,8 +33,11 @@ module ClearLS::IDE
       global = "`::#{full_name}`"
       docs.each_with_index do |doc, i|
         lines = doc.lines
-        if i == 0 && (own = bullets(lines, 0)) && !own.empty?
-          return own
+        if i == 0
+          own = bullets(lines, 0) || [] of Annotations::Arg
+          own = code_bullets(lines) if own.empty?
+          own = headings(lines) if own.empty?
+          return own unless own.empty?
         end
         lines.each_with_index do |line, k|
           next unless line.includes?(mention) || line.includes?(global)
@@ -42,6 +56,40 @@ module ClearLS::IDE
       while k < lines.size && (m = lines[k].match(BULLET))
         args << Annotations::Arg.new(m[1], "", m[2].strip)
         k += 1
+      end
+      args
+    end
+
+    # The first run of `CODE_BULLET` lines (one list).
+    private def self.code_bullets(lines : Array(String)) : Array(Annotations::Arg)
+      args = [] of Annotations::Arg
+      start = lines.index { |l| l.matches?(CODE_BULLET) } || return args
+      k = start
+      while k < lines.size && (m = lines[k].match(CODE_BULLET))
+        args << Annotations::Arg.new(m[1], m[2]?.try(&.strip) || "", m[3].strip)
+        k += 1
+      end
+      args
+    end
+
+    # `HEADING` followed by `TYPE_LINE`; the text is the paragraph after
+    # the type line, up to a blank line, rule or heading.
+    private def self.headings(lines : Array(String)) : Array(Annotations::Arg)
+      args = [] of Annotations::Arg
+      lines.each_with_index do |line, k|
+        m = line.match(HEADING) || next
+        t = (k + 1..Math.min(k + MAX_GAP, lines.size - 1)).find { |j| lines[j].matches?(TYPE_LINE) } || next
+        type = lines[t].match(TYPE_LINE).not_nil![1]
+        j = t + 1
+        while j < lines.size && lines[j].strip.empty?
+          j += 1
+        end
+        text = [] of String
+        while j < lines.size && !(s = lines[j].strip).empty? && !s.starts_with?('#') && !s.starts_with?("---") && !s.starts_with?("```")
+          text << s
+          j += 1
+        end
+        args << Annotations::Arg.new(m[1], type, text.join(' '))
       end
       args
     end

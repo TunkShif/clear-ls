@@ -17,6 +17,16 @@ private def name_of(map, id : TypeId?) : String?
 end
 
 describe DefMap do
+  it "follows an alias in the middle of a path, as the compiler does" do
+    map = build({"a.cr" => "module Athena::DI\n  annotation Register; end\n  module Inner\n    alias Back = Athena::DI\n  end\nend\nalias ADI = Athena::DI\nalias Twice = ADI\n"})
+    name_of(map, map.lookup_path("ADI::Register")).should eq "Athena::DI::Register"
+    name_of(map, map.lookup_path_raw("ADI::Register")).should eq "Athena::DI::Register"
+    name_of(map, map.lookup_path("Twice::Inner::Back::Register")).should eq "Athena::DI::Register"
+    map.lookup_path("ADI::Missing").should be_nil
+    # The last segment stays an alias for raw lookups.
+    map[map.lookup_path_raw("ADI").not_nil!].kind.alias?.should be_true
+  end
+
   it "merges reopened types across files" do
     map = build({
       "a.cr" => "class Foo\n  def a; end\nend",

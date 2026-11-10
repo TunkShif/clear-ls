@@ -222,6 +222,9 @@ module ClearLS::Semantics
       cur = global ? PROGRAM : from
       names.each_with_index do |name, i|
         first = i == 0
+        # An alias in the middle of a path stands for its target
+        # (`ADI::Register` with `alias ADI = Athena::DependencyInjection`).
+        cur = resolve_alias(cur) unless first
         cur = lookup_path_item(name, cur, lookup_self: first, lookup_in_namespace: first) || return nil
       end
       cur
@@ -316,7 +319,7 @@ module ClearLS::Semantics
     private def program_path(text : String) : TypeId?
       names = DefMap.strip_generics(text).lchop("::").split("::")
       cur = PROGRAM
-      names.each { |n| cur = self[cur].types[n]? || return nil }
+      names.each { |n| cur = self[resolve_alias(cur)].types[n]? || return nil }
       resolve_alias(cur)
     end
 
