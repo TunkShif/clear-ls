@@ -64,7 +64,7 @@ private APP = {
 private def hover_text(c : FeatureClient, needle : String, shift = 0) : String?
   u = c.uri("src/app.cr")
   r = c.request("textDocument/hover", {textDocument: {uri: u}, position: c.pos("src/app.cr", needle, shift)})
-  r["contents"]?.try(&.["value"].as_s)
+  r.as_h?.try(&.["contents"]?).try(&.["value"].as_s)
 end
 
 private def defs(c : FeatureClient, needle : String, shift = 0) : Array({String, Int32})
@@ -132,9 +132,25 @@ private ANN_STD = STD.merge({
       annotation Field
       end
 
+      # `JSON::Serializable`
+      #
+      # `JSON::Field` properties:
+      # * **key**: the value of the key
+      # * **emit_null**: if `true`, emits a `null` value
+      #
+      # ### Class annotation `JSON::Serializable::Options`
+      #
+      # supported properties:
+      # * **emit_nulls**: if `true`, emits nulls for all
       module Serializable
         annotation Options
         end
+      end
+
+      # A field with its own doc.
+      #
+      # * **name**: the name
+      annotation Named
       end
 
       class Lexer
@@ -187,7 +203,7 @@ describe "phase 17 annotation name completion" do
   end
 
   it "completes inside a path" do
-    labels_at("@[JSON::‸\ndef f; end\n").should eq [{"Field", 8_i64}, {"Serializable", 9_i64}]
+    labels_at("@[JSON::‸\ndef f; end\n").should eq [{"Field", 8_i64}, {"Named", 8_i64}, {"Serializable", 9_i64}]
     names("@[JSON::Serializable::‸\ndef f; end\n").should eq ["Options"]
     names("@[::Li‸\nlib L\nend\n").should eq ["Link"]
   end
@@ -205,6 +221,65 @@ describe "phase 17 annotation name completion" do
   it "stays out of strings and comments" do
     names("x = \"@[‸\"\n").should_not contain("AlwaysInline")
     names("# @[‸\ndef f; end\n").should_not contain("AlwaysInline")
+  end
+end
+
+private def arg_labels(text : String) : Array(String)
+  labels_at(text).map(&.[0])
+end
+
+describe "phase 17 annotation arguments" do
+  it "completes a built-in's named arguments" do
+    got = arg_labels("@[Link(‸\nlib L\nend\n")
+    got.should eq %w(dll: framework: ldflags: lib: pkg_config: static: wasm_import_module:)
+    arg_labels("@[Link(\"m\", pk‸\nlib L\nend\n").should eq ["pkg_config:"]
+    arg_labels("@[Extern(‸\nstruct S\nend\n").should eq ["union:"]
+    arg_labels("@[TargetFeature(\"+avx2\", ‸\ndef f; end\n").should eq ["cpu:"]
+  end
+
+  it "skips arguments written by name or by position" do
+    got = arg_labels("@[Link(\"m\", \"-lx\", pkg_config: \"m\", ‸\nlib L\nend\n")
+    got.should_not contain("lib:")
+    got.should_not contain("ldflags:")
+    got.should_not contain("pkg_config:")
+    got.should contain("static:")
+  end
+
+  it "inserts `name: ` over the typed word" do
+    with_client({"src/app.cr" => "@[Link(pk\nlib L\nend\n"}, ANN_STD) do |c|
+      u = c.open("src/app.cr")
+      i = c.request("textDocument/completion", {textDocument: {uri: u}, position: {line: 0, character: 9}})["items"].as_a.first
+      i["label"].should eq "pkg_config:"
+      i["textEdit"]["newText"].should eq "pkg_config: "
+      i["textEdit"]["range"]["start"]["character"].should eq 7
+      i["filterText"].should eq "pkg_config"
+    end
+  end
+
+  it "reads the stdlib's property bullets" do
+    arg_labels("@[JSON::Field(‸\ndef f; end\n").should eq %w(emit_null: key:)
+    arg_labels("@[JSON::Field(key: \"a\", ‸\ndef f; end\n").should eq %w(emit_null:)
+    arg_labels("@[JSON::Serializable::Options(‸\nclass A\nend\n").should eq %w(emit_nulls:)
+    arg_labels("@[JSON::Named(‸\ndef f; end\n").should eq %w(name:)
+  end
+
+  it "leaves annotations without known arguments alone" do
+    arg_labels("annotation Mine\nend\nx = 1\n@[Mine(‸\ndef f; end\n").should contain("x")
+    arg_labels("@[Link(lib: \"m\", ldflags: \"x\", static: false, framework: \"F\", pkg_config: \"p\", wasm_import_module: \"w\", dll: \"d.dll\", ‸\nlib L\nend\n").should be_empty
+  end
+
+  it "hovers argument names and positional values" do
+    files = {"src/app.cr" => "@[Link(\"m\", ldflags: \"-lm\")]\nlib L\nend\n\n@[JSON::Field(key: \"k\")]\ndef f; end\n\n@[Deprecated(\"use g\")]\ndef g; end\n"}
+    with_client(files, ANN_STD) do |c|
+      c.open("src/app.cr")
+      h = hover_text(c, "ldflags").not_nil!
+      h.should start_with("```crystal\nldflags : String\n```\n\nargument of `Link`")
+      h.should contain("passed to the linker as is")
+      hover_text(c, "\"m\"", 1).not_nil!.should contain("lib : String\n```\n\nargument of `Link` (positional #1)")
+      hover_text(c, "key:").not_nil!.should eq "```crystal\nkey\n```\n\nargument of `JSON::Field`\n\nthe value of the key"
+      hover_text(c, "\"use g\"", 1).not_nil!.should contain("message : String")
+      hover_text(c, "\"-lm\"", 1).should be_nil # a value, not the name
+    end
   end
 end
 

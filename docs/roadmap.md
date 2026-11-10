@@ -2439,6 +2439,21 @@ Steps (one commit each; pause at the end of each):
    table and doc bullets. Specs: `@[Link(` → `ldflags:` …,
    `@[Link("m", pk` → `pkg_config:`, `@[JSON::Field(ke` → `key:`,
    written names skipped, hover on `emit_null:` and on `"m"`.
+
+   *Done:* `IDE::AnnotationArgs`: a built-in's arguments from the
+   table; otherwise `* **name**: text` bullets in the annotation's own
+   doc, or within 3 lines after a line naming it (`` `JSON::Field`
+   properties: ``, ``### Class annotation `JSON::Serializable::Options` ``)
+   in any declaration doc of a file declaring it. On the real stdlib:
+   `JSON::Field` 8, `YAML::Field` 7, `URI::Params::Field` 4,
+   `JSON::Serializable::Options` 1. Completion at an argument start
+   offers `name:` items (field kind, inserts `name: ` over the typed
+   word), minus names written and built-in positions already filled
+   (`@[Link("m", ` drops `lib:`); an annotation with no known
+   arguments keeps the ordinary items. Hover on an argument name, and
+   on a positional value the compiler names (`"m"` → `lib`,
+   `Deprecated("…")` → `message`). Specs: 6 more (21). `make spec`
+   389 examples.
 4. **Verification and docs.** Neovim check with an annotation
    fixture (completion inside `@[`, hover on an argument); README,
    status, architecture; 0.17.0.

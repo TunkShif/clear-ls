@@ -3,6 +3,7 @@ require "./locals"
 require "./typing"
 require "./type_params"
 require "./annotations"
+require "./annotation_args"
 
 module ClearLS::IDE
   # A location in a file, as byte ranges. The LSP layer converts to
@@ -220,6 +221,9 @@ module ClearLS::IDE
         return HoverInfo.new("```crystal\n#{tp.name}\n```\n\n#{role}", tp.range)
       end
       results = resolve_path_at(offset)
+      if hit = annotation_arg_hover(offset)
+        return hit
+      end
       if hit = builtin_annotation_hover(offset, results.first?)
         return hit
       end
@@ -240,6 +244,43 @@ module ClearLS::IDE
       return nil unless node.kind.constant?
       parent = node.parent || return nil
       parent.kind.annotation_node? && parent.named_child(0) == node ? node : nil
+    end
+
+    # On an annotation argument: `ldflags` in `@[Link(ldflags: "x")]`
+    # (the name), or a positional value the compiler names
+    # (`"m"` → `lib`): the argument's type and doc.
+    private def annotation_arg_hover(offset : UInt32) : HoverInfo?
+      node = tree.root.descendant(offset, offset, named: true) || return nil
+      arg = node
+      while (p = arg.parent) && !p.kind.argument_list?
+        arg = p
+      end
+      list = arg.parent || return nil
+      ann = list.parent || return nil
+      return nil unless ann.kind.annotation_node? && list == ann.field(Syntax::Field::Arguments)
+      name_node = ann.named_child(0) || return nil
+      map = def_map
+      ns = map.namespace_at(@state.id, ann.start_byte)
+      docs_of = ->(f : FileId) { AnnotationArgs.file_docs(@index, f) }
+      full, args = AnnotationArgs.for_path(map, ns, name_node.text, docs_of) || return nil
+      if arg.kind.named_expr?
+        key = arg.field(Syntax::Field::Name) || return nil
+        return nil unless key.range.touches?(offset)
+        a = args.find { |x| x.name == key.text && x.named } || return nil
+        range = key.range
+      else
+        pos = list.named_children.take_while { |c| c != arg }.count { |c| !c.kind.named_expr? && !c.kind.comment? }
+        a = args.find { |x| x.position == pos } || return nil
+        range = arg.range
+      end
+      md = String.build do |io|
+        io << "```crystal\n" << a.name
+        io << " : " << a.type unless a.type.empty?
+        io << "\n```\n\nargument of `" << full << '`'
+        io << " (positional #" << a.position.not_nil! + 1 << ')' if a.position && !arg.kind.named_expr?
+        io << "\n\n" << a.doc unless a.doc.empty?
+      end
+      HoverInfo.new(md, range)
     end
 
     # A compiler annotation (`Annotations::BUILTINS`) under the cursor:

@@ -6,6 +6,7 @@ require "./statement_site"
 require "./require_completion"
 require "./annotation_context"
 require "./annotations"
+require "./annotation_args"
 
 module ClearLS::IDE
   enum CompletionKind
@@ -79,8 +80,15 @@ module ClearLS::IDE
       if ctx = RequireCompletion.context(text, offset)
         return require_items(ctx)
       end
-      if (actx = AnnotationContext.at(text, offset)).is_a?(AnnotationContext::Name) && !in_comment_or_string?(actx.start)
-        return annotation_names(actx)
+      actx = AnnotationContext.at(text, offset)
+      if actx && !in_comment_or_string?(actx.start)
+        case actx
+        in AnnotationContext::Name then return annotation_names(actx)
+        in AnnotationContext::Args
+          if items = annotation_args(actx)
+            return items
+          end
+        end
       end
       return [] of CompletionItem if trigger == "["
       # Inside any other string or a comment nothing is offered for `"`
@@ -220,6 +228,27 @@ module ClearLS::IDE
         node = n.parent
       end
       false
+    end
+
+    # Named arguments of the annotation at an argument start
+    # (`@[Link(`, `@[JSON::Field(ke`), minus those written by name or
+    # by position. Nil when the annotation's arguments are unknown: the
+    # ordinary items stay.
+    private def annotation_args(ctx : AnnotationContext::Args) : Array(CompletionItem)?
+      map = @typing.def_map
+      ns = map.namespace_at(@state.id, ctx.start)
+      docs_of = ->(f : FileId) { AnnotationArgs.file_docs(@index, f) }
+      full, args = AnnotationArgs.for_path(map, ns, ctx.name, docs_of) || return nil
+      return nil if args.empty?
+      range = TextRange.new(ctx.start, ctx.start + ctx.prefix.bytesize)
+      args.compact_map do |a|
+        next unless a.named && a.name.starts_with?(ctx.prefix)
+        next if ctx.written.includes?(a.name)
+        next if (pos = a.position) && pos < ctx.positional
+        detail = a.type.empty? ? "#{full} argument" : "#{a.type} — #{full} argument"
+        CompletionItem.new("#{a.name}:", CompletionKind::Field, detail: detail, documentation: a.doc,
+          sort_text: "0#{a.name}", insert_text: "#{a.name}: ", edit_range: range, filter_text: a.name)
+      end
     end
 
     @holds_annotation = {} of Semantics::TypeId => Bool
