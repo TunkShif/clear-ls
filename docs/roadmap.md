@@ -2776,85 +2776,103 @@ there, offering fixes upstream where they fit. Branch `dev/next`.
   (`getter? select`, 1); hash/named-tuple literals in specific
   positions (4); misc (7).
 
-**Decisions to take before step 1 (proposed):**
+**Working copy (decided):** the grammar is developed in a local clone,
+`../tree-sitter-crystal` (next to this repository), on branch
+`clear-ls` from `50ca9e6`. The remote fork comes later (user creates
+it and says so); until then the Makefile points at the local clone.
+Upstream PRs: not now.
 
-1. **Form: a fork, pinned by commit.** `clear-ls/tree-sitter-crystal`
-   (or a branch in a fork of the upstream repo) with clear-ls commits on
-   top of `50ca9e6`; the Makefile keeps cloning a pinned commit, only
-   `GRAMMAR_REPO`/`GRAMMAR_REV` change. Keeps upstream history (570
-   commits), makes each fix a reviewable commit that can become an
-   upstream PR, and keeps the 44 MB `parser.c` out of this repository.
-   Rejected: copying the grammar into `vendor/` of this repository (a
-   44 MB generated file per grammar change in our history, and no
-   upstream-shaped commits); a patch series applied at build time
-   (patches against a 44 MB generated file don't apply; regenerating at
-   build time needs Node and the CLI on every builder, including CI).
-2. **Generated output committed in the fork.** Each grammar commit
-   carries its regenerated `parser.c` / `node-types.json` (upstream's
-   convention, enforced by its `generate` + `git diff` CI). Building
-   clear-ls still needs only a C compiler; Node and the tree-sitter CLI
-   are needed only to change the grammar. CLI pinned to 0.26.9 (the
-   runtime clear-ls links), so the first fork commit is the
-   regeneration alone.
-3. **Gates for every grammar commit:** `tree-sitter test` (corpus +
-   highlight) passes; a new corpus case per fix; `make grammar-check`
-   loses no stdlib file; an external set (shards in `lib/`, Marten,
-   Athena) loses no file; `make syntax-gen` diff reviewed: any renamed
-   or removed `Kind`/`Field` is fixed in clear-ls in the same step;
-   `make spec`, types dump over repo + stdlib with no regressions.
-   Item-tree caches are invalidated by `BUILD_ID` already.
-4. **Upstream:** offer each fix as a PR when it is independent of
-   clear-ls; don't wait on review. Rebase onto upstream only on demand
-   (a merged upstream fix we want). #132 is not taken: its scanner-side
-   keyword handling conflicts with any keyword fix we make, and it is
-   not merged after 16 months.
+**Decisions:**
 
-Steps (one commit each, in this repository; grammar commits go to the
-fork first; pause at the end of each):
+1. **Form: a fork, pinned by commit.** clear-ls commits on top of
+   `50ca9e6` in the clone; `GRAMMAR_REPO`/`GRAMMAR_REV` in the Makefile
+   name it. Keeps upstream history (570 commits), each fix a reviewable
+   commit, and the 44 MB `parser.c` out of this repository. Rejected:
+   copying the grammar into this repository; patches applied at build
+   time.
+2. **Generated output committed in the grammar repository** (upstream's
+   convention): building clear-ls needs a C compiler only; Node and the
+   tree-sitter CLI (pinned 0.26.9) only to change the grammar. The first
+   grammar commit is the regeneration alone.
+3. **Gates per grammar commit:** `tree-sitter test` (corpus +
+   highlight); a corpus case per fix; `make grammar-check` loses no
+   stdlib file; the external set (`lib/`, Marten, Athena) loses no file;
+   `make syntax-gen` diff reviewed (renamed or removed `Kind`/`Field`
+   fixed in clear-ls in the same step); `make spec`; types dump over
+   repo and stdlib without regressions. Item caches are keyed by the
+   grammar commit (`BUILD_ID`) already.
+4. **Upstream #132 not taken** (scanner-side handling of 46 keywords,
+   conflicts with keyword fixes, open 16 months).
 
-1. **Fork and pin.** Create the fork, add the CLI-0.26.9 regeneration
-   commit; Makefile `GRAMMAR_REPO`/`GRAMMAR_REV` to it, plus a
-   `grammar-test` target (`tree-sitter test` in `vendor/`) and an
-   external coverage target (`grammar-check-ext`: `lib/`, Marten via
-   `tools/external.sh`, Athena added there). Notes: new policy,
-   workflow (edit `grammar.js` → generate → test → commit in the fork →
-   bump `GRAMMAR_REV` → `syntax-gen` → specs). Patch version bump
-   (grammar pin, per development.md). Expect: no behaviour change.
-2. **`self` fun parameter.** The probe fix + corpus case. clear-ls:
-   `ts_language_symbol_name` & co. lower with their params, hover and
-   navigate (spec from Phase 18's list). Patch bump.
-3. **Short-block setters.** `&.x = v`, `&.x=(v)`, `.tap(&.ensure =
-   body)` (stdlib 4 files, external 5). Check what `Items`/`HIR` see
-   (`implicit_object_call` + assign) and that block-form and setter
-   references still work.
-4. **Keyword method names in accessors and calls.** `getter begin :
-   B`, `property end : Bool`, `getter? select` (stdlib `range.cr`,
-   `crystal_llvm_builder.cr`; Athena). Narrow fix in accessor-macro
-   arguments, not #132's scanner keyword rewrite.
-5. **Remaining known gaps, each only if small:** unnamed proc-type
-   fun params (`lib_crypto.cr`), underscore block argument
-   (`dwarf/abbrev.cr`), index-query in short blocks
-   (`semantic/filters.cr`), `.[1]` continuation lines, regex-like
-   string content. Each: corpus case, gates; skip any that needs a
-   scanner rewrite (record it in the notes instead).
-6. **Error recovery for half-typed code** (exploratory; may be
-   dropped): `@[` alone, `@[JSON::` swallowing the next `def`, unclosed
-   `def foo(` swallowing following defs. Measure what clear-ls gets
-   today (Phase 17's `AnnotationContext` works around the first two)
-   before changing precedences; keep only changes that don't lose
-   files.
-7. **Verification and docs.** `make grammar-check` (target: ≥1640/1646
-   stdlib), external coverage, types dump, Neovim checks, notes ("Known
-   gaps" rewritten), README, status; upstream PRs opened for
-   independent fixes; 0.19.0.
+**Gaps by kind** (each reproduced on a one-line input with the
+`50ca9e6` grammar; "files" = stdlib / external files whose only or
+first error it is):
 
-Exit criterion: clear-ls builds from its own pinned grammar without
-Node or the CLI; the `self` param, short-block setters and keyword
-accessor names parse; no stdlib or external file lost; no regressions
-(`make spec`, `make nvim-check`, `make verify-static`, types dump).
+*A. Fixes for limitations clear-ls already hit.*
 
-Open: fork owner/name and hosting (GitHub next to the public clear-ls
-repository, or git.woa.com); whether upstream PRs are wanted at all.
+| Gap | Example | Effect in clear-ls | Fix location (expected) |
+|---|---|---|---|
+| A1 `self` as a `fun` param name | `fun f(self : T*, y : U)` | the fun's params lower wrong: `ts_language_symbol_name` and 37 more funs of the tree-sitter binding have no hover / call typing (Phase 18 step 5) | `grammar.js` `fun_param`: name may be `self` (probe: 1 line, corpus 245/245, no file lost) |
+| A2 short-block setter | `.tap &.keyword = k`, `&.flush=(true)`, `try &.driver_name = "x"` | an `ERROR` token in the call; clear-ls still finds the `driver_name` reference (recovered), but the call's shape (receiver, value) is lost: no value typing, block-form conversion refuses | `grammar.js` implicit-object call: allow `name=` assignment / call form after `&.` (stdlib 4, external 5) |
+| A3 keyword accessor names | `getter begin : B`, `property end : Bool`, `getter? select : Bool = true` | worse than the accessor alone: in a probe, `struct R; getter begin : Int32 = 0; getter size ...` lowered `R` with **no** members and lost everything after it in the file (the next `struct` and its defs), "recovered from parse errors". `Range#begin`/`#end` hover nothing | `grammar.js`: keywords accepted as the name in a type declaration that is a call argument (narrow: accessor-style `call name : T`), not #132's scanner route (stdlib 2, external 1) |
+| A4 regex with `#` | `/\A#<Foo:0x\h+>\z/`, `/a#b/` works, `/#</` doesn't | the regex swallows the rest of the line as a comment and never closes: in a probe, `def a` holding `x.should match /\\A#<A>\\z/` lost `a`, the following `def b` and a whole later `class After` from items ("recovered from parse errors"); Athena's `entity_manager_spec.cr` loses 83 lines | regex content: a lone `#` (not `#{`) is content. A token-level `#` didn't work in a probe (the `comment` extra still wins inside regex content), so this likely needs the regex body in the external scanner, which already lexes percent-literal bodies: **scanner** (external 1, plus any `#<` regex in user specs) |
+
+*B. Small fixes for more syntax.*
+
+| Gap | Example | Files | Fix location (expected) |
+|---|---|---|---|
+| B1 splat in array literal | `[*columns]`, `[*a, 1]` | external 1 | `grammar.js` array elements: allow `splat` |
+| B2 `.[i]` on a continuation line | `x\n  .[1]` | external 2 | `grammar.js` / scanner line-continuation for `.` followed by `[` (check which) |
+| B3 unnamed proc-type `fun` param | `fun f(B*, (Bio*) -> Int)` | stdlib 1 | `grammar.js` `fun_param` / type list: parenthesised proc type |
+| B4 underscore call argument | `each_abbrev(bytes, _) do` | stdlib 1 | `grammar.js` argument: `_` (as in `case`/block params) |
+| B5 index-query in a short block | `try(&.pos[name]?)` | stdlib 1 | `grammar.js` implicit-object index with `?` |
+| B6 hash entry value is a call without parens followed by `,` | `{0 => f "a", 1 => 2}` | external 9 (Athena route fixtures, `bundle.cr`) | precedence of command calls inside hash/tuple entries (grammar first; if conflicts explode, defer to C) |
+
+*C. Needs scanner work or broader changes: decide later.*
+
+| Gap | Example | Files | Why bigger |
+|---|---|---|---|
+| C1 mixed hash/named-tuple keys | `{1 => [1], before: {a: 1}}` | external 1 | Crystal itself rejects this (`h = {1 => 2, b: 2}` is an error); Athena's is inside a macro-only constant. Not a grammar bug: drop |
+| C2 `{{` as two tuple braces | `x = {{2 => 3}, 1}` | external 1 (in a `{% if %}`) | the compiler also reads `{{` as a macro expression start (needs `{ {`): not a grammar bug: drop |
+| C3 escaped macro inside a macro | `\{% if Int{{n}} == ... %}` | stdlib 1 | macro-content scanner state |
+| C4 `#` handling in other literal bodies | regex as A4 if a grammar-level fix is impossible | — | scanner (moved here if A4 needs it) |
+| C5 keywords everywhere as names | `def select`, `x.end`, named args `begin:` | — | #132's approach (scanner keyword tokens); only if A3's narrow fix leaves real gaps |
+| C6 error recovery for half-typed code | `@[` alone, `@[JSON::` eating the next `def`, unclosed `def foo(` swallowing defs | — | precedence / recovery tuning with unclear payoff; clear-ls works around (`AnnotationContext`, `lower_error`, previous item tree). Measure before touching |
+
+Steps (one commit each in this repository; grammar commits on
+`clear-ls` in `../tree-sitter-crystal` first; pause at the end of each):
+
+1. **Local grammar and pin.** Grammar repo: CLI-0.26.9 regeneration
+   commit. Makefile: `GRAMMAR_REPO` = the local clone (a path; fork URL
+   later), `GRAMMAR_REV` = that commit; `grammar-test` (`tree-sitter
+   test` in `vendor/`); `grammar-check-ext` (`lib/`, Marten via
+   `tools/external.sh`, Athena added there). Notes: new policy and
+   workflow (edit `grammar.js` → generate → test → commit in the clone
+   → bump `GRAMMAR_REV` → `make distclean`-free refresh of `vendor/` →
+   `syntax-gen` → specs). Patch bump (grammar pin).
+2. **A1 `self` fun param.** Grammar + corpus case; clear-ls spec: a fun
+   with a `self` param lowers with both params, hovers and types its
+   call (`ts_language_symbol_name`).
+3. **A2 short-block setters.** Grammar + corpus cases (`&.x = v`,
+   `&.x=(v)`, `&.x += v` if cheap); clear-ls: setter references /
+   rename include these uses; block-form conversion.
+4. **A3 keyword accessor names.** Grammar + corpus; clear-ls: `Range`'s
+   `begin`/`end` accessors appear in items (stdlib `range.cr` parses),
+   completion `r.be` → `begin`.
+5. **A4 regex `#`.** Try the grammar route once more; if it needs the
+   scanner, do the smallest scanner change (regex body like percent
+   literals) only if it stays local, else move it to C with notes.
+6. **B1–B6**, one grammar commit each (or grouped when tiny), each
+   with a corpus case; any that turns into a conflict storm or scanner
+   change moves to C.
+7. **Verification and docs.** `make grammar-check` (expect ≥1640/1646
+   stdlib), `grammar-check-ext`, types dump, Neovim checks; notes:
+   "Known gaps" rewritten with the C list; README, status; 0.19.0.
+
+Exit criterion: clear-ls builds from the pinned clear-ls grammar
+without Node or the CLI; A1–A3 parse (A4 parses or is recorded in C);
+no stdlib or external file lost; no regressions (`make spec`, `make
+nvim-check`, `make verify-static`, types dump).
 
 ### Phase 20 — `{% if %}` inside method bodies
 
