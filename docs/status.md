@@ -45,8 +45,9 @@ stops mid-phase). History and per-phase details are in
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
 - **Next:** Phase 19 — own tree-sitter-crystal
-  ([roadmap.md](roadmap.md#phase-19--own-tree-sitter-crystal)) and Phase
-  20 — `{% if %}` inside method bodies (order open).
+  ([roadmap.md](roadmap.md#phase-19--own-tree-sitter-crystal)), split into
+  steps; decisions (fork form, hosting) pending. Then Phase 20 — `{% if %}`
+  inside method bodies.
 - **In progress:** nothing; Phases 16–18 on `dev/next`, not merged into
   `main`.
 
