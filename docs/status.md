@@ -50,7 +50,10 @@ stops mid-phase). History and per-phase details are in
 - **Next:** Phase 19 — own tree-sitter-crystal
   ([roadmap.md](roadmap.md#phase-19--own-tree-sitter-crystal)), split into
   steps (grammar on branch `clear-ls` in `../tree-sitter-crystal`; remote
-  fork later). Then Phase 20 — `{% if %}`
+  fork later). Then declarations in `{% begin %}` and macro-split
+  signatures (`File.read`/`write`/`new`, `spawn`, `Socket.tcp`;
+  [roadmap.md](roadmap.md#declarations-in--begin--and-macro-split-signatures));
+  then Phase 20 — `{% if %}`
   inside method bodies; then Phase 21 — constant hover (type + value),
   compiler-defined constants, `:ditto:`/`:inherit:`/`:nodoc:` docs,
   generic args from class-method calls, named args to `@ivar` params

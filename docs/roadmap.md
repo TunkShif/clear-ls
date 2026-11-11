@@ -2980,13 +2980,129 @@ doc directives are Phase 21. Spec: `features_type_doc_spec.cr`. 0.18.6.
 Status: done. `make spec` 421 examples; every Neovim check passes;
 `File` hover checked in headless Neovim.
 
+### Declarations in `{% begin %}` and macro-split signatures
+
+Found with the fix round above (`File.read` / `File.write` in
+`lsp/diagnostics.cr`). Planned after Phase 19, before Phase 20: it
+fixes the declaration level that Phase 20 builds on, and needs no HIR,
+CFG or inference work. Small; released as a patch of 0.19.
+
+**Today (0.18.6):** `File.` completion lists 56 class methods without
+`read`, `write`, `new`, `open`, `each_line`, `read_lines`; hover on
+`File.read` / `File.write` is empty and definition `[]`; `File.new`
+falls back to `File.class#new : File — built-in (no source
+declaration)`. `dump-items file.cr` leaves the 7 defs out. They read:
+
+```crystal
+{% begin %}
+  # doc…
+  def self.read(filename : Path | String, encoding = nil, invalid = nil, {% if compare_versions(Crystal::VERSION, "1.5.0") >= 0 %} @[Deprecated] {% end %} blocking = nil) : String
+{% end %}
+```
+
+Two gaps in `Items::Lower`, each reproduced on a small file:
+
+1. **`{% begin %}` is not lowered.** `lower_stmt` handles
+   `macro_if` / `macro_unless` (`lower_macro_if` → `lower_macro_body`)
+   but no case reads `macro_begin`: a plain documented def inside
+   `{% begin %} … {% end %}` gives no item.
+2. **A nested `{% if %}` splits a statement.** `lower_macro_body`
+   flushes its `macro_content` ranges at each nested `macro_if` and
+   reparses each run alone, so `def self.read(…, ` and ` blocking =
+   nil) : String …` are two broken halves. Inside an outer `{% if %}`
+   the def is lost too, while a plain def in the same branch is kept.
+
+**Measured** (stdlib 1.22.2 without `compiler/` and `spec/`; macro
+blocks outside defs; a probe that reparses each block body with every
+`macro_content` range in one call, the nested macro nodes left out as
+gaps):
+
+| | blocks | defs today | defs with gaps |
+|---|---|---|---|
+| `{% if/unless %}` | 479 | 136 | 137 |
+| `{% begin %}` | 30 | 0 | 19 |
+
++20 defs, none lost, 7 files: `file.cr` +7 (`new`, `open` ×2, `read`,
+`each_line`, `read_lines`, `write`), `socket.cr` +5
+(`tcp`/`udp`/`unix`, 2 `initialize`), `socket/tcp_socket.cr` +3
+(`new`, 2 `initialize`), `fiber.cr` +2 (`new`, `initialize`),
+`concurrent.cr` +1 (`spawn`), `io/file_descriptor.cr` +1 (`new`),
+`crystal/tracing.cr` +1 (the `{% if %}` case). No recovered def has
+`{{ }}` in its signature. The other `{% begin %}` blocks hold
+expressions (`int.cr`: `{% begin %} if … {{@type}}::MIN …`) or
+`{% for %}`-generated `case`s (`crystal/tracing.cr`).
+
+Typing has the same split: `IDE::Typing#def_node` reparses a closed
+file's def by its item range (`parse_ranges(text, [r])`), which would
+still hold the inner `{% if … %} … {% end %}` (`File.write` has no
+return type, so its return is inferred). Already true today, not
+changed here: in an *open* file a def inside any declaration-level
+macro block has no `method_def` node in the file's tree, so its body
+has no locals or inference (`Bodies`), and `def_node` (which uses the
+open tree) finds no node, so callers lose its inferred return type
+while that file is open (probed: `x = Foo.ok(1)` is `Int32` with
+`lib.cr` closed, untyped with it open; same with a plain `{% if
+flag?(:linux) %}`).
+
+**Design decisions:**
+
+1. **Gaps, not substitution.** A macro body is reparsed once with
+   every `macro_content` range; nested `{% if %}` / `{% for %}` /
+   `{{ }}` / `{% %}` are left out (included ranges skip them).
+   Declarations inside a nested `{% if %}` branch are still lowered
+   by the recursive `lower_macro_if` under its condition; that branch
+   is *not* also spliced into the enclosing text. For the stdlib case
+   this drops `@[Deprecated]` on `blocking`, which no feature reads.
+   Choosing a branch (then / else by `Cond`) was rejected: the
+   conditions here are `compare_versions`, and a branch can be a
+   whole parameter (`fiber.cr`: `execution_context : … ,`), so
+   neither choice is right for every case.
+2. **`{% begin %}` lowers like an unconditional `{% if %}` branch**:
+   same `lower_macro_body`, no condition pushed.
+3. **No `{{ }}` guard beyond the grammar.** A declaration whose name
+   holds `{{ }}` parses as `ERROR` around a fragment (probed:
+   `def {{name.id}}(x)`), which `lower_body` already skips. The
+   generated names stay compiler facts (Phase 7).
+4. **Typing reuses the gaps.** `def_node` reparses a def with the
+   item range minus the macro nodes inside it (found by one parse of
+   that range), so the body sees the same signature the item has;
+   for an open file it does the same on the buffer's text when the
+   tree has no `method_def` at the item's range (the open-file
+   return-type loss above).
+
+Steps (one commit each):
+
+1. **Lowering.** `lower_macro_body` reparses once with gaps (decision
+   1); `macro_begin` lowered (decision 2). Specs (`items/lower_spec.cr`):
+   a def in `{% begin %}` with its doc; a def whose params hold `{% if
+   %} @[A] {% end %}` inside `{% begin %}` and inside `{% if flag?(…)
+   %}` (keeps the condition); a nested branch's own def still lowered
+   under its condition; `def {{name.id}}` gives no item. Patch bump
+   (item lowering).
+2. **Typing.** `def_node` with gaps (decision 4). Spec: a
+   `File.write`-like def in another file, no return type, `{% if %}`
+   in its params: the call's type is inferred with that file closed
+   and open.
+3. **Verification.** Probe on `lsp/diagnostics.cr`: completion after
+   `File.` has `read`/`write`/`new`/`open`; hover and definition on
+   `File.read`, `File.write`, `File.new`, `spawn`, `Socket.tcp`. Items
+   dump diff over the stdlib (the +20 above, nothing else); types dump
+   (no regressions); `make spec`, `make nvim-check`.
+
+Out of scope: locals, hover and inlay hints *inside* the body of a
+def that sits in a macro block of an open file (`Bodies` works on the
+file's tree; with Phase 20, which models macro nodes in bodies);
+`{% for %}`-generated declarations.
+
 ### Phase 20 — `{% if %}` inside method bodies
 
 Planned for later (decided after Phase 18's review; order relative to
 Phase 19 open). Not specific to C bindings.
 
 **Today (0.17.2):** declaration-level `{% if/unless %}` branches are
-reparsed and lowered under their condition (`Items::Lower`), but in a
+reparsed and lowered under their condition (`Items::Lower`; `{% begin
+%}` and a `{% if %}` inside a signature are not: see "Declarations in
+`{% begin %}` and macro-split signatures" above, which comes first), but in a
 method body every macro node is one opaque `Missing` expression
 (`HIR::LowerBody`): no locals, calls, hover or definition inside, e.g.
 `LibC.free(ptr)` in `Syntax.free_native`. Compiler facts don't help:
