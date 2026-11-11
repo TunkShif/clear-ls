@@ -68,6 +68,10 @@ changing it. Grammar quirks are in
 - A file body spans every namespace of its file: use the program as its
   namespace and look constants up at the expression (`type_body_ns`);
   `namespace_at(file, 0)` is inside a type declared on the first line.
+- A file body starts at its first item, so a file opening with `def`
+  has a file body and a def body with the same start. Key and dedupe
+  bodies by `body.range`, never `range.start`, and get the file body
+  with `Bodies#file_body`, not `at(0)` (that is the leading def).
 - `DefMap#lookup_path` follows aliases (what inference wants);
   navigation uses `lookup_path_raw` so `Env` stays `alias Env = ...`.
 - The program has ancestors (top-level `include`): resolve the include

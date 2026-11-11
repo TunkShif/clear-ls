@@ -13,9 +13,12 @@ module ClearLS::IDE
 
     # Parsed def ranges / file texts we looked into (bounded, FIFO).
     MAX_TREES = 256
-    @trees = {} of {FileId, UInt32} => Syntax::Tree
+    @trees = {} of {FileId, TextRange} => Syntax::Tree
     @parser = Syntax::Parser.new
-    @results = {} of {FileId, UInt64, UInt32} => Types::Infer
+    # By file, revision and body range. Not the start alone: a file body
+    # starts where its first item does, so a file opening with `def`
+    # would share the def's entry.
+    @results = {} of {FileId, UInt64, TextRange} => Types::Infer
 
     getter summaries : Types::Summaries
 
@@ -39,22 +42,27 @@ module ClearLS::IDE
 
     alias BodyCalls = Hash(String, Array(CallFact))
 
-    # Call facts per file (latest revision only) and body start. A few
+    # Call facts per file (latest revision only) and body range. A few
     # bytes per call (Marten's 89k calls: ~13 MB), against ~100 KB per
     # body for a kept `Infer`: the background warm-up fills these, not
     # `@results`.
-    @call_facts = {} of FileId => {UInt64, Hash(UInt32, BodyCalls)}
+    @call_facts = {} of FileId => {UInt64, Hash(TextRange, BodyCalls)}
 
     # Calls of the body containing *offset*, by name; computed once per
     # file revision (from a cached `Infer` when there is one).
     def call_facts(state : FileState, bodies : Bodies, offset : UInt32) : {HIR::Body, BodyCalls}?
       body = bodies.at(offset) || return nil
+      {body, body_call_facts(state, body)}
+    end
+
+    # Calls of *body* (one of *state*'s `Bodies`), by name.
+    def body_call_facts(state : FileState, body : HIR::Body) : BodyCalls
       rev, per_body = @call_facts[state.id]?.try { |e| e[0] == state.revision ? e : nil } ||
-                      (@call_facts[state.id] = {state.revision, {} of UInt32 => BodyCalls})
-      if calls = per_body[body.range.start]?
-        return {body, calls}
+                      (@call_facts[state.id] = {state.revision, {} of TextRange => BodyCalls})
+      if calls = per_body[body.range]?
+        return calls
       end
-      inf = @results[{state.id, state.revision, body.range.start}]? || run(state, body)
+      inf = @results[{state.id, state.revision, body.range}]? || run(state, body)
       calls = BodyCalls.new
       body.exprs.each do |e|
         next unless e.kind.call?
@@ -69,8 +77,7 @@ module ClearLS::IDE
         named = e.named_args.compact_map { |(n, v)| named_key_range(state, body.expr(v), n) }
         (calls[name] ||= [] of CallFact) << CallFact.new(nr, !res.nil?, kind, targets, !e.receiver.nil?, named, inits || [] of {Int32, UInt32})
       end
-      per_body[body.range.start] = calls
-      {body, calls}
+      per_body[body.range] = calls
     end
 
     # The `k` of `k: v` written before the value *v* (named argument).
@@ -95,9 +102,12 @@ module ClearLS::IDE
     def infer_at(state : FileState, bodies : Bodies, offset : UInt32, cache = true) : {HIR::Body, Types::Infer}?
       body = bodies.at(offset) || return nil
       return {body, run(state, body)} unless cache
-      key = {state.id, state.revision, body.range.start}
-      inf = @results[key] ||= run(state, body)
-      {body, inf}
+      {body, infer_body(state, body)}
+    end
+
+    # Cached inference of *body* (one of *state*'s `Bodies`).
+    def infer_body(state : FileState, body : HIR::Body) : Types::Infer
+      @results[{state.id, state.revision, body.range}] ||= run(state, body)
     end
 
     private def run(state : FileState, body : HIR::Body) : Types::Infer
@@ -109,9 +119,10 @@ module ClearLS::IDE
       ns = is_def ? @def_map.namespace_at(state.id, body.range.start) : Semantics::DefMap::PROGRAM
       info = @def_map[ns]
       self_t = self_type(ns)
-      # A def's own `forall` vars are type params inside it.
+      # A def's own `forall` vars are type params inside it (not for the
+      # file body, which may start at a leading def).
       free = [] of String
-      if node = state.tree.root.descendant(body.range.start, body.range.start + 1)
+      if is_def && (node = state.tree.root.descendant(body.range.start, body.range.start + 1))
         while n = node
           if n.kind.method_def?
             n.field(Syntax::Field::Forall).try { |f| free.concat(f.named_children.map(&.text)) }
@@ -181,7 +192,7 @@ module ClearLS::IDE
       tree = if state = @vfs.file?(@vfs.uri(site.file))
                state.tree
              else
-               key = {site.file, r.start}
+               key = {site.file, r}
                @trees[key]? || begin
                  text = file_text(site.file) || return nil
                  return nil if r.end > text.bytesize

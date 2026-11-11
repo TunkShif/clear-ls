@@ -236,11 +236,11 @@ module ClearLS::IDE
         next unless @index.visible_files(file).includes?(target.decl_file)
         ctx = @context_for.call(file) || next
         word = /(?<![\w@$])#{Regex.escape(target.name)}(?=\s*:[^:])/
-        seen = Set(UInt32).new
+        seen = Set(TextRange).new
         ctx.state.text.scan(word) do |m|
           off = m.byte_begin(0).to_u32
           body = ctx.bodies.at(off) || next
-          next unless seen.add?(body.range.start)
+          next unless seen.add?(body.range)
           _, calls = ctx.typing.call_facts(ctx.state, ctx.bodies, off) || next
           calls.each_value do |cs|
             cs.each do |c|
@@ -525,11 +525,12 @@ module ClearLS::IDE
       # word (call facts then pick the `name=` calls).
       spelled = References.setter?(target.name) ? target.name.rchop('=') : target.name
       word = /(?<![\w@$])#{Regex.escape(spelled)}(?![\w?!])/
-      seen_bodies = Set(UInt32).new
+      # By range: a file body starts where a leading def does.
+      seen_bodies = Set(TextRange).new
       text.scan(word) do |m|
         off = m.byte_begin(0).to_u32
         body = ctx.bodies.at(off) || next
-        next unless seen_bodies.add?(body.range.start)
+        next unless seen_bodies.add?(body.range)
         @checkpoint.call("", nil) if seen_bodies.size > 1
         _, calls = ctx.typing.call_facts(ctx.state, ctx.bodies, off) || next
         # A C field or `$var` is both read (`s.x`) and written (`s.x = v`).

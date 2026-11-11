@@ -211,7 +211,8 @@ module ClearLS::IDE
 
     # Every def body plus the file body.
     private def each_body(tree : Syntax::Tree, & : HIR::Body ->) : Nil
-      @bodies.at(0).try { |b| yield b }
+      # Not `at(0)`: offset 0 may be inside a def that opens the file.
+      yield @bodies.file_body
       tree.root.walk do |n|
         if n.kind.method_def?
           @bodies.at(n.start_byte + 1).try { |b| yield b }

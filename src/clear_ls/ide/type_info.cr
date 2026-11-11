@@ -607,13 +607,18 @@ class method: `self` is `" << owner << ".class`"
         starts << n.start_byte + 1 if n.kind.method_def?
         true
       end
-      starts << 0_u32
-      done = Set(UInt32).new
+      # By range: a file body starts where a leading def does.
+      done = Set(TextRange).new
+      file_body = @bodies.file_body
+      done << file_body.range
       starts.each do |s|
         body, inf = @typing.infer_at(@state, @bodies, s) || next
-        next unless done.add?(body.range.start)
+        next unless done.add?(body.range)
         yield body, inf
       end
+      # The file body last, as `at(0)` (not by offset: 0 may be inside a
+      # def that opens the file).
+      yield file_body, @typing.infer_body(@state, file_body)
     end
   end
 end

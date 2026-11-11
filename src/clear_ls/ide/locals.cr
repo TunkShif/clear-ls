@@ -23,6 +23,16 @@ module ClearLS::IDE
     # Body of the innermost def containing *offset*, else the file body.
     def at(offset : UInt32) : HIR::Body?
       node = owner_node(offset) || return nil
+      of_node(node)
+    end
+
+    # The file body (top-level code). Not `at(0)`: offset 0 is inside a
+    # def that opens the file.
+    def file_body : HIR::Body
+      of_node(@state.tree.root)
+    end
+
+    private def of_node(node : Syntax::Node) : HIR::Body
       if cached = @cache.find { |e| e.node_range == node.range }
         return cached.body
       end

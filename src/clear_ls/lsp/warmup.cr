@@ -63,14 +63,17 @@ module ClearLS::LSP
         file_bodies = IDE::Bodies.new(state)
         idx = index_for(state.id)
         typing = with_index(idx) { typing(state) }
-        starts = [0_u32]
+        # The file body as nil: offset 0 may be inside a leading def.
+        starts = [nil] of UInt32?
         state.tree.root.walk { |n| starts << n.start_byte + 1 if n.kind.method_def?; true }
         starts.each do |s|
           return unless warmup_wait(gen)
           t = Time.instant
           # Call facts only (what a search reads), not the whole Infer:
           # keeping every body's would cost ~460 MB on Marten.
-          with_index(idx) { typing.call_facts(state, file_bodies, s) }
+          with_index(idx) do
+            s ? typing.call_facts(state, file_bodies, s) : typing.body_call_facts(state, file_bodies.file_body)
+          end
           busy += t.elapsed
           bodies += 1
         end

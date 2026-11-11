@@ -197,10 +197,11 @@ module ClearLS::Types
       names.includes?(name)
     end
 
-    @yields_cache = {} of {Int32, UInt32} => Bool
+    # By file and item range (macro-generated items can share a start).
+    @yields_cache = {} of {Int32, TextRange} => Bool
 
     private def yields?(site : Semantics::Site) : Bool
-      @yields_cache[{site.file.value.to_i32, site.item.range.start}] ||= begin
+      @yields_cache[{site.file.value.to_i32, site.item.range}] ||= begin
         node = @source_loader.try(&.call(site))
         node ? node.tree.text.byte_slice(node.start_byte, node.end_byte - node.start_byte).matches?(/\byield\b/) : true
       end
