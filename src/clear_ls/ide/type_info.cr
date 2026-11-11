@@ -1,3 +1,4 @@
+require "./pseudo_docs"
 require "./typing"
 require "./alias_display"
 
@@ -12,6 +13,9 @@ module ClearLS::IDE
   class TypeInfo
     # Show alias names where the type was written as one (`inlayHints.aliases`).
     property aliases = true
+
+    # The stdlib, for pseudo-method docs (`PseudoDocs`).
+    property stdlib_dir : String? = nil
 
     def initialize(@state : FileState, @bodies : Bodies, @typing : Typing)
     end
@@ -405,6 +409,12 @@ class method: `self` is `" << owner << ".class`"
         # primitives): no declaration, but the inferred result type.
         return nil unless ret && !table.unknown?(ret)
         recv = call.receiver.try { |r| @typing.infer_at(@state, @bodies, offset).try { |(_, inf)| inf.type_of(r) } }
+        # `x.is_a?(T)`, `x.as(T)`, ...: documented as Object pseudo-methods.
+        if call.receiver && (pe = PseudoDocs.lookup(@stdlib_dir, "Object##{call.name}"))
+          md = PseudoDocs.markdown(pe)
+          md += "\n\n→ `#{table.to_s(ret)}`" unless table.unknown?(ret)
+          return {md, call.name_range.not_nil!}
+        end
         md = String.build do |io|
           io << "```crystal
 "

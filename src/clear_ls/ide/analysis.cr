@@ -4,6 +4,7 @@ require "./typing"
 require "./type_params"
 require "./annotations"
 require "./annotation_args"
+require "./pseudo_docs"
 
 module ClearLS::IDE
   # A location in a file, as byte ranges. The LSP layer converts to
@@ -221,6 +222,9 @@ module ClearLS::IDE
         return HoverInfo.new("```crystal\n#{tp.name}\n```\n\n#{role}", tp.range)
       end
       results = resolve_path_at(offset)
+      if hit = pseudo_hover(offset, results.empty?)
+        return hit
+      end
       if hit = annotation_arg_hover(offset)
         return hit
       end
@@ -244,6 +248,27 @@ module ClearLS::IDE
       return nil unless node.kind.constant?
       parent = node.parent || return nil
       parent.kind.annotation_node? && parent.named_child(0) == node ? node : nil
+    end
+
+    # Keyword pseudo-methods whose node starts with the keyword.
+    PSEUDO_KEYWORDS = %w(typeof sizeof instance_sizeof alignof instance_alignof pointerof offsetof)
+
+    # On a compiler pseudo-method keyword (`sizeof(...)`) or on `Void` /
+    # `NoReturn` used as a type: docs from `docs_pseudo_methods.cr`.
+    # *unresolved*: the constant under the cursor resolved to no type (a
+    # user's `Void` wins).
+    private def pseudo_hover(offset : UInt32, unresolved : Bool) : HoverInfo?
+      std = @index.project.stdlib_dir
+      leaf = tree.root.descendant(offset, offset) || return nil
+      if !leaf.named? && (parent = leaf.parent) && PSEUDO_KEYWORDS.includes?(leaf.type) && parent.type == leaf.type
+        e = PseudoDocs.lookup(std, leaf.type) || return nil
+        return HoverInfo.new(PseudoDocs.markdown(e), leaf.range)
+      end
+      return nil unless unresolved
+      node = tree.root.descendant(offset, offset, named: true) || return nil
+      return nil unless node.kind.constant? && node.text.lchop("::").in?("Void", "NoReturn")
+      e = PseudoDocs.lookup(std, node.text.lchop("::")) || return nil
+      HoverInfo.new(PseudoDocs.markdown(e), node.range)
     end
 
     # On an annotation argument: `ldflags` in `@[Link(ldflags: "x")]`

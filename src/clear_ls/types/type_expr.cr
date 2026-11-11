@@ -217,7 +217,10 @@ module ClearLS::Types
       end
       # Built in, not declared in the stdlib.
       return @table.no_return if path.in?("NoReturn", "::NoReturn") && args.empty?
-      def_id = @table.def_map.lookup_path(path, @ns) || return @table.unknown
+      def_id = @table.def_map.lookup_path(path, @ns)
+      # `Void` is built in too (a declared `Void` wins, as for any name).
+      return @table.void if def_id.nil? && path.in?("Void", "::Void") && args.empty?
+      def_id || return @table.unknown
       # lookup_path follows aliases to their target type, dropping generic
       # args (`alias IntP = Pointer(Int32)` → Pointer): parse the alias's
       # target text instead.

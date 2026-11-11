@@ -18,6 +18,9 @@ module ClearLS::Types
     # a summary's `yield`). Vanishes from unions like NoReturn but does not
     # end control flow; standing alone it reads as unknown.
     Pending
+    # `Void` (built into the compiler; only meaningful in C bindings and
+    # `Pointer(Void)`).
+    Void
   end
 
   # Structural type. Generic args, union members, tuple elements, and proc
@@ -47,11 +50,13 @@ module ClearLS::Types
     getter unknown : TyId
     getter no_return : TyId
     getter pending : TyId
+    getter void : TyId
 
     def initialize(@def_map)
       @unknown = intern(Ty.new(TyKind::Unknown))
       @no_return = intern(Ty.new(TyKind::NoReturn))
       @pending = intern(Ty.new(TyKind::Pending))
+      @void = intern(Ty.new(TyKind::Void))
     end
 
     def [](id : TyId) : Ty
@@ -161,6 +166,7 @@ module ClearLS::Types
       case t.kind
       in .unknown?    then io << '?'
       in .no_return?  then io << "NoReturn"
+      in .void?       then io << "Void"
       in .pending?    then io << '?'
       in .type_param? then io << t.param
       in .named?

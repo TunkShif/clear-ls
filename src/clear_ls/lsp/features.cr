@@ -627,7 +627,10 @@ module ClearLS::LSP
     end
 
     private def type_info(state : FileState) : IDE::TypeInfo
-      IDE::TypeInfo.new(state, bodies(state), typing(state)).tap { |t| t.aliases = @settings.bool("inlayHints.aliases") }
+      IDE::TypeInfo.new(state, bodies(state), typing(state)).tap do |t|
+        t.aliases = @settings.bool("inlayHints.aliases")
+        t.stdlib_dir = index.project.stdlib_dir
+      end
     end
 
     @body_cache = IDE::BodyCache.new

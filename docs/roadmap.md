@@ -2653,6 +2653,20 @@ Steps (one commit each; pause at the end of each):
    declarations hover. Specs: 2 more (10). `make spec` 408 examples.
 4. **Pseudo types and methods (R4).** Hover for `Void`, `NoReturn`,
    `sizeof` & co.; `Pointer(Void)` in hovers and hints.
+
+   *Done:* `IDE::PseudoDocs` reads the stdlib's
+   `docs_pseudo_methods.cr` (once per stdlib dir, through item
+   lowering): `__crystal_pseudo_<name>` defs, `Object` pseudo-methods,
+   `CRYSTAL_PSEUDO__<Name>` structs. Hover on the keyword of `typeof`,
+   `sizeof`, `instance_sizeof`, `alignof`, `instance_alignof`,
+   `pointerof`, `offsetof` (`Analysis#pseudo_hover`), on `Void` /
+   `NoReturn` when no declaration of that name resolves, and on
+   `x.is_a?`, `as`, `as?`, `nil?`, `responds_to?` (instead of
+   "built-in (no source declaration)"). `TyKind::Void` (`TypeTable#void`)
+   for an undeclared `Void` in a type: `Pointer(Void)` instead of
+   `Pointer(?)`; a def declared `: Void` returns `Nil`, like a fun.
+   Types dump: no regressions; repo 1 and stdlib 31 `Pointer(?)` →
+   `Pointer(Void)`. Specs: 4 more (14). `make spec` 412 examples.
 5. **Verification and docs.** Neovim check with a lib fixture; a
    hover probe over `lib_c/x86_64-linux-gnu` and
    `syntax/grammar.cr`; README, status, architecture; 0.18.0.

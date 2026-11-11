@@ -211,3 +211,90 @@ describe "phase 18 C declaration hover" do
     end
   end
 end
+
+private PSEUDO_STD = STD.merge({
+  "docs_pseudo_methods.cr" => <<-CR,
+    {% skip_file unless flag?(:docs) %}
+
+    # Returns the size of the given type as number of bytes.
+    def __crystal_pseudo_sizeof(type : Class) : Int32
+    end
+
+    # Returns a `Pointer` to the contents of a variable.
+    def __crystal_pseudo_pointerof(variable : T) : Pointer(T) forall T
+    end
+
+    class Object
+      # Returns `true` if `self` inherits or includes *type*.
+      def __crystal_pseudo_is_a?(type : Class) : Bool
+      end
+    end
+
+    # Similar in usage to `Nil`. `Void` is preferred for C lib bindings.
+    struct CRYSTAL_PSEUDO__Void
+    end
+
+    # Some expressions won't return to the current scope.
+    struct CRYSTAL_PSEUDO__NoReturn
+    end
+    CR
+})
+
+private PSEUDO_APP = {
+  "src/app.cr" => <<-CR,
+    lib LibV
+      fun take(p : Void*) : Void
+    end
+
+    def stop : NoReturn
+      raise "x"
+    end
+
+    def nothing : Void
+    end
+
+    def run(x : Int32)
+      size = sizeof(Int32)
+      ptr = pointerof(x)
+      raw = uninitialized Void*
+      ok = x.is_a?(Int32)
+      n = nothing
+      LibV.take(raw)
+    end
+    CR
+}
+
+describe "phase 18 compiler pseudo-methods and types" do
+  it "hovers pseudo-method keywords and Object pseudo-methods from docs_pseudo_methods.cr" do
+    with_client(PSEUDO_APP, PSEUDO_STD) do |c|
+      c.open("src/app.cr")
+      ffi_hover(c, "sizeof").not_nil!.should eq "```crystal\nsizeof(type : Class) : Int32\n```\n\nbuilt into the compiler\n\nReturns the size of the given type as number of bytes."
+      ffi_hover(c, "pointerof").not_nil!.should start_with("```crystal\npointerof(variable : T) : Pointer(T) forall T\n```")
+      ffi_hover(c, "is_a?").not_nil!.should eq "```crystal\ndef Object#is_a?(type : Class) : Bool\n```\n\nbuilt into the compiler\n\nReturns `true` if `self` inherits or includes *type*.\n\n→ `Bool`"
+    end
+  end
+
+  it "hovers Void and NoReturn" do
+    with_client(PSEUDO_APP, PSEUDO_STD) do |c|
+      c.open("src/app.cr")
+      ffi_hover(c, "Void*").not_nil!.should eq "```crystal\nstruct Void\n```\n\nbuilt into the compiler\n\nSimilar in usage to `Nil`. `Void` is preferred for C lib bindings."
+      ffi_hover(c, "NoReturn").not_nil!.should start_with("```crystal\nstruct NoReturn\n```")
+    end
+  end
+
+  it "prints Pointer(Void) and types a `: Void` call as Nil" do
+    with_client(PSEUDO_APP, PSEUDO_STD) do |c|
+      c.open("src/app.cr")
+      ffi_hover(c, "raw =").not_nil!.should start_with("```crystal\nraw : Pointer(Void)\n```")
+      ffi_hover(c, "n = ").not_nil!.should start_with("```crystal\nn : Nil\n```")
+    end
+  end
+
+  it "keeps a user's own Void" do
+    files = {"src/app.cr" => "struct Void\nend\n\nx = Pointer(Void).null\n"}
+    with_client(files, PSEUDO_STD) do |c|
+      c.open("src/app.cr")
+      ffi_hover(c, "Void)").not_nil!.should eq "```crystal\nstruct Void\n```"
+    end
+  end
+end

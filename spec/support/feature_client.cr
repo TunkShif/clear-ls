@@ -40,7 +40,7 @@ class FeatureClient
       end
       # `lib_c/<target>/...` files are reached through `require "c/..."`
       # (the target path), not from the prelude.
-      prelude = stdlib.keys.reject(&.starts_with?("lib_c/"))
+      prelude = stdlib.keys.reject { |k| k.starts_with?("lib_c/") || k == "docs_pseudo_methods.cr" }
       write_if_changed(File.join(std_dir, "prelude.cr"), prelude.map { |k| %(require "./#{k.rchop(".cr")}") }.join('\n'))
     end
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)

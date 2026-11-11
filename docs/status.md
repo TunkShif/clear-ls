@@ -43,7 +43,7 @@ stops mid-phase). History and per-phase details are in
   ([roadmap.md](roadmap.md#phase-18--c-bindings-lib-fun)), then Phase 19 —
   own tree-sitter-crystal.
 - **In progress:** Phase 18 steps 1–3 done (lib_c target path, C call
-  navigation, declaration hover; 0.17.2 `skip_file` fix); next: step 4. Phases 16–18 on `dev/next`, not merged
+  navigation, declaration hover, pseudo-methods and `Void`; 0.17.2 `skip_file` fix); next: step 5. Phases 16–18 on `dev/next`, not merged
   into `main`.
 
 ## Resume

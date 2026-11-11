@@ -2536,6 +2536,8 @@ module ClearLS::Types
       end
       tparams = owner.type_params + sig.free_vars
       ret = TypeExprParser.parse(text, @table, m.owner, tparams, self_t)
+      # `def f : Void` returns nil (the compiler's `Void` return).
+      return nil_t if ret == @table.void
       result = Subst.apply(@table, ret, free_var_bindings(c, block_ret))
       still_open?(result) ? nil : result
     end
