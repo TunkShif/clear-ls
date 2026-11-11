@@ -62,8 +62,75 @@ module ClearLS::Items
 
     def run : ItemTree
       items = [] of Item
-      lower_body(@tree.root, items, nil)
+      lower_top(@tree.root, items)
       ItemTree.new(items, @requires, @recovered, @mixins)
+    end
+
+    # The file's top level. `{% skip_file %}` (compiler macro: the rest
+    # of the file is not read) guards every later statement with the
+    # negation of its condition: `{% skip_file if flag?(:win32) %}`,
+    # `{% unless flag?(:x) %}{% skip_file %}{% end %}`. An unconditional
+    # one ends the file. An unknown condition keeps the rest (as before).
+    private def lower_top(root : Syntax::Node, dest : Array(Item)) : Nil
+      pushed = 0
+      pending_annotations = [] of String
+      root.named_children.each do |node|
+        if node.kind.annotation_node?
+          pending_annotations << annotation_text(node)
+          next
+        end
+        next if node.kind.comment?
+        start = dest.size
+        lower_stmt(node, dest, nil, Visibility::Public)
+        unless pending_annotations.empty?
+          dest[start..].each(&.annotations.concat(pending_annotations))
+          pending_annotations = [] of String
+        end
+        if skip = skip_file_cond(node)
+          break if skip.is_a?(Bool)
+          @conds.push(Cond::Not.new(skip))
+          pushed += 1
+        end
+      end
+    ensure
+      pushed.try &.times { @conds.pop }
+    end
+
+    # When *node* skips the rest of the file: `true` always, else under
+    # which condition. Nil when it is no `skip_file`.
+    private def skip_file_cond(node : Syntax::Node) : Cond | Bool | Nil
+      case node.kind
+      when .macro_statement?
+        expr = node.named_child(0)
+        expr = expr.named_child(0) if expr && expr.kind.expressions? && expr.named_child_count == 1
+        return nil unless expr
+        return true if skip_file_call?(expr)
+        if (expr.kind.modifier_if? || expr.kind.modifier_unless?) && (t = expr.field(Syntax::Field::Then)) && skip_file_call?(t)
+          c = expr.field(Syntax::Field::Cond).try { |n| parse_cond(n) } || Cond::Unknown.new("?")
+          return expr.kind.modifier_unless? ? Cond::Not.new(c) : c
+        end
+      when .macro_if?, .macro_unless?
+        c = node.field(Syntax::Field::Cond).try { |n| parse_cond(n) } || Cond::Unknown.new("?")
+        c = Cond::Not.new(c) if node.kind.macro_unless?
+        if node.field(Syntax::Field::Then).try { |b| skips?(b) }
+          return c
+        end
+        alt = node.field(Syntax::Field::Else)
+        if alt && !alt.kind.macro_elsif? && alt.field(Syntax::Field::Body).try { |b| skips?(b) }
+          return Cond::Not.new(c)
+        end
+      end
+      nil
+    end
+
+    # A macro body holding a bare `{% skip_file %}`.
+    private def skips?(body : Syntax::Node) : Bool
+      body.named_children.any? { |c| c.kind.macro_statement? && skip_file_cond(c) == true }
+    end
+
+    private def skip_file_call?(node : Syntax::Node) : Bool
+      (node.kind.identifier? && node.text == "skip_file") ||
+        (node.kind.call? && node.field_text(Syntax::Field::Method) == "skip_file" && node.field(Syntax::Field::Receiver).nil?)
     end
 
     # Lowers the statements of *body* into *dest*. *owner* is the enclosing

@@ -19,6 +19,34 @@ private def find(tree : ItemTree, name : String) : Item
 end
 
 describe Lower do
+  it "guards the rest of a file with the negated `skip_file` condition" do
+    flags = Set{"linux", "unix", "x86_64"}
+    t = items_of(<<-CR)
+      class Before; end
+      {% skip_file unless flag?(:unix) %}
+      class A; end
+      {% skip_file if flag?(:win32) %}
+      class B; end
+      {% unless flag?(:without_iconv) %}
+        {% skip_file %}
+      {% end %}
+      class Stub; end
+      CR
+    Cond.all(find(t, "Before").conditions, flags).should be_true
+    Cond.all(find(t, "A").conditions, flags).should be_true
+    Cond.all(find(t, "B").conditions, flags).should be_true
+    # Linux has no `without_iconv`: the stub file's rest is skipped.
+    Cond.all(find(t, "Stub").conditions, flags).should be_false
+    Cond.all(find(t, "Stub").conditions, flags | Set{"without_iconv"}).should be_true
+  end
+
+  it "ends the file at an unconditional `skip_file`, keeps it for an unknown condition" do
+    t = items_of("class A; end\n{% skip_file %}\nclass B; end\n")
+    expect_raises(Exception, /no item B/) { find(t, "B") }
+    t = items_of("{% skip_file if compare_versions(X, \"1.0\") > 0 %}\nclass C; end\n")
+    Cond.all(find(t, "C").conditions, Set{"linux"}).should be_nil
+  end
+
   it "lowers nested namespaces with paths, generics, and superclasses" do
     t = items_of(<<-CR)
       module Outer::Inner
