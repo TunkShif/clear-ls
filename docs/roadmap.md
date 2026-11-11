@@ -2975,6 +2975,203 @@ inference rules above; IDE features over the new nodes; verification
 (types dump over the stdlib: ~310 sites change, no regressions allowed;
 hover probe on `grammar.cr`'s `free_native`).
 
+### Phase 21 — constant hover, compiler constants, doc directives, generic class methods
+
+Found in use after Phase 19 step 3 (0.18.1, `dev/next` at `332963d`).
+Planned after Phase 20. Probed with `tools/lsp_client.py` on a loose
+file, compiler integration off.
+
+**Today:**
+
+- **Constant hover shows the value text, not the type.** `ARGV` →
+  ``ARGV = Array.new(ARGC_UNSAFE - 1) { |i| String.new(ARGV_UNSAFE[1 + i]) }``;
+  `STDIN`, `STDOUT`, `PROGRAM_NAME` the same. Constant hover falls
+  through every `TypeInfo` hover in `LSP::Features#hover` to
+  `IDE::Analysis#hover`, which is declaration-only: `describe`
+  prints `full_name = item.detail`. Inference already types the
+  constant (`Infer#const_type` → `const_value_type` →
+  `const_expr_type`, summary-cached): `x = STDOUT` hovers as
+  `x : IO::FileDescriptor`, `e = PROGRAM_NAME` as `String`.
+- **Compiler-defined constants have no declaration.** `ARGC_UNSAFE`,
+  `ARGV_UNSAFE` (used by `ARGV`, `PROGRAM_NAME` in `kernel.cr`):
+  hover gives nothing, `c = ARGC_UNSAFE` gives `c` with no type.
+  `Crystal::VERSION` (used in `{% compare_versions %}` across the
+  stdlib): same. `__FILE__`/`__LINE__`/`__DIR__` already type
+  (`pseudo_constant`), with no hover on the keyword.
+- **Generic args lost on explicit class methods of a bare generic.**
+  `Array.new(3) { |i| "x" }` → `Array` (so `ARGV` would still hover
+  as `Array` once constants show their type). See "Generic args from
+  class-method calls" below for the category.
+- **Doc directives are shown raw.** The second `sprintf` in
+  `sprintf "%s", "hi"; sprintf "%s", ["hi"]` resolves to
+  `def sprintf(format_string, args : Array | Tuple)` whose doc is
+  `:ditto:`; hover shows `:ditto:`. Only completion knows about
+  `:nodoc:` (`completion.cr`, hides internal methods).
+
+**Measured** (stdlib 1.22.0 without `compiler/`, doc comment lines):
+
+| directive | uses | compiler semantics |
+|---|---|---|
+| `:ditto:` | 285 (14 with text after) | `TopLevelVisitor#check_ditto`: the doc of the previous *documented* def / macro / constant / fun / assign in visiting order; `:ditto:` + more lines appends them after a blank line |
+| `:nodoc:` | 811 (118 with text after) | `Doc::Generator#nodoc?`: doc starts with `:nodoc:`, item left out of the API docs (and its namespace's members) |
+| `:inherit:` | 63 | `Doc::Method#compute_doc_info`: a line `:inherit:` is replaced by the doc of the ancestor method with the same signature strictness; a def with no doc copies the previous overload's (`previous_def_docs`) or the ancestor's ("Description copied from …") |
+| `:showdoc:` | 0 | lchopped; makes `private` / lib items documented |
+
+Compiler constants (`compiler/crystal/program.cr`, 1.22.0), the full
+list of `Const.new` in the compiler:
+
+| constant | where | value | type |
+|---|---|---|---|
+| `ARGC_UNSAFE` | `Program#initialize` (253) | `Primitive("argc")` | `Int32` |
+| `ARGV_UNSAFE` | (254) | `Primitive("argv")` | `Pointer(Pointer(UInt8))` |
+| `Crystal::BUILD_COMMIT` | `define_crystal_constants` (310) | compiler build | `String \| Nil` (Nil for dev builds) |
+| `Crystal::BUILD_DATE`, `CACHE_DIR`, `DEFAULT_PATH`, `DESCRIPTION`, `PATH`, `LIBRARY_PATH`, `VERSION`, `LLVM_VERSION`, `HOST_TRIPLE`, `TARGET_TRIPLE` | (320–359) | compiler config / env | `String` |
+| `Crystal::USER_FLAGS`, `ALL_FLAGS` | (360–365) | `-D` flags / all flags | `Array(String)` |
+
+**Generic args from class-method calls** (`MyBox(T)` with
+`initialize(@v : T)`; compiler column from `typeof`, 1.22.0):
+
+| call | clear-ls | compiler | gap |
+|---|---|---|---|
+| `Array.new(3) { "x" }`, `Deque.new(3) { 1 }` | `Array`, `Deque` | `Array(String)`, `Deque(Int32)` | A |
+| `Pointer.malloc(3) { 1.5 }`, `Iterator.of { 1 }` | `Pointer(?)`, `…SingletonProcIterator(?)` | `Pointer(Float64)`, `…(Int32)` | A |
+| `Set.new([1])`, `Deque.new([1])`, `Slice.new(3, 1)` | `Set`, `Deque`, `Slice` | `Set(Int32)`, `Deque(Int32)`, `Slice(Int32)` | B |
+| `Pointer.malloc(3, 1)`, `Iterator.of(1)`, `Hash.zip([1], ["a"])` | `Pointer(?)`, `…(?)`, `Hash(?, ?)` | `Pointer(Int32)`, `…(Int32)`, `Hash(Int32, String)` | B |
+| `MyBox.wrap(1)` (`def self.wrap(v : T); new(v); end`) | `MyBox(?)` | `MyBox(Int32)` | B |
+| `Range.new(1, 2, exclusive: true)`, `P1.new(1, flag: true)` (`initialize(@a : A, @flag = false)`) | `Range`, `P1` | `Range(Int32, Int32)`, `P1(Int32)` | C |
+| `Slice.new(3) { 1.5 }` (`&` unrestricted) | `Slice` | `Slice(Float64)` | A via body |
+| `Array(typeof(x)).new` | `Array(?)` | typed | D |
+| `StaticArray(Int32, 3).new { }` | `StaticArray(Int32, ?)` | `StaticArray(Int32, 3)` | E |
+
+What already works, for contrast: `Array(String).new(3) { }` (args
+given), `Array.new(3, "x")` and `MyBox.new(1)` (no explicit
+`self.new`: `Infer#instance_from_initialize` unifies `initialize`'s
+restrictions against open params), `[1].map { "x" }` (`forall U`
+from the block: `free_var_bindings`), `MyBox.make { 1 }` when the
+body is `new(yield)` (summary). `Hash.new(0)` → `Hash` is right: the
+compiler rejects it (K, V unbound).
+
+Causes:
+
+- **A, B** — one mechanism. With a bare generic metaclass receiver,
+  `generic_bindings` binds the owner's params to unknown; `arg_bindings`
+  and `free_var_bindings` return early when the def has no `forall`
+  (`sig.free_vars.empty?`), so owner params are never unified against
+  argument types or the block's value; `declared_return` returns
+  `self_t` (bare `Array`) for an unannotated `new` before looking any
+  further. `instance_from_initialize` does the right thing, but only
+  for implicit `new`.
+- **C** — a resolver bug, not generics: `Param#call_name` keeps the
+  `@` of `@flag`, so a named argument never matches an ivar parameter
+  (`CallResolver#bind`), the candidate is dropped, and the call has no
+  resolution: no type, no definition (`Q.new(flag: true)` → `[]`),
+  no signature help. 696 stdlib defs have an `@param`.
+- **D** — `typeof` in a type argument; Phase 6 decision 3 territory,
+  13 of the stdlib's open-arg locals. **E** — numeric params, not
+  modelled.
+
+Frequency (types dump of locals, def bodies): stdlib 5177 locals, 91
+bare-generic or `?`-arg ones, ~17 from A/B/C, 13 from D; the rest are
+unions/macro aliases (Marten's `Hash(String, ?)` come from
+`alias Any = Union({{TYPES.splat}})`, a macro-built alias, not this).
+Call sites with a bare generic receiver and arguments: stdlib 222,
+Athena 4, Marten 0, clear-ls 1.
+
+16 in all, each with a compiler-side doc string (except the two
+`*_UNSAFE`). Not user-visible, so out of scope: `$Regex:n` /
+`$Slice:n` (literal expander, main visitor: hidden constants for regex
+and slice literals) and enum members from `EnumType#add_constant`
+(`@[Flags]` `None`/`All`, already handled in `Infer#const_type`).
+
+**Design decisions:**
+
+1. **Constant hover: type first, value second.** A `TypeInfo#const_hover`
+   ahead of `Analysis#hover` in the hover chain, for a constant
+   reference or declaration name that resolves to a constant (not a
+   type): `NAME : T` from inference, then the value expression as a
+   secondary line, then the doc. Unknown type: today's `NAME = value`.
+   Value text is shown as is up to one line / ~80 chars, else
+   truncated with `…` (data tables are thousands of bytes). Enum
+   members keep their enum type. Aliases and types are unaffected.
+   Shape:
+
+   ````md
+   ```crystal
+   ARGV : Array(String)
+   ```
+
+   = `Array.new(ARGC_UNSAFE - 1) { |i| String.new(ARGV_UNSAFE[1 + i]) }`
+
+   An array of arguments passed to the program.
+   ````
+2. **Built-in compiler constants table.** `IDE::CompilerConstants`,
+   like `IDE::Annotations::BUILTINS` (Phase 17): name, owner (top
+   level or `Crystal`), type text, doc. The doc is the compiler's own
+   (copied from `define_crystal_constants`); `ARGC_UNSAFE` /
+   `ARGV_UNSAFE` get a written one (the argc/argv given to `main`,
+   read by `ARGV` and `PROGRAM_NAME`; prefer those). Each entry notes
+   "defined by the compiler (`compiler/crystal/program.cr`), no source".
+   The module header documents where the list comes from, why it
+   exists (no declaration in any `.cr` file the DefMap indexes) and how
+   to refresh it on a Crystal upgrade (`rg 'Const.new|define_crystal_'
+   compiler/crystal/program.cr`). Used by inference (`const_type`
+   falls back to it after the scope chain), hover (no definition
+   location, as built-in annotations) and completion (`Crystal::`,
+   top-level constants). A source declaration of the same name wins.
+   Values are not shown: they are the analysing compiler's, and only
+   compiler facts could know the build's (`-D` flags).
+3. **Owner type params from class-method calls (A, B).** With a
+   bare generic metaclass receiver (`Array`, not `Array(X)`), the
+   candidate's owner params start open (`type_param`, as
+   `instance_from_initialize` does) instead of unknown; `arg_bindings`
+   unifies owner params as well as `forall` vars from argument
+   restrictions, then `free_var_bindings` from the block's value
+   (`& : Int32 -> T`); `declared_return` applies them to `self`, a
+   declared return (`Pointer(T)`) or a summary. Params still open
+   afterwards become unknown (`still_open?`), so nothing worse than
+   today leaks out. Explicit args (`Array(String).new`) are never
+   overridden. "A via body" (`Slice.new(n) { }`) may follow from the
+   summary once A works; verify, don't target. D and E out of scope.
+   Not its own phase: one mechanism in `infer.cr` (three methods),
+   but its own step with the inference regression workflow
+   (`types_dump` + `types_diff.py` on stdlib, Marten, Athena;
+   `book_diff.py`).
+3a. **Named arguments to `@ivar` params (C).** `call_name` drops the
+   `@`/`@@` (the compiler's external name for `@flag` is `flag`).
+   Fixes resolution, not just types; first step of the phase (also
+   affects definition, references, signature help).
+4. **Doc directives**, resolved where docs are read (one helper used
+   by hover, completion documentation, signature help):
+   - `:ditto:` (alone or followed by text): the doc of the previous
+     documented item in the same file and namespace in source order,
+     as `check_ditto` (its `@last_doc` is the last doc seen in
+     visiting order, so a `:ditto:` chain resolves to the first real
+     doc); the extra text appended after a blank line. Unresolvable:
+     drop the directive, show nothing.
+   - `:inherit:` line: the doc of the same-name method in the nearest
+     ancestor (`DefMap#ancestors`), matched by name and arity (not the
+     compiler's full restriction strictness); unresolved: the line is
+     dropped.
+   - No doc at all on a def: the previous overload's doc in the same
+     owner (`previous_def_docs`), else the ancestor's, marked
+     "_Description copied from `Owner`_" as `crystal docs` does.
+   - `:nodoc:`: the doc is not shown at all (hover shows the
+     signature only, no note); completion keeps hiding these.
+   - `:showdoc:`: stripped.
+
+**Open:** whether the doc helper caches resolved docs (285 dittos;
+cost is a sibling scan per hover, probably negligible).
+
+Steps (to split before starting): named args to `@ivar` params (3a);
+owner params from class-method calls (3, inference regression
+workflow, no regressions allowed); constant hover (1); compiler
+constants table + inference/hover/completion (2); doc directives (4).
+3 before 1 so `ARGV` hovers as `Array(String)` when 1 lands.
+Verification: specs per step; the table above as a fixture (each row
+matches the compiler or stays a listed gap); LSP probe on `ARGV`,
+`STDIN`, `PROGRAM_NAME`, `ARGC_UNSAFE`, `Crystal::VERSION`, the
+`sprintf` pair; `make nvim-check` hover float.
+
 ## Testing approach
 
 - Snapshot tests for representations (`dump-cst`, later items and HIR).
