@@ -38,6 +38,9 @@ stops mid-phase). History and per-phase details are in
   fixes C1–C4, C7 ([roadmap.md](roadmap.md#usage-feedback-after-phase-8-done)).
 - **Also done:** fix round after Phase 10 — top-level `include` and the
   file-body namespace ([roadmap.md](roadmap.md#fix-round-after-phase-10-top-level-include-done)).
+- **Also done:** fix round after Phase 18 — bodies keyed by range (a
+  file starting with `def` mixed up its file body and that def)
+  ([roadmap.md](roadmap.md#fix-round-after-phase-18-bodies-keyed-by-range-done)).
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).

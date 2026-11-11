@@ -2697,6 +2697,33 @@ Moved to Phase 19: `fun f(self : T*, …)` parses as `self`, `ERROR`,
 the rest (38 funs in the tree-sitter binding; `ts_language_symbol_type`
 is untyped because of it).
 
+### Fix round after Phase 18: bodies keyed by range (done)
+
+Report: in a loose file (or any file) starting with `def add(a, b)`,
+`foo = add 1, 2` and `bar = add "foo", "bar"` had no types and hover
+on the second `add` was silent (`-32603 Index out of bounds`, which
+Neovim doesn't show). Not about project roots: the same text as a
+shard target failed too; a leading comment or item hid it.
+
+Cause: the file body starts at its first item, here the def, and
+several caches and dedupes used `body.range.start` as the body's
+identity: `Typing@results` and per-body call facts (whichever body
+ran first answered for both, with expression ids from the other),
+`each_body_in` (inlay hints skipped the file body),
+`References` body dedupes, and callers that asked `Bodies#at(0)` for
+the file body (semantic tokens, warm-up) got the def's.
+
+Fix: key/dedupe by `TextRange` (`@results`, call facts, `@trees`,
+`Infer@yields_cache`, reference scans); `Bodies#file_body`,
+`Typing#infer_body` and `#body_call_facts` for the file body; a def's
+`forall`/`self.` no longer leaks into a file body that starts at it.
+Specs: `features_body_key_spec.cr` (loose file and shard target, both
+inference orders, leading blank lines: hover, inlay hints, references,
+semantic tokens). 0.18.1.
+
+Status: done. `make spec` 415 examples; every Neovim check passes;
+`make verify-static` OK.
+
 ### Phase 19 — own tree-sitter-crystal
 
 Starts after Phases 17 and 18. Replaces the policy in
