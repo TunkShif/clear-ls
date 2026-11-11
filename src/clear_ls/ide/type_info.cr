@@ -397,6 +397,9 @@ class method: `self` is `" << owner << ".class`"
 
     def method_hover(offset : UInt32) : {String, TextRange}?
       call, matches, ret = call_at(offset) || return nil
+      if (m = matches.first?) && (c_md = c_decl_markdown(m.site, m.owner, ret))
+        return {c_md, call.name_range.not_nil!}
+      end
       if matches.empty?
         # Compiler-generated methods (`Proc#call`, enum `red?`, number
         # primitives): no declaration, but the inferred result type.
@@ -433,6 +436,40 @@ class method: `self` is `" << owner << ".class`"
         end
       end
       {md, call.name_range.not_nil!}
+    end
+
+    # Hover text of a C binding declaration (`fun`, `$var`, lib struct or
+    # union field) in *owner*; nil for anything else. *ret*: the type at
+    # the use, when known.
+    def c_decl_markdown(site : Semantics::Site, owner : Semantics::TypeId, ret : Types::TyId? = nil) : String?
+      item = site.item
+      return nil unless item.kind.fun? || item.kind.c_var? || item.kind.c_field?
+      full = @typing.def_map[owner].full_name
+      String.build do |io|
+        io << "```crystal\n"
+        case item.kind
+        when .fun?
+          io << "fun " << full << '.' << item.name
+          sig = item.signature
+          io << sig if sig
+          if real = sig.try(&.real_name)
+            io << "\n```\n\nC name: `" << real.strip('"') << '`'
+          else
+            io << "\n```"
+          end
+        when .c_var?
+          io << full << "." << item.name.lchop('$') << " : " << item.detail << "\n```\n\nC global variable `$" << item.name.lchop('$') << '`'
+        else
+          io << full << '#' << item.name << " : " << item.detail << "\n```\n\n"
+          io << (@typing.def_map[owner].kind.c_union? ? "union field" : "struct field")
+        end
+        if ret && !table.unknown?(ret) && item.kind.fun?
+          io << "\n\n→ `" << table.to_s(ret) << '`'
+        end
+        if doc = item.doc
+          io << "\n\n" << doc
+        end
+      end
     end
 
     def method_definitions(offset : UInt32) : Array(Semantics::Site)

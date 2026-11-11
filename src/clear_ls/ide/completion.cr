@@ -374,6 +374,12 @@ module ClearLS::IDE
     def method_items(recv_t : Types::TyId, prefix : String) : Array(CompletionItem)
       table = @typing.table
       map = @typing.def_map
+      if lib_id = lib_receiver(recv_t)
+        return c_member_items(lib_id, prefix, true)
+      end
+      if cs = c_struct_receiver(recv_t)
+        return c_member_items(cs, prefix, false)
+      end
       by_name = {} of String => {Array(Semantics::Site), Int32}
       depth_of = {} of String => Int32
       table.members(recv_t).each do |member|
@@ -438,6 +444,45 @@ module ClearLS::IDE
           nullary: sites.any? { |s| s.item.signature.try(&.params.none? { |p| p.kind.positional? || p.kind.splat? }) || false },
           block_site: sites.all? { |s| s.item.signature.try(&.params.any?(&.kind.block?)) || false } ? first : nil)
       end.sort_by!(&.sort_text.not_nil!).first(MAX_ITEMS)
+    end
+
+    # `LibX` (metaclass of a lib) as a receiver.
+    private def lib_receiver(recv_t : Types::TyId) : Semantics::TypeId?
+      t = @typing.table[recv_t]
+      return nil unless t.kind.metaclass?
+      inst = @typing.table[t.args[0]]
+      id = inst.def_id || return nil
+      inst.kind.named? && @typing.def_map[id].kind.lib? ? id : nil
+    end
+
+    # A lib struct/union value as a receiver.
+    private def c_struct_receiver(recv_t : Types::TyId) : Semantics::TypeId?
+      t = @typing.table[recv_t]
+      id = t.def_id || return nil
+      k = @typing.def_map[id].kind
+      t.kind.named? && (k.c_struct? || k.c_union?) ? id : nil
+    end
+
+    # Funs and `$var`s of a lib, or fields of a lib struct/union. No
+    # `new` and no Object methods: a lib has none, and a C struct's
+    # fields are what is reached through `.`.
+    private def c_member_items(owner : Semantics::TypeId, prefix : String, of_lib : Bool) : Array(CompletionItem)
+      map = @typing.def_map
+      ti = TypeInfo.new(@state, Bodies.new(@state), @typing)
+      items = [] of CompletionItem
+      map[owner].members.each do |name, sites|
+        next unless name.starts_with?(prefix)
+        site = sites.find { |s| of_lib ? (s.item.kind.fun? || s.item.kind.c_var?) : s.item.kind.c_field? } || next
+        item = site.item
+        kind, detail = case item.kind
+                       when .fun?   then {CompletionKind::Function, "#{name}#{item.signature}"}
+                       when .c_var? then {CompletionKind::Variable, "#{name} : #{item.detail}"}
+                       else              {CompletionKind::Field, "#{name} : #{item.detail}"}
+                       end
+        doc = ti.c_decl_markdown(site, owner)
+        items << CompletionItem.new(name, kind, detail: detail, documentation: doc, sort_text: "0#{name}")
+      end
+      items.sort_by!(&.label).first(MAX_ITEMS)
     end
 
     # Base types whose methods every value has; listed after the receiver's

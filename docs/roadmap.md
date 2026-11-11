@@ -2622,6 +2622,26 @@ Steps (one commit each; pause at the end of each):
    completion after `LibX.`. Specs on the fixture's shapes
    (reopened lib, variadic, `out`, proc param, enum return, real
    name).
+
+   *Done:* `Infer#lib_member_call` records the fun / `$var` / field it
+   matched as the call's resolution (`Unique`, `record_c_target`), so
+   `call_at`, `CallFact` targets and signature help see it like a
+   method; inference results are unchanged (types dump: 0 changes on
+   repo and stdlib). `TypeInfo#c_decl_markdown`: `fun LibM.cos(x :
+   Float64) : Float64` (+ `C name: `open`` for `fun a = "open"`, the
+   type at the use, the doc), `LibM.errno : Int32` (C global
+   variable `$errno`), `LibM::Point#x : Int32` (struct/union field).
+   `References.callable?` adds funs, `$var`s and fields as declaration
+   targets; references and rename of a field or `$var` include its
+   setter uses (`pt.y = 3`). Signature help shows `, ...` for variadic
+   funs. Completion after `LibM.` lists only its funs and `$var`s
+   (function/variable kinds), after a lib struct/union value only its
+   fields (no `new`, no Object methods). On `grammar.cr`:
+   `tree_sitter_crystal`, `ts_language_abi_version`,
+   `ts_language_symbol_count` hover and navigate; `ts_language_symbol_name`
+   still doesn't (its `self` parameter, Phase 19), nor `LibC.free`
+   inside `{% if %}` (macro bodies in HIR, not approved). Specs: 6 more
+   in `features_phase18_spec.cr` (8). `make spec` 406 examples.
 3. **Declaration hover (R3).** `fun` name, `$var`, field.
 4. **Pseudo types and methods (R4).** Hover for `Void`, `NoReturn`,
    `sizeof` & co.; `Pointer(Void)` in hovers and hints.

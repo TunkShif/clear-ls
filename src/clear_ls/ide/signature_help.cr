@@ -105,6 +105,11 @@ module ClearLS::IDE
           p.to_s(io)
           params << ParameterInfo.new({start, io.bytesize}, nil)
         end
+        # `fun printf(fmt : Char*, ...)`: C variadic arguments.
+        if sig.try(&.variadic)
+          io << ", " unless sig.try(&.params.empty?)
+          io << "..."
+        end
         io << ')'
         if (rt = sig.try(&.return_type))
           io << " : " << rt

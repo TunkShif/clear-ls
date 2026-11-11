@@ -110,6 +110,13 @@ module ClearLS::IDE
     # program); over it the search fails clearly instead of running on.
     property max_candidates = 2000
 
+    # Declarations that calls name: defs, macros, and C bindings (`fun`,
+    # `$var`, lib struct/union fields; `Infer#lib_member_call`).
+    def self.callable?(item : Items::Item) : Bool
+      k = item.kind
+      k.def? || k.macro? || k.fun? || k.c_var? || k.c_field?
+    end
+
     def target_at(ctx : Context, offset : UInt32) : RefTarget?
       t = ivar_target(ctx, offset) || method_target(ctx, offset) || path_target(ctx, offset)
       accessor_target(ctx, offset, t) || t
@@ -392,7 +399,7 @@ module ClearLS::IDE
       map = ctx.typing.def_map
       ns = map.namespace_at(ctx.state.id, offset)
       map[ns].each_member_site do |site|
-        next unless site.file == ctx.state.id && (site.item.kind.def? || site.item.kind.macro?)
+        next unless site.file == ctx.state.id && References.callable?(site.item)
         return true if site.item.name_range.touches?(offset)
       end
       false
@@ -449,7 +456,7 @@ module ClearLS::IDE
       ns = map.namespace_at(ctx.state.id, offset)
       map[ns].each_member_site do |site|
         next unless site.file == ctx.state.id
-        next unless site.item.kind.def? || site.item.kind.macro?
+        next unless References.callable?(site.item)
         if site.item.name_range.touches?(offset)
           return MethodTarget.new(site.item.name, [site], ns)
         end
@@ -525,7 +532,10 @@ module ClearLS::IDE
         next unless seen_bodies.add?(body.range.start)
         @checkpoint.call("", nil) if seen_bodies.size > 1
         _, calls = ctx.typing.call_facts(ctx.state, ctx.bodies, off) || next
-        calls[target.name]?.try &.each do |c|
+        # A C field or `$var` is both read (`s.x`) and written (`s.x = v`).
+        names = [target.name]
+        names << "#{target.name}=" if target.sites.any? { |st| st.item.kind.c_field? || st.item.kind.c_var? }
+        names.flat_map { |n| calls[n]? || [] of Typing::CallFact }.each do |c|
           if c.resolved && !c.targets.empty?
             next unless c.targets.any? { |t| keys.includes?(t) }
             exact = c.kind.unique? || c.kind.multiple_runtime_targets? || c.targets.all? { |t| keys.includes?(t) }

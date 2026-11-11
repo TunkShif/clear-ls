@@ -1870,7 +1870,9 @@ module ClearLS::Types
     # `$var`, and `struct.field` / `struct.field = v` on lib structs and
     # unions the field type. Arguments are not checked: C calls convert
     # them implicitly (`to_unsafe`, numbers), and only the name and the
-    # arity matter (variadic funs take any extra).
+    # arity matter (variadic funs take any extra). The declaration is
+    # recorded as the call's resolution (Unique), so navigation, hover,
+    # references and rename treat it like a method.
     private def lib_member_call(recv : TyId?, name : String, e : HIR::Expr) : TyId?
       r = @table[recv || return nil]
       if r.kind.metaclass? && (lt = @table[r.args[0]]).kind.named?
@@ -1892,9 +1894,11 @@ module ClearLS::Types
               elem = pt && pt.kind.named? && map[pt.def_id.not_nil!].full_name == "Pointer" ? pt.args[0]? : nil
               write_target(tgt, elem || @table.unknown)
             end
+            record_c_target(e, site, lib_id, recv.not_nil!)
             ret = sig.return_type || return nil_t
             return ret == "Void" ? nil_t : c_type(ret, lib_id)
           when .c_var?
+            record_c_target(e, site, lib_id, recv.not_nil!)
             return c_type(item.detail || next, lib_id)
           end
         end
@@ -1907,10 +1911,21 @@ module ClearLS::Types
         base = name.rchop('=')
         info.members[base]?.try &.each do |site|
           next unless site.item.kind.c_field?
+          record_c_target(e, site, owner, recv.not_nil!)
           return c_type(site.item.detail || next, info.namespace || owner)
         end
       end
       nil
+    end
+
+    # A C call's declaration as its (unique) resolution.
+    private def record_c_target(e : HIR::Expr, site : Semantics::Site, owner : Semantics::TypeId, self_t : TyId) : Nil
+      m = MethodMatch.new(site, owner, {} of String => TyId)
+      n = e.children.size
+      arg_params = Array(Int32?).new(n) { |i| i.as(Int32?) }
+      c = CallCandidate.new(m, self_t, arg_params, Array(Int32?).new, Compatibility::Compatible)
+      c.compat = Compatibility::Compatible
+      @resolutions[e.id] = CallResolution.new(ResolutionKind::Unique, [c], [m])
     end
 
     # A type written inside a lib (`Point*`, `Size`, `Int32 -> Int32`).
