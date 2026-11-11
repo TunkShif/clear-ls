@@ -76,3 +76,55 @@ describe "phase 19 grammar: short-block assignment (A2)" do
     end
   end
 end
+
+describe "phase 19 grammar: keywords as accessor names (A3)" do
+  src = <<-CR
+    struct Span(B, E)
+      getter begin : B
+      getter end : E
+      getter? select : Bool = true
+      property ensure : Int32? = nil
+
+      def initialize(@begin : B, @end : E)
+      end
+    end
+
+    record Pair, begin : Int32, end : Int32
+
+    class After
+      def later; end
+    end
+
+    def run(s : Span(Int32, String), p : Pair)
+      a = s.begin
+      b = s.end
+      c = p.begin
+    end
+    CR
+
+  it "lowers the accessors and keeps what follows" do
+    tree = Syntax::Parser.new.parse(src)
+    tree.root.has_error?.should be_false
+    items = Items::Lower.lower(tree)
+    span = items.items.find! { |i| i.name == "Span" }
+    names = span.children.select(&.kind.def?).map(&.name)
+    names.should contain("begin")
+    names.should contain("end")
+    names.should contain("select?")
+    names.should contain("ensure=")
+    span.children.find! { |i| i.name == "begin" }.name_range.should eq TextRange.new(src.index!("begin : B").to_u32, src.index!("begin : B").to_u32 + 5)
+    pair = items.items.find! { |i| i.name == "Pair" }
+    pair.children.select(&.kind.def?).map(&.name).should eq ["initialize", "begin", "end"]
+    items.items.map(&.name).should contain("After")
+  end
+
+  it "types and navigates calls of keyword-named accessors" do
+    with_client({"src/app.cr" => src}, PRELUDE_FILES) do |c|
+      c.open("src/app.cr")
+      p19_hover(c, "a = ").not_nil!.should start_with("```crystal\na : Int32\n```")
+      p19_hover(c, "b = ").not_nil!.should start_with("```crystal\nb : String\n```")
+      p19_hover(c, "c = ").not_nil!.should start_with("```crystal\nc : Int32\n```")
+      p19_defs(c, "begin\n  b =").should eq [2]
+    end
+  end
+end

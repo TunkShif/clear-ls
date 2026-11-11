@@ -17,7 +17,10 @@ neither: `src/parser.c` is committed in the grammar repository).
 2. In `../tree-sitter-crystal` (branch `clear-ls`): edit `grammar.js`
    (or `src/scanner.c`), add a corpus case under `test/corpus/`, then
    `tree-sitter generate` (~35 s) and `tree-sitter test` (all pass);
-   commit grammar, generated `src/` and the test together.
+   commit grammar, generated `src/` and the test together. The CLI caches
+   the compiled parser in `~/.cache/tree-sitter/lib/crystal.so` per
+   grammar name, not path: pass `-r` (the make targets do) when switching
+   checkouts.
 3. Here: `GRAMMAR_REV` to the new commit, `make grammar-update` (fetches
    it into `vendor/`, rebuilds the archive), `make` relinks.
 4. `make syntax-gen`; review the `kinds.cr` diff (a renamed or removed
@@ -41,7 +44,6 @@ which 1.22.1/1.22.2 changed to use a setter call in a short block (below).
 
 | Construct | Example (stdlib location) |
 |---|---|
-| Keyword as accessor name | `getter begin : B` (`range.cr`), `property end : Bool` (`compiler/crystal/codegen/crystal_llvm_builder.cr`) |
 | Short block with index-query | `filters1.try(&.pos[name]?)` (`semantic/filters.cr`) |
 | Underscore block-call argument | `each_abbrev(bytes, _) do \|abbrev\|` (`crystal/dwarf/abbrev.cr`) |
 | Unnamed proc-type `fun` parameter | `fun BIO_meth_set_create(BioMethod*, (Bio*) -> Int)` (`openssl/lib_crypto.cr`) |

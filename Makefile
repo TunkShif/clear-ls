@@ -27,7 +27,7 @@ TREE_SITTER_REV ?= v0.26.9
 # Until the remote fork exists, the repository is a local clone next to
 # this one; override GRAMMAR_REPO to build elsewhere.
 GRAMMAR_REPO ?= $(abspath ../tree-sitter-crystal)
-GRAMMAR_REV ?= 37c0a06be8d28f8cbd347ce6fc16c28195cdf9ff
+GRAMMAR_REV ?= 6aa6b29f5b90a9ed3cf93a244dde01b37cfaa584
 
 ROOT := $(abspath .)
 VENDOR := $(ROOT)/vendor
@@ -136,7 +136,7 @@ STDLIB := $(shell $(CRYSTAL) env CRYSTAL_PATH 2>/dev/null | tr ':' '\n' | grep -
 grammar-check: | $(GRAMMAR_DIR)
 	@mkdir -p $(BUILD)
 	@find $(STDLIB) -name '*.cr' | sort > $(BUILD)/stdlib-files.txt
-	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) parse -q -s --paths $(BUILD)/stdlib-files.txt 2>&1 | \
+	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) parse -r -q -s --paths $(BUILD)/stdlib-files.txt 2>&1 | \
 	  sed 's|$(STDLIB)/||' | grep -E 'ERROR|MISSING|Total parses' || true
 
 # lib/ (shards) and the external projects of tools/external.sh.
@@ -145,11 +145,11 @@ EXTERNAL := $(wildcard tools/external/marten/src tools/external/athena/src)
 grammar-check-ext: | $(GRAMMAR_DIR)
 	@mkdir -p $(BUILD)
 	@find -L lib $(EXTERNAL) -name '*.cr' | sed 's|^|$(ROOT)/|' | sort > $(BUILD)/external-files.txt
-	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) parse -q -s --paths $(BUILD)/external-files.txt 2>&1 | \
+	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) parse -r -q -s --paths $(BUILD)/external-files.txt 2>&1 | \
 	  sed 's|$(ROOT)/||' | grep -E 'ERROR|MISSING|Total parses' || true
 
 grammar-test: | $(GRAMMAR_DIR)
-	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) test 2>&1 | grep -E 'Total parses|✗|failure' || true
+	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) test -r 2>&1 | grep -E 'Total parses|✗|failure' || true
 
 syntax-gen: | $(GRAMMAR_DIR)
 	$(CRYSTAL) run tools/gen_syntax.cr -- $(GRAMMAR_DIR)/src/node-types.json src/clear_ls/syntax/kinds.cr

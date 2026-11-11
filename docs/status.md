@@ -52,9 +52,9 @@ stops mid-phase). History and per-phase details are in
   compiler-defined constants, `:ditto:`/`:inherit:`/`:nodoc:` docs,
   generic args from class-method calls, named args to `@ivar` params
   ([roadmap.md](roadmap.md#phase-21--constant-hover-compiler-constants-doc-directives-generic-class-methods)).
-- **In progress:** Phase 19 steps 1–3 done (own grammar pinned, coverage
-  gate; `self` fun params; short-block assignment); next: step 4 (A3
-  keyword accessor names). Phases 16–19 on `dev/next`,
+- **In progress:** Phase 19 steps 1–4 done (own grammar pinned, coverage
+  gate; `self` fun params; short-block assignment; keyword accessor
+  names); next: step 5 (A4 `#` in regex). Phases 16–19 on `dev/next`,
   not merged into `main`.
 
 ## Resume

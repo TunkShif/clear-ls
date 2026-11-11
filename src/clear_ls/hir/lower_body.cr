@@ -370,9 +370,14 @@ module ClearLS::HIR
       type = node.field_text(Syntax::Field::Type)
       kids = value ? [value] : [] of ExprId
       if var && var.kind.identifier?
-        b = lookup(var.text) || declare(var.text, BindingKind::TypeDecl, node.range, var.range, type)
-        record_ref(b, var.range, RefKind::Write) unless binding(b).name_range == var.range
-        add(ExprKind::TypeDecl, node.range, name: var.text, name_range: var.range, binding: b, children: kids)
+        # A keyword name (`foo begin : T`) is one token with its ` : `.
+        vtext, vrange = var.text, var.range
+        if vtext.ends_with?(' ') && (kw = vtext[/\A[a-z_]+/]?)
+          vtext, vrange = kw, TextRange.new(var.start_byte, var.start_byte + kw.bytesize.to_u32)
+        end
+        b = lookup(vtext) || declare(vtext, BindingKind::TypeDecl, node.range, vrange, type)
+        record_ref(b, vrange, RefKind::Write) unless binding(b).name_range == vrange
+        add(ExprKind::TypeDecl, node.range, name: vtext, name_range: vrange, binding: b, children: kids)
       else
         add(ExprKind::TypeDecl, node.range, name: var.try(&.text), name_range: var.try(&.range), children: kids)
       end

@@ -2907,6 +2907,42 @@ Steps (one commit each in this repository; grammar commits on
 4. **A3 keyword accessor names.** Grammar + corpus; clear-ls: `Range`'s
    `begin`/`end` accessors appear in items (stdlib `range.cr` parses),
    completion `r.be` → `begin`.
+
+   *Done:* grammar `6aa6b29 feat: keywords as accessor names`: a new
+   `keyword_type_declaration` (aliased `type_declaration`) in call
+   argument lists (all six `args` choices): one token
+   `<keyword>[ \t]+:[ \t]` for 30 keywords (`begin end else elsif
+   ensure rescue then when in do case select if unless while until with
+   yield self true false nil asm typeof sizeof instance_sizeof alignof
+   instance_alignof pointerof offsetof`; the compiler rejects `as`,
+   `is_a?`, `nil?`, `out`, `responds_to?` there), then the type and an
+   optional `= value`. Measured first which keywords failed: 34 of 63
+   (the rest already parsed as identifiers). `if`/`unless`/`rescue`/
+   `ensure` are external-scanner keywords: the scanner now yields (no
+   token) when such a keyword is followed by ` : `, with `mark_end` at
+   the keyword so a "no" leaves the keyword token unchanged (a first
+   try without it broke `if ::File...` in 11 files). Two-token
+   variants (keyword alone, separator apart) were tried and dropped:
+   the plain keyword string conflicts with every statement keyword, and
+   a scanner-emitted keyword token collides with the scanner's own
+   keyword handling. Consequence: the `var` node's text is `begin : `
+   (keyword plus separator); clear-ls trims it (`Lower#name_of` for
+   accessors and records, `LowerBody#lower_type_decl`). Corpus: todo
+   case moved to `statements.txt` ("keywords as accessor names");
+   "too many heredocs" (an `:error` test past the scanner's 16-heredoc
+   limit) recovers differently, expected tree updated (still an error).
+   `node-types.json` and `kinds.cr` unchanged. Coverage: stdlib 7 → 4
+   (`range.cr`, `syntax/ast.cr`, `crystal_llvm_builder.cr`), external
+   21 → 20. Types dump: stdlib +10 known (`Range#begin`/`#end` uses),
+   repo unchanged. `r.begin`/`r.end` hover `Range#begin() : B` → `Int32`
+   and go to `range.cr`.
+
+   Also fixed: `make grammar-check`, `grammar-check-ext` and
+   `grammar-test` ran the CLI's cached `~/.cache/tree-sitter/lib/
+   crystal.so`, built from whichever checkout compiled it last; now
+   `-r` (rebuild). Earlier step results were re-checked from clean
+   worktrees (557ee42: 11/28, f6381f4: 11/27, 37c0a06: 7/21): correct.
+   Specs: 2 more (5). `make spec` 420 examples. 0.18.5.
 5. **A4 regex `#`.** Try the grammar route once more; if it needs the
    scanner, do the smallest scanner change (regex body like percent
    literals) only if it stays local, else move it to C with notes.

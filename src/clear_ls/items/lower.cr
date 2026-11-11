@@ -386,26 +386,27 @@ module ClearLS::Items
         args.each do |arg|
           name_node, type, default = accessor_target(arg)
           next unless name_node
-          name = name_node.kind.string_node? ? string_value(name_node) : name_node.text.lchop(':')
+          name, name_range = name_of(name_node)
+          name = name_node.kind.string_node? ? string_value(name_node) : name.lchop(':')
           receiver = class_level ? "self" : nil
           if spec[:getter]
             # `getter! x : T` defines `x : T` (raises on nil) and `x? : T?`.
             getters = spec[:suffix] == "!" ? [{name, type}, {name + "?", type.try { |t| "#{t}?" }}] : [{name + spec[:suffix], type}]
             getters.each do |(gname, gtype)|
               sig = Signature.new([] of Param, gtype, [] of String, receiver, false, false, nil)
-              dest << Item.new(ItemKind::Def, gname, node.range, name_node.range,
+              dest << Item.new(ItemKind::Def, gname, node.range, name_range,
                 visibility: vis, origin: Origin::Macro, doc: doc_for(node), conditions: @conds.dup, signature: sig)
             end
           end
           if spec[:setter]
-            param = Param.new(ParamKind::Positional, name, nil, type, nil, name_node.range)
+            param = Param.new(ParamKind::Positional, name, nil, type, nil, name_range)
             sig = Signature.new([param], nil, [] of String, receiver, false, false, nil)
-            dest << Item.new(ItemKind::Def, name + "=", node.range, name_node.range,
+            dest << Item.new(ItemKind::Def, name + "=", node.range, name_range,
               visibility: vis, origin: Origin::Macro, doc: doc_for(node), conditions: @conds.dup, signature: sig)
           end
           if owner
             ivar = (class_level ? "@@" : "@") + name
-            dest << Item.new(class_level ? ItemKind::ClassVar : ItemKind::InstanceVar, ivar, node.range, name_node.range,
+            dest << Item.new(class_level ? ItemKind::ClassVar : ItemKind::InstanceVar, ivar, node.range, name_range,
               visibility: vis, origin: Origin::Macro, conditions: @conds.dup, detail: type || default)
           end
         end
@@ -415,6 +416,15 @@ module ClearLS::Items
     end
 
     # `getter x`, `getter x : T`, `getter x = v`, `getter x : T = v`, `getter :x`.
+    # Text and range of an accessor's name node. A keyword name (`getter
+    # begin : B`) is one grammar token with its ` : ` separator; drop it.
+    private def name_of(node : Syntax::Node) : {String, TextRange}
+      text = node.text
+      return {text, node.range} unless node.kind.identifier? && text.ends_with?(' ') && text.includes?(':')
+      name = text[/\A[a-z_]+/]? || text
+      {name, TextRange.new(node.start_byte, node.start_byte + name.bytesize.to_u32)}
+    end
+
     private def accessor_target(arg : Syntax::Node) : {Syntax::Node?, String?, String?}
       case arg.kind
       when .identifier?, .symbol_node?, .string_node?
@@ -436,11 +446,11 @@ module ClearLS::Items
       fields.each do |f|
         name_node2, type, default = accessor_target(f)
         next unless name_node2
-        name = name_node2.text
+        name, name_range2 = name_of(name_node2)
         params << Param.new(ParamKind::Positional, name, nil, type, default, f.range)
         sig = Signature.new([] of Param, type, [] of String, nil, false, false, nil)
-        rec.children << Item.new(ItemKind::Def, name, f.range, name_node2.range, origin: Origin::Macro, signature: sig)
-        rec.children << Item.new(ItemKind::InstanceVar, "@#{name}", f.range, name_node2.range, origin: Origin::Macro, detail: type || default)
+        rec.children << Item.new(ItemKind::Def, name, f.range, name_range2, origin: Origin::Macro, signature: sig)
+        rec.children << Item.new(ItemKind::InstanceVar, "@#{name}", f.range, name_range2, origin: Origin::Macro, detail: type || default)
       end
       init = Signature.new(params, nil, [] of String, nil, false, false, nil)
       rec.children.unshift Item.new(ItemKind::Def, "initialize", node.range, name_node.range, origin: Origin::Macro, signature: init)
