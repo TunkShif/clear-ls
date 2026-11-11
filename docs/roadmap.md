@@ -2643,6 +2643,14 @@ Steps (one commit each; pause at the end of each):
    inside `{% if %}` (macro bodies in HIR, not approved). Specs: 6 more
    in `features_phase18_spec.cr` (8). `make spec` 406 examples.
 3. **Declaration hover (R3).** `fun` name, `$var`, field.
+
+   *Done:* `TypeInfo#c_decl_hover` (before `decl_param_hover` in the
+   hover chain): on a `fun` name, a `$var` or a lib struct/union field
+   name (each name of `a, b : T`), the text uses show
+   (`c_decl_markdown`), without the use's type. `decl_param_hover`
+   also takes `fun_param` (`fun f(x : T)`); bare-type params
+   (`fun f(T*)`) have no name to hover. On `grammar.cr`: the two `fun`
+   declarations hover. Specs: 2 more (10). `make spec` 408 examples.
 4. **Pseudo types and methods (R4).** Hover for `Void`, `NoReturn`,
    `sizeof` & co.; `Pointer(Void)` in hovers and hints.
 5. **Verification and docs.** Neovim check with a lib fixture; a

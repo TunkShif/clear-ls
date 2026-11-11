@@ -347,7 +347,7 @@ the current instance"
     def decl_param_hover(offset : UInt32) : {String, TextRange}?
       node = @state.tree.root.descendant(offset, offset, named: true) || return nil
       param = node.parent || return nil
-      return nil unless param.kind.param? && param.field(Syntax::Field::Name) == node
+      return nil unless (param.kind.param? || param.kind.fun_param?) && param.field(Syntax::Field::Name) == node
       d = param.parent.try(&.parent) || return nil
       return nil unless d.kind.abstract_method_def? || d.kind.macro_def? || d.kind.fun_def?
       type = param.field_text(Syntax::Field::Type)
@@ -436,6 +436,19 @@ class method: `self` is `" << owner << ".class`"
         end
       end
       {md, call.name_range.not_nil!}
+    end
+
+    # On the name in a C binding declaration (`fun cos`, `$errno`, a lib
+    # struct/union field): the same text as at its uses.
+    def c_decl_hover(offset : UInt32) : {String, TextRange}?
+      map = @typing.def_map
+      ns = map.namespace_at(@state.id, offset)
+      map[ns].each_member_site do |site|
+        next unless site.file == @state.id && site.item.name_range.touches?(offset)
+        md = c_decl_markdown(site, ns) || next
+        return {md, site.item.name_range}
+      end
+      nil
     end
 
     # Hover text of a C binding declaration (`fun`, `$var`, lib struct or

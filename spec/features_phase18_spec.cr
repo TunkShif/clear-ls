@@ -189,3 +189,25 @@ describe "phase 18 C calls navigate like methods" do
     ffi_complete("  pt.").should eq [{"x", 5_i64, "x : Int32"}, {"y", 5_i64, "y : Int32"}]
   end
 end
+
+describe "phase 18 C declaration hover" do
+  it "hovers fun, global and field names where they are declared" do
+    src = FFI["src/app.cr"].sub("    x : Int32\n", "    x, z : Int32\n")
+    with_client({"src/app.cr" => src}, STD) do |c|
+      c.open("src/app.cr")
+      ffi_hover(c, "cos(x").not_nil!.should eq "```crystal\nfun LibM.cos(x : Float64) : Float64\n```\n\nCosine."
+      ffi_hover(c, "my_open =").not_nil!.should contain("C name: `open`")
+      ffi_hover(c, "errno : Int32").not_nil!.should eq "```crystal\nLibM.errno : Int32\n```\n\nC global variable `$errno`"
+      ffi_hover(c, "z : Int32").not_nil!.should eq "```crystal\nLibM::Point#z : Int32\n```\n\nstruct field"
+      ffi_hover(c, "x, z").not_nil!.should eq "```crystal\nLibM::Point#x : Int32\n```\n\nstruct field"
+    end
+  end
+
+  it "hovers fun parameters" do
+    with_client(FFI, STD) do |c|
+      c.open("src/app.cr")
+      ffi_hover(c, "x : Float64) : Float64\n  fun printf").not_nil!.should eq "```crystal\nx : Float64\n```\n\nparameter"
+      ffi_hover(c, "flags").not_nil!.should eq "```crystal\nflags : Int32\n```\n\nparameter"
+    end
+  end
+end

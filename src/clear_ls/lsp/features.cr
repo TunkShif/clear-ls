@@ -193,7 +193,7 @@ module ClearLS::LSP
         md = add_compiler_type(state, off, md)
         return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
       end
-      if hit = ti.var_hover(off) || ti.self_hover(off) || ti.def_hover(off) || ti.decl_param_hover(off) || ti.literal_hover(off) || ti.key_or_op_hover(off) || ti.method_hover(off)
+      if hit = ti.var_hover(off) || ti.self_hover(off) || ti.def_hover(off) || ti.c_decl_hover(off) || ti.decl_param_hover(off) || ti.literal_hover(off) || ti.key_or_op_hover(off) || ti.method_hover(off)
         md, r = hit
         return {contents: {kind: "markdown", value: md}, range: range_json(state, r)}
       end
