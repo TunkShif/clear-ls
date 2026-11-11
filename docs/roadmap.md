@@ -2581,14 +2581,11 @@ fields; inference types C calls by name and arity
 
 **Undecided (needs approval):**
 
-- `{% if flag?(…) %}` inside def bodies (R6): body HIR treats
-  `macro_content` as opaque, so `LibC.free(ptr)` in
-  `Syntax.free_native` has no hover. Items already reparse macro
-  bodies with `parse_ranges`; bodies would need the same. Not
-  specific to C bindings.
-- `asm(…)` hover: the operand layout (`template : outputs : inputs
-  : clobbers : options`, `::` for no outputs) and which section the
-  cursor is in. Keywords are not hover targets today.
+- `{% if flag?(…) %}` inside def bodies (R6): **moved to Phase 20**
+  (level A: plain branches only).
+- `asm(…)` hover: **decided, not done.** `docs_pseudo_methods.cr` has no
+  `asm` entry (the parser alone handles it), so it stays an ordinary
+  keyword without hover, like `while` or `begin`.
 
 Steps (one commit each; pause at the end of each):
 
@@ -2710,6 +2707,59 @@ steps yet):
 - Gate: `make grammar-check` must not lose files, grammar corpus
   tests run in CI, `kinds.cr` regenerated and the Kind/Field
   renames handled.
+
+### Phase 20 — `{% if %}` inside method bodies
+
+Planned for later (decided after Phase 18's review; order relative to
+Phase 19 open). Not specific to C bindings.
+
+**Today (0.17.2):** declaration-level `{% if/unless %}` branches are
+reparsed and lowered under their condition (`Items::Lower`), but in a
+method body every macro node is one opaque `Missing` expression
+(`HIR::LowerBody`): no locals, calls, hover or definition inside, e.g.
+`LibC.free(ptr)` in `Syntax.free_native`. Compiler facts don't help:
+they report methods and ivars, not calls in bodies.
+
+**Measured** (method bodies, not `macro` defs; stdlib without
+`compiler/` and `spec/`, clear-ls `src`, Marten, Athena components):
+
+| | stdlib | clear-ls | Marten | Athena |
+|---|---|---|---|---|
+| `{% if/unless %}` | 371 | 5 | 2 | 46 |
+| branches plain Crystal text | 310 | 4 | 2 | 35 |
+| … that parse alone | 310 | 4 | 2 | 35 |
+| `flag?`-only condition | 185 | 3 | 1 | 2 |
+| a branch with `{{ }}` | 9 | 0 | 0 | 7 |
+| a branch with `{% for %}` / `{% %}` / nested `{% if %}` | 52 | 1 | 0 | 4 |
+| `{% for %}` in a body | 50 | 1 | 4 | 6 |
+| `{{ }}` directly in body code | 114 | 0 | 2 | 12 |
+
+**Scope (level A):** branches of `{% if/unless/elsif/else %}` made of
+`macro_content` only. Out of scope: a branch holding `{{ }}`, `{% for %}`
+or a `{% %}` statement (stays opaque, as today); `{% for %}` and `{{ }}`
+in bodies (their output needs macro evaluation with type information:
+compiler territory). Placeholder substitution for `{{ }}` was rejected:
+an interpolation can be a name, a type, a statement or part of an
+identifier, so any placeholder is a guess.
+
+**Design decisions:**
+
+1. Each plain branch's `macro_content` ranges are reparsed with
+   `parse_ranges` (as `Items::Lower#lower_macro_body`) and lowered as
+   code, so hover, definition, references and rename work in every
+   branch, the inactive ones (`win32` on Linux) included.
+2. Type flow: with a `flag?`-only condition (`Items::Cond` evaluates to
+   true/false), the active branch flows like ordinary code and the
+   inactive ones are analysed but don't flow into what follows. With any
+   other condition (`T == Bool`, `compare_versions`, constants), each
+   branch is analysed as an alternative and none flows into what follows.
+3. Locals: one binding per name across branches; its type after the
+   `{% if %}` is the active branch's (flag case) or unchanged (other).
+
+Steps (to split before starting): HIR branch node and lowering; CFG and
+inference rules above; IDE features over the new nodes; verification
+(types dump over the stdlib: ~310 sites change, no regressions allowed;
+hover probe on `grammar.cr`'s `free_native`).
 
 ## Testing approach
 
