@@ -394,11 +394,11 @@ module ClearLS::HIR
         name += "=" if node.parent.try { |pp| pp.kind.assign? && pp.field(Syntax::Field::Lhs) == node }
       elsif node.kind.assign_call? && name
         name += "="
-      elsif node.kind.implicit_object_call? && name && (err = node.named_children.find(&.kind.error?)) &&
-            err.text.strip.ends_with?('=') && !err.text.strip.in?("==", "!=", "<=", ">=", "===", "=~")
-        # `&.name = v`, `&.name += v`: the grammar has no short-block
-        # assignment and leaves the operator as an ERROR node. The compiler
-        # calls the setter (`name=(v)`, `name=(name + v)`).
+      elsif node.kind.implicit_object_call? && name && (pp = node.parent) && (pp.kind.assign? || pp.kind.op_assign?) &&
+            pp.field(Syntax::Field::Lhs) == node
+        # `&.name = v`, `&.name += v` (grammar: assign / op_assign with an
+        # implicit_object_call lhs): the compiler calls the setter
+        # (`name=(v)`, `name=(name + v)`).
         name += "="
       end
       args = [] of ExprId
@@ -459,7 +459,11 @@ module ClearLS::HIR
     # (passes a proc; no block scope, the value is evaluated once).
     private def lower_block_argument(node : Syntax::Node) : ExprId
       inner = node.named_children.find { |c| !c.kind.comment? }
-      if inner && inner.kind.implicit_object_call?
+      # `&.x = v` / `&.x += v`: an assignment whose target is the implicit
+      # object call is a short block too.
+      short_assign = inner && (inner.kind.assign? || inner.kind.op_assign?) &&
+                     inner.field(Syntax::Field::Lhs).try(&.kind.implicit_object_call?)
+      if inner && (inner.kind.implicit_object_call? || short_assign)
         add(ExprKind::Block, node.range, syntax: Syntax::Kind::ImplicitObjectCall, children: [lower(inner)])
       else
         add(ExprKind::Block, node.range, syntax: Syntax::Kind::BlockArgument, children: inner ? [lower(inner)] : [] of ExprId)

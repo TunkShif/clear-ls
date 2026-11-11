@@ -2813,7 +2813,7 @@ first error it is):
 | Gap | Example | Effect in clear-ls | Fix location (expected) |
 |---|---|---|---|
 | A1 `self` as a `fun` param name | `fun f(self : T*, y : U)` | the fun's params lower wrong: `ts_language_symbol_name` and 37 more funs of the tree-sitter binding have no hover / call typing (Phase 18 step 5) | `grammar.js` `fun_param`: name may be `self` (probe: 1 line, corpus 245/245, no file lost) |
-| A2 short-block setter | `.tap &.keyword = k`, `&.flush=(true)`, `try &.driver_name = "x"` | an `ERROR` token in the call; clear-ls still finds the `driver_name` reference (recovered), but the call's shape (receiver, value) is lost: no value typing, block-form conversion refuses | `grammar.js` implicit-object call: allow `name=` assignment / call form after `&.` (stdlib 4, external 5) |
+| A2 short-block setter | `.tap &.keyword = k`, `&.flush=(true)`, `try &.driver_name = "x"` | an `ERROR` token in the call; clear-ls still finds the `driver_name` reference (recovered), but the call's shape (receiver, value) is lost: no value typing | `grammar.js` implicit-object call: allow `name=` assignment / call form after `&.` (stdlib 4, external 5) |
 | A3 keyword accessor names | `getter begin : B`, `property end : Bool`, `getter? select : Bool = true` | worse than the accessor alone: in a probe, `struct R; getter begin : Int32 = 0; getter size ...` lowered `R` with **no** members and lost everything after it in the file (the next `struct` and its defs), "recovered from parse errors". `Range#begin`/`#end` hover nothing | `grammar.js`: keywords accepted as the name in a type declaration that is a call argument (narrow: accessor-style `call name : T`), not #132's scanner route (stdlib 2, external 1) |
 | A4 regex with `#` | `/\A#<Foo:0x\h+>\z/`, `/a#b/` works, `/#</` doesn't | the regex swallows the rest of the line as a comment and never closes: in a probe, `def a` holding `x.should match /\\A#<A>\\z/` lost `a`, the following `def b` and a whole later `class After` from items ("recovered from parse errors"); Athena's `entity_manager_spec.cr` loses 83 lines | regex content: a lone `#` (not `#{`) is content. A token-level `#` didn't work in a probe (the `comment` extra still wins inside regex content), so this likely needs the regex body in the external scanner, which already lexes percent-literal bodies: **scanner** (external 1, plus any `#<` regex in user specs) |
 
@@ -2883,6 +2883,27 @@ Steps (one commit each in this repository; grammar commits on
 3. **A2 short-block setters.** Grammar + corpus cases (`&.x = v`,
    `&.x=(v)`, `&.x += v` if cheap); clear-ls: setter references /
    rename include these uses; block-form conversion.
+
+   *Done:* grammar `37c0a06 feat: short-block assignment &.x = v`:
+   `block_argument` also takes `implicit_object_assign` /
+   `implicit_object_operator_assign` (aliased `assign` / `op_assign`
+   with an `implicit_object_call` lhs, also chained `&.a.b = v`, and
+   `&.x=(v)`); comparisons (`&.a == b`, `<=`, `!=`, `=~`) unchanged; the
+   `todo.txt` `:error` case moved to `expressions.txt` (corpus 246/246).
+   `node-types.json`: `implicit_object_call` added to `assign`/`op_assign`
+   lhs; `kinds.cr` unchanged. clear-ls: `LowerBody#lower_block_argument`
+   treats such an assignment as a short block; the setter name
+   (`name=`) comes from the parent assign instead of the old `ERROR`
+   workaround; `Infer#implicit_receiver` skips the assign between the
+   call and the block; `setter_value` passes the assigned value. Now
+   `c.try &.name = "x"` hovers / goes to `Conn#name=` (was "built-in, no
+   source declaration"), `&.count += 1` resolves, references and rename
+   unchanged (they already found the use). Block-form conversion only
+   applies to `{}` / `do` blocks (not affected; plan text corrected).
+   Coverage: stdlib 11 → 7 (`semantic/exception.cr`, `syntax/parser.cr`,
+   `unix`/`wasi` `file_descriptor.cr`), external 27 → 21 (4 Athena,
+   2 Marten). Types dump: repo and stdlib unchanged. Specs: 2 more (3).
+   `make spec` 418 examples; Neovim checks unchanged. 0.18.4.
 4. **A3 keyword accessor names.** Grammar + corpus; clear-ls: `Range`'s
    `begin`/`end` accessors appear in items (stdlib `range.cr` parses),
    completion `r.be` → `begin`.

@@ -2198,6 +2198,12 @@ module ClearLS::Types
         parent_id = @parent[call.id]? || return nil
         parent = @body.expr(parent_id)
       end
+      # `&.a = v` / `&.a += v`: the assignment sits between the call (its
+      # target) and the block.
+      if (parent.kind.assign? || parent.kind.op_assign?) && parent.children[0]? == call.id
+        parent_id = @parent[parent_id]? || return nil
+        parent = @body.expr(parent_id)
+      end
       return nil unless parent.syntax.implicit_object_call?
       @implicit_args[parent_id]? || @table.unknown
     end
@@ -2283,7 +2289,8 @@ module ClearLS::Types
     end
 
     private def setter_value(call : HIR::Expr) : CallArg?
-      return nil unless call.syntax.assign_call? && call.children.empty?
+      # `x.name = v`, and `&.name = v` in a short block.
+      return nil unless (call.syntax.assign_call? || (call.syntax.implicit_object_call? && call.name.try(&.ends_with?('=')))) && call.children.empty?
       parent = @parent[call.id]? || return nil
       p = @body.expr(parent)
       return nil unless (p.kind.assign? || p.kind.op_assign?) && p.children[0]? == call.id
