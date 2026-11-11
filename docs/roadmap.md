@@ -2958,6 +2958,28 @@ without Node or the CLI; A1–A3 parse (A4 parses or is recorded in C);
 no stdlib or external file lost; no regressions (`make spec`, `make
 nvim-check`, `make verify-static`, types dump).
 
+### Fix round during Phase 19: type doc from a reopening (done)
+
+Report (reading `lsp/diagnostics.cr`): hover on `File` showed
+``class File < IO::FileDescriptor`` and `_6 declarations_`, no doc;
+the API docs show it. `file.cr` opens `class File < IO::FileDescriptor;
+end` doc-less on line 1, before its requires, and documents the
+reopening on line 7.
+
+Cause: `IDE::Analysis#hover` described only `sites.first`, header and
+doc. The compiler keeps the first doc it sees (`TopLevelVisitor#attach_doc`:
+`type.doc ||= node.doc`); `DefMap::TypeInfo#doc` (completion) already
+did.
+
+Fix: header from the first declaration, doc from the first that has
+one. `File` and `IO::FileDescriptor` (`io/console.cr` comes first) now
+show their docs; `Process` and `Int32` have none anywhere in the
+stdlib. `Crystal::System` now shows `:nodoc:` raw (its first doc):
+doc directives are Phase 21. Spec: `features_type_doc_spec.cr`. 0.18.6.
+
+Status: done. `make spec` 421 examples; every Neovim check passes;
+`File` hover checked in headless Neovim.
+
 ### Phase 20 — `{% if %}` inside method bodies
 
 Planned for later (decided after Phase 18's review; order relative to
@@ -3042,7 +3064,9 @@ file, compiler integration off.
   `sprintf "%s", "hi"; sprintf "%s", ["hi"]` resolves to
   `def sprintf(format_string, args : Array | Tuple)` whose doc is
   `:ditto:`; hover shows `:ditto:`. Only completion knows about
-  `:nodoc:` (`completion.cr`, hides internal methods).
+  `:nodoc:` (`completion.cr`, hides internal methods). Since 0.18.6
+  type hover takes the first doc of any reopening, so
+  `Crystal::System` hovers as `:nodoc:`.
 
 **Measured** (stdlib 1.22.0 without `compiler/`, doc comment lines):
 

@@ -41,6 +41,9 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** fix round after Phase 18 — bodies keyed by range (a
   file starting with `def` mixed up its file body and that def)
   ([roadmap.md](roadmap.md#fix-round-after-phase-18-bodies-keyed-by-range-done)).
+- **Also done:** fix round during Phase 19 — type hover takes the doc
+  from the first declaration that has one (`File`)
+  ([roadmap.md](roadmap.md#fix-round-during-phase-19-type-doc-from-a-reopening-done)).
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).

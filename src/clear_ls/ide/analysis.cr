@@ -233,7 +233,13 @@ module ClearLS::IDE
       end
       first = results.first? || return nil
       md = String.build do |io|
-        first[:sites].first(1).each { |s| describe(s.item, first[:full_name], io) }
+        # Header from the first declaration; doc from the first one that
+        # has a doc, like the compiler (`type.doc ||= node.doc`): `File`
+        # is first opened doc-less in file.cr, documented in a reopening.
+        if site = first[:sites].first?
+          doc = first[:sites].find(&.item.doc).try(&.item.doc)
+          describe(site.item, first[:full_name], io, doc)
+        end
         if first[:sites].size > 1
           io << "\n\n_" << first[:sites].size << " declarations_"
         end
@@ -326,7 +332,7 @@ module ClearLS::IDE
       HoverInfo.new(IDE::Annotations.markdown(b, site.item.doc), first[:range])
     end
 
-    private def describe(item : Items::Item, full_name : String, io : IO) : Nil
+    private def describe(item : Items::Item, full_name : String, io : IO, doc : String? = item.doc) : Nil
       io << "```crystal\n"
       io << item.visibility.to_s.downcase << ' ' unless item.visibility.public?
       case item.kind
@@ -344,7 +350,7 @@ module ClearLS::IDE
       else                  io << full_name
       end
       io << "\n```"
-      if doc = item.doc
+      if doc
         io << "\n\n" << doc
       end
     end
