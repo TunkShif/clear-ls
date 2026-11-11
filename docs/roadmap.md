@@ -2850,6 +2850,20 @@ Steps (one commit each in this repository; grammar commits on
    workflow (edit `grammar.js` → generate → test → commit in the clone
    → bump `GRAMMAR_REV` → `make distclean`-free refresh of `vendor/` →
    `syntax-gen` → specs). Patch bump (grammar pin).
+
+   *Done:* grammar `clear-ls` branch: `557ee42 chore: regenerate with
+   tree-sitter-cli 0.26.9` (`parser.c` banner, `tree_sitter/array.h`).
+   Makefile: `GRAMMAR_REPO` = `$(abspath ../tree-sitter-crystal)`,
+   `GRAMMAR_REV` = `557ee42…`; `grammar-update` (fetches the pinned commit
+   into the shallow `vendor/` clone, rebuilds the archive; `make`
+   relinks); `grammar-test`; `grammar-check-ext` over `lib/`,
+   `tools/external/marten/src`, `tools/external/athena/src` (Athena
+   `d6b704c` added to `tools/external.sh`, sources only).
+   `tools/grammar/coverage.sh save|check` (no-file-lost gate). Baseline:
+   corpus 245/245; stdlib 1635/1646 (11 failing); external 2040/2068 (28
+   failing: lib 25/25, Marten, Athena with tests). A fresh clone builds
+   from the local grammar. Notes (policy, workflow), development.md,
+   tools/README. `make spec` 415 examples. 0.18.2.
 2. **A1 `self` fun param.** Grammar + corpus case; clear-ls spec: a fun
    with a `self` param lowers with both params, hovers and types its
    call (`ts_language_symbol_name`).

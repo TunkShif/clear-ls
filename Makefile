@@ -5,6 +5,9 @@
 #   make spec       run specs
 #   make verify-static   check no dynamic Tree-sitter dependency
 #   make grammar-check   parse the Crystal stdlib, list grammar failures
+#   make grammar-check-ext   same for lib/ and tools/external (Marten, Athena)
+#   make grammar-test    run the grammar's corpus tests (tree-sitter test)
+#   make grammar-update  re-fetch vendor/tree-sitter-crystal at GRAMMAR_REV
 #   make syntax-gen      regenerate src/clear_ls/syntax/kinds.cr
 #   make probes          build analysis probes into bin/probes/ (tools/README.md)
 #   make nvim-check      headless Neovim checks against tools/fixtures/
@@ -19,8 +22,12 @@ TREE_SITTER_CLI ?= tree-sitter
 
 TREE_SITTER_REPO ?= https://github.com/tree-sitter/tree-sitter
 TREE_SITTER_REV ?= v0.26.9
-GRAMMAR_REPO ?= https://github.com/crystal-lang-tools/tree-sitter-crystal
-GRAMMAR_REV ?= 50ca9e6fcfb16a2cbcad59203cfd8ad650e25c49
+# clear-ls's own grammar (Phase 19): upstream crystal-lang-tools/
+# tree-sitter-crystal 50ca9e6 plus the commits on branch `clear-ls`.
+# Until the remote fork exists, the repository is a local clone next to
+# this one; override GRAMMAR_REPO to build elsewhere.
+GRAMMAR_REPO ?= $(abspath ../tree-sitter-crystal)
+GRAMMAR_REV ?= 557ee426cdf5c4308f9d51a0866a44de56112e4a
 
 ROOT := $(abspath .)
 VENDOR := $(ROOT)/vendor
@@ -47,7 +54,7 @@ export PKG_CONFIG_PATH := $(PC_DIR):$(PKG_CONFIG_PATH)
 
 SOURCES := $(shell find src -name '*.cr' 2>/dev/null)
 
-.PHONY: all build release deps spec verify-static grammar-check syntax-gen probes nvim-check clean distclean
+.PHONY: all build release deps spec verify-static grammar-check grammar-check-ext grammar-test grammar-update syntax-gen probes nvim-check clean distclean
 
 all: build
 
@@ -81,6 +88,16 @@ $(TS_DIR):
 $(GRAMMAR_DIR):
 	$(GIT) clone --quiet $(GRAMMAR_REPO) $@
 	$(GIT) -C $@ checkout --quiet $(GRAMMAR_REV)
+
+# After a GRAMMAR_REV bump: fetch and check out the pinned commit,
+# rebuild the grammar archive (then `make` relinks clear-ls).
+grammar-update:
+	@test -d $(GRAMMAR_DIR) || $(MAKE) $(GRAMMAR_DIR)
+	$(GIT) -C $(GRAMMAR_DIR) remote set-url origin $(GRAMMAR_REPO)
+	$(GIT) -C $(GRAMMAR_DIR) fetch --quiet origin $(GRAMMAR_REV)
+	$(GIT) -C $(GRAMMAR_DIR) checkout --quiet $(GRAMMAR_REV)
+	rm -f $(GRAMMAR_LIB) $(GRAMMAR_PC) $(BUILD)/obj/crystal-*.o
+	$(MAKE) $(GRAMMAR_PC)
 
 $(TS_LIB): | $(TS_DIR)
 	@mkdir -p $(BUILD)/obj $(LIB_DIR)
@@ -121,6 +138,18 @@ grammar-check: | $(GRAMMAR_DIR)
 	@find $(STDLIB) -name '*.cr' | sort > $(BUILD)/stdlib-files.txt
 	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) parse -q -s --paths $(BUILD)/stdlib-files.txt 2>&1 | \
 	  sed 's|$(STDLIB)/||' | grep -E 'ERROR|MISSING|Total parses' || true
+
+# lib/ (shards) and the external projects of tools/external.sh.
+EXTERNAL := $(wildcard tools/external/marten/src tools/external/athena/src)
+
+grammar-check-ext: | $(GRAMMAR_DIR)
+	@mkdir -p $(BUILD)
+	@find -L lib $(EXTERNAL) -name '*.cr' | sed 's|^|$(ROOT)/|' | sort > $(BUILD)/external-files.txt
+	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) parse -q -s --paths $(BUILD)/external-files.txt 2>&1 | \
+	  sed 's|$(ROOT)/||' | grep -E 'ERROR|MISSING|Total parses' || true
+
+grammar-test: | $(GRAMMAR_DIR)
+	@cd $(GRAMMAR_DIR) && $(TREE_SITTER_CLI) test 2>&1 | grep -E 'Total parses|✗|failure' || true
 
 syntax-gen: | $(GRAMMAR_DIR)
 	$(CRYSTAL) run tools/gen_syntax.cr -- $(GRAMMAR_DIR)/src/node-types.json src/clear_ls/syntax/kinds.cr

@@ -1,6 +1,32 @@
 # Tree-sitter grammar notes
 
-Grammar: `tree-sitter-crystal` at `50ca9e6`, tree-sitter CLI 0.26.9.
+Grammar: clear-ls's own `tree-sitter-crystal`: upstream
+[crystal-lang-tools/tree-sitter-crystal](https://github.com/crystal-lang-tools/tree-sitter-crystal)
+`50ca9e6` plus the commits on branch `clear-ls`, pinned in the Makefile
+(`GRAMMAR_REPO`, `GRAMMAR_REV`). Tree-sitter CLI and runtime 0.26.9.
+Until the remote fork exists, `GRAMMAR_REPO` is the local clone
+`../tree-sitter-crystal`.
+
+## Changing the grammar
+
+Needs Node and the tree-sitter CLI 0.26.9 (building clear-ls needs
+neither: `src/parser.c` is committed in the grammar repository).
+
+1. `tools/grammar/coverage.sh save` (baseline of failing stdlib and
+   external files; external = `lib/` and `tools/external.sh` projects).
+2. In `../tree-sitter-crystal` (branch `clear-ls`): edit `grammar.js`
+   (or `src/scanner.c`), add a corpus case under `test/corpus/`, then
+   `tree-sitter generate` (~35 s) and `tree-sitter test` (all pass);
+   commit grammar, generated `src/` and the test together.
+3. Here: `GRAMMAR_REV` to the new commit, `make grammar-update` (fetches
+   it into `vendor/`, rebuilds the archive), `make` relinks.
+4. `make syntax-gen`; review the `kinds.cr` diff (a renamed or removed
+   `Kind`/`Field` is fixed in clear-ls in the same commit).
+5. `tools/grammar/coverage.sh check`: no file lost (exit 1 otherwise);
+   `make grammar-test`, `make spec`, and a types dump over repo and
+   stdlib (`tools/types_diff.py`).
+6. Bump the patch version (grammar pin, development.md). Item caches
+   are keyed by the grammar commit (`BUILD_ID`), so packs rebuild.
 
 ## Coverage
 
@@ -45,7 +71,8 @@ as placeholders, so surrounding declarations and bodies are still indexed.
 Parse errors are not published as diagnostics by default; the compiler owns
 diagnostics.
 
-Fixes belong upstream in the grammar; clear-ls does not patch it locally.
+Grammar fixes go into clear-ls's grammar (Phase 19): see "Changing the
+grammar". Upstream PRs are not offered for now.
 
 ## Threading notes
 

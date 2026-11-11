@@ -14,8 +14,11 @@ make release           # optimised binary; use it in the editor and for timings
 ```
 
 The first build after `make distclean` clones Tree-sitter v0.26.9 and
-tree-sitter-crystal `50ca9e6` into `vendor/` (gitignored) and installs the
-shard into `lib/`.
+clear-ls's tree-sitter-crystal (`GRAMMAR_REPO` at `GRAMMAR_REV`; for now
+the local clone `../tree-sitter-crystal`) into `vendor/` (gitignored) and
+installs the shard into `lib/`. After a `GRAMMAR_REV` bump, `make
+grammar-update`; grammar workflow in
+[tree-sitter-grammar-notes.md](tree-sitter-grammar-notes.md#changing-the-grammar).
 
 ## Workflow
 

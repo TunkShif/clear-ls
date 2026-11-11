@@ -77,3 +77,11 @@ platform differences are handled inside them (RSS vs footprint,
 live under the `/var` → `/private/var` symlink on purpose (the server
 must match a folder to buffers Neovim names by real path). A new phase adds a fixture directory and a script
 with the same name.
+
+## Grammar coverage (`tools/grammar/coverage.sh`)
+
+`save` records the files that fail to parse (ERROR/MISSING) in the
+stdlib (`make grammar-check`) and in `lib/` + `tools/external`
+(`make grammar-check-ext`: Marten, Athena); `check` compares and exits 1
+when a file that parsed before fails now. Used for every grammar change
+(Phase 19).
