@@ -4,7 +4,9 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–17 (last: annotations: completion inside `@[`
+- **Done:** Phases 0–18 (last: C bindings: `lib_c/<target>` require
+  path, funs/globals/fields navigate like methods, declaration hover,
+  compiler pseudo-method docs and `Pointer(Void)`; before that, annotations: completion inside `@[`
   and its arguments, hover on built-in annotations and arguments,
   aliases inside type paths; before that, type definition from inferred types,
   declaration, range formatting from the formatter's hunks; before that,
@@ -39,13 +41,11 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 18 — C bindings
-  ([roadmap.md](roadmap.md#phase-18--c-bindings-lib-fun)), then Phase 19 —
-  own tree-sitter-crystal; Phase 20 — `{% if %}` inside method bodies
-  (planned, order vs 19 open).
-- **In progress:** Phase 18 steps 1–3 done (lib_c target path, C call
-  navigation, declaration hover, pseudo-methods and `Void`; 0.17.2 `skip_file` fix); next: step 5. Phases 16–18 on `dev/next`, not merged
-  into `main`.
+- **Next:** Phase 19 — own tree-sitter-crystal
+  ([roadmap.md](roadmap.md#phase-19--own-tree-sitter-crystal)) and Phase
+  20 — `{% if %}` inside method bodies (order open).
+- **In progress:** nothing; Phases 16–18 on `dev/next`, not merged into
+  `main`.
 
 ## Resume
 

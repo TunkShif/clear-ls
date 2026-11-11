@@ -1,0 +1,5 @@
+name: ffi
+version: 0.1.0
+targets:
+  ffi:
+    main: src/demo.cr

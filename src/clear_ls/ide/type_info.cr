@@ -458,6 +458,16 @@ class method: `self` is `" << owner << ".class`"
         md = c_decl_markdown(site, ns) || next
         return {md, site.item.name_range}
       end
+      # `fun strerror_r = __xpg_strerror_r(...)`: the C name.
+      node = @state.tree.root.descendant(offset, offset, named: true) || return nil
+      node = node.parent.not_nil! if node.kind.literal_content? && node.parent
+      fun_node = node.parent || return nil
+      return nil unless fun_node.kind.fun_def? && fun_node.field(Syntax::Field::RealName) == node
+      map[ns].each_member_site do |site|
+        next unless site.file == @state.id && site.item.kind.fun? && site.item.range == fun_node.range
+        md = c_decl_markdown(site, ns) || next
+        return {md, node.range}
+      end
       nil
     end
 

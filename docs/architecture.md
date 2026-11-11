@@ -281,6 +281,22 @@ macros. Constants: `const_expr_type`; big tables via `truncated_value`.
 - `DefMap#lookup_path_raw` follows an alias in the middle of a path
   (`ADI::Register`), as the compiler does.
 
+### C bindings (Phase 18)
+
+- `Project.with_target_path` / `lib_c_target`: `lib_c/<arch>-<os>` on
+  `crystal_path`, as the compiler's `CrystalPath#add_target_path`.
+- `Items::Lower#lower_top`: `{% skip_file %}` guards the rest of a file
+  with the negated condition.
+- `Infer#lib_member_call` records the matched fun / `$var` / field as
+  the call's `Unique` resolution (`record_c_target`), so `call_at`,
+  call facts, references, rename and signature help treat it as a
+  method. `TypeInfo#c_decl_markdown` / `c_decl_hover` format C
+  declarations; `Completion#c_member_items` lists a lib's funs and
+  globals or a C struct's fields.
+- `IDE::PseudoDocs` (`pseudo_docs.cr`): pseudo-method and `Void` /
+  `NoReturn` docs read from the stdlib's `docs_pseudo_methods.cr`.
+  `TyKind::Void` for an undeclared `Void`.
+
 ### Compiler integration (Phase 7)
 
 - `Compiler::Job`: subprocess with timeout and cancel. `wait` yields, so

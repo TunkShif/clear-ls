@@ -63,6 +63,15 @@ guessing from names. Wrong answers do more damage than missing ones.
   fixed tables. Arguments of shard and user annotations are not known
   (no fixed doc format; the macros reading them are linked to the use
   site only at expansion time).
+- **C bindings**: `lib` funs, `$globals` and lib struct/union fields hover,
+  go to definition, find references, rename, signature help (`...` for
+  variadic funs) and complete like methods (`LibC.strl` → `strlen`); their
+  declarations hover too, with the C name of `fun a = "c_name"`. `LibC`
+  types of the target (`LibC::SizeT`, `UInt32T`) resolve through
+  `lib_c/<arch>-<os>`, as in the compiler.
+- **Compiler built-ins**: hover on `sizeof`, `pointerof`, `typeof` & co.,
+  `x.is_a?`, `as`, `nil?`, and on `Void` / `NoReturn`, with the docs of the
+  stdlib's `docs_pseudo_methods.cr`; types print as `Pointer(Void)`.
 - **Semantic tokens** for parameters, locals, instance variables, types and
   declarations.
 

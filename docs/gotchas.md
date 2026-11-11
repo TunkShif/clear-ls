@@ -36,7 +36,7 @@ changing it. Grammar quirks are in
 
 ## Crystal language and specs
 
-- `abstract`, `out`, `lib` are reserved words: they can't be param/var names.
+- `abstract`, `out`, `lib`, `fun` are reserved words: they can't be param/var names.
 - `include` in a spec file leaks into every spec file. Shared spec helpers
   must not be `private`, and they live in `spec/support/`.
 - `make spec` / `crystal run` need `CRYSTAL_CACHE_DIR` and

@@ -197,6 +197,8 @@ describe "phase 18 C declaration hover" do
       c.open("src/app.cr")
       ffi_hover(c, "cos(x").not_nil!.should eq "```crystal\nfun LibM.cos(x : Float64) : Float64\n```\n\nCosine."
       ffi_hover(c, "my_open =").not_nil!.should contain("C name: `open`")
+      # On the C name itself (a string here, an identifier in `= __x(...)`).
+      ffi_hover(c, "\"open\"", 1).not_nil!.should start_with("```crystal\nfun LibM.my_open(")
       ffi_hover(c, "errno : Int32").not_nil!.should eq "```crystal\nLibM.errno : Int32\n```\n\nC global variable `$errno`"
       ffi_hover(c, "z : Int32").not_nil!.should eq "```crystal\nLibM::Point#z : Int32\n```\n\nstruct field"
       ffi_hover(c, "x, z").not_nil!.should eq "```crystal\nLibM::Point#x : Int32\n```\n\nstruct field"

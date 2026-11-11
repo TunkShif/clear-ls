@@ -2668,6 +2668,27 @@ Steps (one commit each; pause at the end of each):
    hover probe over `lib_c/x86_64-linux-gnu` and
    `syntax/grammar.cr`; README, status, architecture; 0.18.0.
 
+   *Done:* Neovim check `ffi` (fixture `tools/fixtures/ffi`, in `make
+   nvim-check`): hovers, definition, references, completion and
+   signature help on funs, globals and fields, `LibC.strlen` through the
+   target path, `Pointer(Void)`, `sizeof`. Hover probe
+   (`tools/probes/hover_probe.cr`) on the 45 files of
+   `lib_c/x86_64-linux-gnu`: 32 without a miss; the rest are integer
+   literals in constants and arguments (`0o2000000`, intentionally no
+   hover), `flag?`/`{% %}` text, `Pointer(Void).new` / `.null` calls
+   inside constant values (constants have no bodies), a `->` proc
+   type, and the C name of `fun strerror_r = __xpg_strerror_r`, which
+   now hovers (the fun's declaration text with `C name:`). On
+   `grammar.cr`: what remains is `ts_language_symbol_name`/`_type`/
+   `field_name_for_id` (the `self` param parse error, Phase 19),
+   `LibC.free` / `GC.free` in `{% if %}` (Phase 20), `flag?`, `||`,
+   `protected` and the `asm` string (keywords and operators, no hover
+   by design). README, architecture, tools/README, gotchas (`fun` is
+   reserved too), status; 0.18.0.
+
+Status: done. `make spec` 412 examples; every Neovim check passes
+(`ffi` added); `make verify-static` OK. 0.18.0.
+
 Exit criterion: a C call hovers, navigates and completes like a
 method call; `LibC` target types resolve; no regressions (`make spec`,
 `make nvim-check`, `make verify-static`).
