@@ -49,8 +49,8 @@ stops mid-phase). History and per-phase details are in
   steps (grammar on branch `clear-ls` in `../tree-sitter-crystal`; remote
   fork later). Then Phase 20 — `{% if %}`
   inside method bodies.
-- **In progress:** Phase 19 step 1 done (own grammar pinned, coverage
-  gate); next: step 2 (A1 `self` fun param). Phases 16–19 on `dev/next`,
+- **In progress:** Phase 19 steps 1–2 done (own grammar pinned, coverage
+  gate; `self` fun params); next: step 3 (A2 short-block setters). Phases 16–19 on `dev/next`,
   not merged into `main`.
 
 ## Resume

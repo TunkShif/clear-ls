@@ -2867,6 +2867,19 @@ Steps (one commit each in this repository; grammar commits on
 2. **A1 `self` fun param.** Grammar + corpus case; clear-ls spec: a fun
    with a `self` param lowers with both params, hovers and types its
    call (`ts_language_symbol_name`).
+
+   *Done:* grammar `f6381f4 feat: allow self as a fun param name`
+   (`fun_param` name may be `self`, aliased to `identifier`; the compiler
+   accepts it for `fun` in a lib and at top level, rejects it for `def`,
+   whose rule is unchanged) + corpus case "fun params named self"
+   (246/246). `kinds.cr` unchanged. Coverage: stdlib 11 → 11, external
+   28 → 27 (`lib/tree_sitter/src/lib_tree_sitter.cr` now parses: the 38
+   `self` funs). On `grammar.cr`: `ts_language_symbol_name`,
+   `ts_language_symbol_type` (→ `TSSymbolType`, so `type.regular?`
+   resolves), `ts_language_field_name_for_id` hover and navigate.
+   Types dump: repo +3 known (`grammar.cr:84 type`, `node.cr:158 raw`,
+   `tree.cr:141 raw`), stdlib unchanged. Spec `features_phase19_spec.cr`
+   (1). `make spec` 416 examples. 0.18.3.
 3. **A2 short-block setters.** Grammar + corpus cases (`&.x = v`,
    `&.x=(v)`, `&.x += v` if cheap); clear-ls: setter references /
    rename include these uses; block-form conversion.
