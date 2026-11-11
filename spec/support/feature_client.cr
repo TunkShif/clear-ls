@@ -33,8 +33,15 @@ class FeatureClient
     if stdlib
       std_dir = File.join(@root, ".stdlib")
       Dir.mkdir_p(std_dir)
-      stdlib.each { |path, text| write_if_changed(File.join(std_dir, path), text) }
-      write_if_changed(File.join(std_dir, "prelude.cr"), stdlib.keys.map { |k| %(require "./#{k.rchop(".cr")}") }.join('\n'))
+      stdlib.each do |path, text|
+        full = File.join(std_dir, path)
+        Dir.mkdir_p(File.dirname(full))
+        write_if_changed(full, text)
+      end
+      # `lib_c/<target>/...` files are reached through `require "c/..."`
+      # (the target path), not from the prelude.
+      prelude = stdlib.keys.reject(&.starts_with?("lib_c/"))
+      write_if_changed(File.join(std_dir, "prelude.cr"), prelude.map { |k| %(require "./#{k.rchop(".cr")}") }.join('\n'))
     end
     paths = ["lib"] + (std_dir ? [std_dir] : [] of String)
     @server.project_factory = if real_stdlib

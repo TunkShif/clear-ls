@@ -42,9 +42,9 @@ stops mid-phase). History and per-phase details are in
 - **Next:** Phase 18 — C bindings
   ([roadmap.md](roadmap.md#phase-18--c-bindings-lib-fun)), then Phase 19 —
   own tree-sitter-crystal.
-- **In progress:** nothing (0.17.1: annotation arguments from tables
-  only); Phases 16–17 on `dev/next`, not merged into
-  `main`.
+- **In progress:** Phase 18 step 1 done (lib_c target path; 0.17.2
+  `skip_file` fix); next: step 2. Phases 16–18 on `dev/next`, not merged
+  into `main`.
 
 ## Resume
 

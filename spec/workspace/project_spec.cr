@@ -46,4 +46,41 @@ describe Workspace::Project do
   ensure
     FileUtils.rm_rf(dir) if dir
   end
+
+  it "maps a target triple to its lib_c directory like the compiler" do
+    {
+      "x86_64-unknown-linux-gnu"   => "x86_64-linux-gnu",
+      "x86_64-pc-linux-gnu"        => "x86_64-linux-gnu",
+      "x86_64-unknown-linux"       => "x86_64-linux-gnu",
+      "aarch64-unknown-linux-musl" => "aarch64-linux-musl",
+      "x86_64-alpine-linux-musl"   => "x86_64-linux-musl",
+      "aarch64-apple-darwin24.1.0" => "aarch64-darwin",
+      "arm64-apple-macosx14.0"     => "aarch64-darwin",
+      "x86_64-unknown-freebsd14.1" => "x86_64-freebsd",
+      "i686-unknown-linux-gnu"     => "i386-linux-gnu",
+      "armv7-unknown-linux-gnueabihf" => "arm-linux-gnueabihf",
+      "aarch64-linux-android31"    => "aarch64-android",
+      "x86_64-pc-windows-msvc"     => "x86_64-windows-msvc",
+      "wasm32-unknown-wasi"        => "wasm32-wasi",
+    }.each do |triple, target|
+      Workspace::Project.lib_c_target(triple).should eq target
+    end
+    Workspace::Project.lib_c_target("nonsense").should be_nil
+  end
+
+  it "adds the target's lib_c directory to the path once, from the first entry that has it" do
+    dir = File.tempname("clear-ls-project")
+    std = File.join(dir, "std")
+    other = File.join(dir, "other")
+    Dir.mkdir_p(File.join(std, "lib_c", "x86_64-linux-gnu", "c"))
+    Dir.mkdir_p(File.join(other, "lib_c", "x86_64-linux-gnu"))
+    File.write(File.join(std, "lib_c", "x86_64-linux-gnu", "c", "stdint.cr"), "lib LibC\n  alias UInt32T = UInt32\nend\n")
+    project = Workspace::Project.new(dir, ["lib", std, other], std, nil, "x86_64-unknown-linux-gnu")
+    project.crystal_path.should eq [File.join(dir, "lib"), std, other, File.join(std, "lib_c", "x86_64-linux-gnu")]
+    project.resolver.resolve("c/stdint", nil).should eq [File.join(std, "lib_c", "x86_64-linux-gnu", "c", "stdint.cr")]
+    # No directory for the target: unchanged.
+    Workspace::Project.new(dir, ["lib", std], std, nil, "riscv64-unknown-linux-gnu").crystal_path.should eq [File.join(dir, "lib"), std]
+  ensure
+    FileUtils.rm_rf(dir) if dir
+  end
 end

@@ -21,9 +21,53 @@ module ClearLS::Workspace
     property children : Proc(String, Array(String)) = ->(dir : String) { Dir.children(dir) }
 
     def initialize(@root : String, crystal_path : Array(String), @stdlib_dir, @crystal_version, @target_triple)
-      @crystal_path = crystal_path.map { |p| File.expand_path(p, @root) }
+      @crystal_path = Project.with_target_path(crystal_path.map { |p| File.expand_path(p, @root) }, @target_triple)
       @flags = Items.flags_for_triple(@target_triple)
       @resolver = RequireResolver.new(@crystal_path)
+    end
+
+    # *entries* plus `<entry>/lib_c/<arch>-<os>` for the first entry that
+    # has it, as the compiler does (`CrystalPath#add_target_path`): the
+    # stdlib's `require "c/stdint"` resolves there.
+    def self.with_target_path(entries : Array(String), triple : String) : Array(String)
+      target = lib_c_target(triple) || return entries
+      entries.each do |e|
+        dir = File.join(e, "lib_c", target)
+        next unless Dir.exists?(dir)
+        return entries.includes?(dir) ? entries : entries + [dir]
+      end
+      entries
+    end
+
+    # `architecture-os_name` of the compiler's `Codegen::Target` for
+    # *triple* (`x86_64-unknown-linux-gnu` → `x86_64-linux-gnu`,
+    # `aarch64-apple-darwin24.1.0` → `aarch64-darwin`). Nil for a
+    # malformed triple.
+    def self.lib_c_target(triple : String) : String?
+      parts = triple.downcase.split('-', 3)
+      return nil if parts.size < 3 || parts.any?(&.empty?)
+      arch, vendor, env = parts
+      arch = case arch
+             when "i486", "i586", "i686" then "i386"
+             when "amd64"                then "x86_64"
+             when "arm64"                then "aarch64"
+             when .starts_with?("arm")   then "arm"
+             else                             arch
+             end
+      if env.starts_with?("linux") && !env.includes?('-') &&
+         vendor.in?("suse", "redhat", "slackware", "amazon", "unknown", "montavista", "mti")
+        env = "#{env}-gnu"
+      end
+      os = if env.starts_with?("darwin") || env.starts_with?("macos")
+             "darwin"
+           elsif (bsd = %w(freebsd dragonfly openbsd netbsd solaris).find { |b| env.starts_with?(b) })
+             bsd
+           elsif env.split('-').any?(&.starts_with?("android"))
+             "android"
+           else
+             env
+           end
+      "#{arch}-#{os}"
     end
 
     # Queries the `crystal` executable (`crystal env`, `crystal --version`).

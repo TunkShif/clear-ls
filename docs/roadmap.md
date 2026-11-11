@@ -2595,6 +2595,28 @@ Steps (one commit each; pause at the end of each):
 1. **lib_c target path (R1).** Specs: `LibC::UInt32T` hover and
    definition, `LibC.strlen` typed `UInt64`, `require "c/string"`
    resolves, a missing target directory changes nothing.
+
+   *Done:* `Project.with_target_path` / `Project.lib_c_target` (the
+   compiler's `Codegen::Target` normalisation: `i686` → `i386`, `arm64`
+   → `aarch64`, `unknown-linux` → `linux-gnu`, darwin/BSD/android by OS
+   name); the directory goes on `crystal_path`, so it is also in the
+   local cache key. On the real stdlib: `LibC::UInt32T` → `stdint.cr:8`,
+   `SizeT`, `PidT`, `SSizeT` resolve, `LibC.strlen` → `UInt64`,
+   `grammar.cr`'s `ts_language_symbol_count` → `UInt32`. Types dump:
+   repo +3 known, stdlib +119 known and 12 sharper (`Pointer(?)` →
+   `Pointer(LibC::Passwd)`, `Slice(?)` → `Slice(LibC::EpollEvent)`).
+   The one regression (`io/encoding.cr:129`) exposed a lowering bug,
+   fixed separately (0.17.2): `{% skip_file %}` was ignored, so
+   `io/encoding_stubs.cr` (skipped unless `without_iconv`) declared a
+   second `IO::Decoder` whose `initialize` doesn't assign
+   `@in_buffer_left`, making it `UInt64?` once `SizeT` resolved. The
+   rest of a file now carries the negated condition (`skip_file if`,
+   `skip_file unless`, `{% if %}{% skip_file %}{% end %}`); an
+   unconditional one ends the file, an unknown condition keeps it. Two
+   Windows-only fiber files now drop out of the Linux view (expected).
+   Specs: `project_spec.cr` (target mapping, path), `lower_spec.cr`
+   (`skip_file`), `features_phase18_spec.cr` (2). `make spec` 400
+   examples.
 2. **Fun navigation (R2).** Hover, definition, references, rename,
    signature help on fun, `$var` and field uses; fun and `$var`
    completion after `LibX.`. Specs on the fixture's shapes
