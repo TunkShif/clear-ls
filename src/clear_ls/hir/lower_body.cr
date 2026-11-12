@@ -193,71 +193,12 @@ module ClearLS::HIR
         type_text: type_name || of1, type_text2: of2, text: node.field_text(Syntax::Field::Operator))
     end
 
-    # The grammar parses `*x` inside collection literals as `ERROR("*")`
-    # followed by `x` (see tree-sitter-grammar-notes.md): rejoin them as
-    # a Splat element.
-    private def splat_marker?(c : Syntax::Node) : Bool
-      c.kind.error? && c.named_child_count == 0 && c.text == "*"
-    end
-
-    # `*xs` where the lexer read the operand's leading `i`/`m`/`x` letters
-    # as regex modifiers: ERROR("*", regex_modifier "x") then identifier
-    # "s" (or nothing when the whole name is modifier letters).
-    private def split_splat?(c : Syntax::Node) : Bool
-      c.kind.error? && c.named_child_count == 1 && c.named_child(0).try(&.kind.regex_modifier?) || false
-    end
-
-    # Local or call named by a split splat operand: the modifier letters
-    # plus an adjacent identifier.
-    private def split_splat_operand(err : Syntax::Node, rest : Syntax::Node?) : {ExprId, UInt32}
-      mod = err.named_child(0).not_nil!
-      name = mod.text
-      stop = mod.end_byte
-      if rest && rest.kind.identifier? && rest.start_byte == mod.end_byte
-        name += rest.text
-        stop = rest.end_byte
-      end
-      range = TextRange.new(mod.start_byte, stop)
-      expr = if b = lookup(name)
-               record_ref(b, range, RefKind::Read)
-               add(ExprKind::LocalRef, range, name: name, name_range: range, binding: b)
-             else
-               add(ExprKind::Call, range, name: name, name_range: range)
-             end
-      {expr, stop}
-    end
-
     private def add_elems(node : Syntax::Node, kids : Array(ExprId), names : Array({String, ExprId}),
                           skip : Array(Syntax::Node), type_name : String?) : Nil
-      splat_at = nil.as(UInt32?)
-      split = nil.as(Syntax::Node?)
-      children = node.named_children
-      children.each_with_index do |c, ci|
+      node.named_children.each do |c|
         next if c.kind.comment? || c.kind.operator? || skip.includes?(c)
-        if split
-          # This child was consumed as the rest of a split splat operand.
-          split = nil
-          next if c.kind.identifier? && c.start_byte == children[ci - 1].end_byte
-        end
-        if splat_marker?(c)
-          splat_at = c.start_byte
-          next
-        end
-        if split_splat?(c)
-          nxt = children[ci + 1]?
-          operand, stop = split_splat_operand(c, nxt)
-          kids << add(ExprKind::Splat, TextRange.new(c.start_byte, stop), children: [operand])
-          split = c
-          next
-        end
-        if s = splat_at
-          splat_at = nil
-          kids << add(ExprKind::Splat, TextRange.new(s, c.end_byte), children: [lower(c)])
-          next
-        end
         if c.kind.error?
-          # Other recovery (`*{…}` swallowed into the ERROR): the elements
-          # can't be trusted.
+          # Recovery inside the literal: the elements can't be trusted.
           kids << add(ExprKind::Missing, c.range, children: c.named_children.map { |x| lower(x) })
           next
         end
@@ -266,6 +207,10 @@ module ClearLS::HIR
           value = c.named_children.find { |x| x != key }
           name = key.try { |k| k.kind.string_node? ? k.named_children.join(&.text) : k.text } || "?"
           names << {name, value ? lower(value) : add(ExprKind::Missing, c.range)}
+        elsif c.kind.splat?
+          # `[*xs, 1]`, `{*t, 1}` (grammar `clear-ls` B1).
+          inner = c.named_children.find { |x| !x.kind.comment? }
+          kids << add(ExprKind::Splat, c.range, children: [inner ? lower(inner) : add(ExprKind::Missing, c.range)])
         elsif c.kind.hash_entry?
           c.named_children.each { |x| kids << lower(x) unless x.kind.operator? }
         elsif (c.kind.tuple_node? || c.kind.array_node?) && type_name

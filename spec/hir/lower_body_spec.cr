@@ -30,11 +30,12 @@ describe HIR::LowerBody do
     body.bindings.find!(&.name.== "blk").kind.should eq HIR::BindingKind::BlockParam
   end
 
-  it "rejoins splats in collection literals and marks splat targets" do
-    body, src = body_of("def m(xs, t)\n  a = [1, *xs]\n  b = {*t, 2}\n  q, *r = 1, 2, 3\nend")
+  it "lowers splats in collection literals and marks splat targets" do
+    body, src = body_of("def m(xs, t, mix)\n  a = [1, *xs]\n  b = {*t, 2}\n  q, *r = 1, 2, 3\n  c = {1, *{\"a\", 2}}\n  d = Set{*mix}\nend")
     splats = body.exprs.select(&.kind.splat?).map { |e| src.byte_slice(e.range.start, e.range.size) }
-    splats.should eq ["*xs", "*t", "*r"]
-    # `xs` (lexed as modifier "x" + "s") still reads the param.
+    splats.should eq ["*xs", "*t", "*r", "*{\"a\", 2}", "*mix"]
+    body.exprs.any?(&.kind.missing?).should be_false
+    body.bindings.find!(&.name.== "mix").references.map(&.kind).should eq [HIR::RefKind::Decl, HIR::RefKind::Read]
     xs = body.bindings.find!(&.name.== "xs")
     xs.references.map(&.kind).should eq [HIR::RefKind::Decl, HIR::RefKind::Read]
     body.bindings.map(&.name).should contain "r"
