@@ -534,6 +534,8 @@ class method: `self` is `" << owner << ".class`"
           # Class/module bodies: `getter x = ...` arguments look like locals.
           next if body.scope(b.scope).kind.def? && b.scope.value != 0
           next if in_type_body?(b.name_range.start)
+          # `->(x : T) { }`: the type is written next to the name.
+          next if b.kind.block_arg? && b.restriction
           decl = b.name_range
           next unless range.touches?(decl.start) && seen.add?(decl.end)
           # The type assigned at the declaration, not the join of all writes
@@ -588,7 +590,8 @@ class method: `self` is `" << owner << ".class`"
       false
     end
 
-    # The value is a literal or `T.new(...)`, so the type is visible.
+    # The value is a literal, `T.new(...)`, `uninitialized T` or
+    # `v.as(T)`, so the type is visible.
     private def obvious?(body : HIR::Body, b : HIR::Binding) : Bool
       assign = body.exprs.find do |e|
         (e.kind.assign? || e.kind.type_decl?) && e.children.first?.try { |c| body.expr(c).binding == b.id }
@@ -596,6 +599,8 @@ class method: `self` is `" << owner << ".class`"
       return true if body.exprs.any? { |e| e.kind.type_decl? && e.binding == b.id }
       value = assign.try { |a| a.children[1]?.try { |v| body.expr(v) } } || return false
       return true if value.kind.literal?
+      return true if value.syntax.uninitialized_var?
+      return true if value.kind.call? && value.name == "as" && value.type_text
       value.kind.call? && value.name == "new" && value.receiver.try { |r| body.expr(r).kind.const? } || false
     end
 

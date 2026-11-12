@@ -44,6 +44,9 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** fix round during Phase 19 — type hover takes the doc
   from the first declaration that has one (`File`)
   ([roadmap.md](roadmap.md#fix-round-during-phase-19-type-doc-from-a-reopening-done)).
+- **Also done:** fix round during Phase 19 — no inlay hint where the
+  type is written (`->(x : T)`, `uninitialized T`, `.as(T)`)
+  ([roadmap.md](roadmap.md#fix-round-during-phase-19-no-hint-where-the-type-is-written-done)).
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).

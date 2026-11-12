@@ -3008,6 +3008,32 @@ doc directives are Phase 21. Spec: `features_type_doc_spec.cr`. 0.18.6.
 Status: done. `make spec` 421 examples; every Neovim check passes;
 `File` hover checked in headless Neovim.
 
+### Fix round during Phase 19: no hint where the type is written (done)
+
+Report: an inlay hint on a block parameter that already has a type,
+`->(x : Int32) { }` showing `x: Int32 : Int32`. (Blocks themselves
+can't annotate params: the compiler rejects `|x : Int32|`; proc
+literals share the `BlockArg` binding kind.) Checked every hint site
+with a probe file:
+
+| Site | Before | After |
+|---|---|---|
+| proc literal param with a type `->(x : T)` | hinted | none |
+| block param `\|x\|`, unpacked `\|(a, b)\|` | hinted | unchanged (no way to write a type) |
+| `x : T = v` | none | unchanged |
+| `x = uninitialized T` | hinted | none |
+| `x = v.as(T)` | hinted | none (`as?` still hints: `T?` isn't written) |
+| proc local `f = ->(x : T) { }` | hinted | unchanged (`T -> R` is not written as such) |
+| def without return type (incl. `&blk : T -> R` params) | hinted after `)` | unchanged (a return type isn't written) |
+| def/`&block` params | never hinted | unchanged |
+
+Fix (`TypeInfo#inlay_hints`): skip a `BlockArg` binding with a
+restriction; `obvious?` also counts `uninitialized T` and `.as(T)`.
+Setting descriptions (`inlayHints.locals`, `blockParams`) updated.
+Spec: `features_inlay_written_spec.cr` (fails before the fix). 0.18.8.
+
+Status: done. `make spec` 423 examples; every Neovim check passes.
+
 ### Declarations in `{% begin %}` and macro-split signatures
 
 Found with the fix round above (`File.read` / `File.write` in

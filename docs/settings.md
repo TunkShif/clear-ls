@@ -45,8 +45,8 @@ and wrong types are logged and ignored. Settings marked *restart* are read once,
 | Key | Type | Default | |
 |---|---|---|---|
 | `inlayHints.enabled` | bool | `true` | All inlay hints. |
-| `inlayHints.locals` | bool | `true` | Type after a local's first assignment (`x = foo` → `x : Int32`), unless obvious from the value (a literal, `T.new`). |
-| `inlayHints.blockParams` | bool | `true` | Types of block parameters (`each { \|x\| }` → `x : String`). |
+| `inlayHints.locals` | bool | `true` | Type after a local's first assignment (`x = foo` → `x : Int32`), unless the value shows it (a literal, `T.new`, `uninitialized T`, `v.as(T)`). |
+| `inlayHints.blockParams` | bool | `true` | Types of block parameters (`each { \|x\| }` → `x : String`); not for proc literal parameters written with a type (`->(x : Int32) { }`). |
 | `inlayHints.aliases` | bool | `true` | Spell types written as an alias with its name (`alias Id = Int32 \| String`: `x : Id`, `xs : Array(Id)`, `xs.first : Id`), in hints and hover; hover adds the expansion. A value that mixes the alias with the plain type shows the expansion. False always shows the expansion (as the compiler does). |
 | `inlayHints.returnTypes` | bool | `true` | Inferred return type after the parameter list of defs written without one. |
 
