@@ -153,3 +153,21 @@ describe "phase 19 grammar: `#<` inside a regex (A4)" do
     items.items[0].children.select(&.kind.def?).map(&.name).should eq ["a", "b"]
   end
 end
+
+describe "phase 19 grammar: unnamed proc-type fun param (B3)" do
+  it "lowers `(T*) -> R` as one param" do
+    src = <<-CR
+      lib LibBio
+        type Bio = Void*
+        fun meth_set_create(Bio*, (Bio*) -> Int32) : Int32
+        fun after(x : Int32) : Int32
+      end
+      CR
+    tree = Syntax::Parser.new.parse(src)
+    tree.root.has_error?.should be_false
+    items = Items::Lower.lower(tree)
+    funs = items.items[0].children.select(&.kind.fun?)
+    funs.map(&.name).should eq ["meth_set_create", "after"]
+    funs[0].signature.not_nil!.params.map(&.restriction).should eq ["Bio*", "(Bio*) -> Int32"]
+  end
+end
