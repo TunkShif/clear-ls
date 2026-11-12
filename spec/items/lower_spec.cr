@@ -233,6 +233,57 @@ describe Lower do
     Cond.all(find(t, "V").conditions, Set{"linux"}).should be_nil
   end
 
+  it "lowers declarations inside `{% begin %}`, with their doc" do
+    t = items_of(<<-CR)
+      class F
+        {% begin %}
+          # Reads it.
+          def self.read(name : String) : String
+          end
+        {% end %}
+      end
+      CR
+    d = find(t, "read")
+    d.doc.should eq "Reads it."
+    d.signature.not_nil!.receiver.should eq "self"
+    d.conditions.should be_empty
+  end
+
+  it "keeps a def whose params hold a nested `{% if %}`" do
+    linux = Items.flags_for_triple("x86_64-unknown-linux-gnu")
+    t = items_of(<<-CR)
+      class F
+        {% begin %}
+          def self.read(a : String, {% if compare_versions(Crystal::VERSION, "1.5.0") >= 0 %} @[Deprecated] {% end %} b = nil) : String
+          end
+        {% end %}
+        {% if flag?(:linux) %}
+          def self.write(a, {% if flag?(:x) %} @[Deprecated] {% end %} b = nil)
+          end
+          {% if flag?(:musl) %}
+            def musl_only; end
+          {% end %}
+        {% end %}
+      end
+      CR
+    r = find(t, "read")
+    r.signature.not_nil!.to_s.should eq "(a : String, b = nil) : String"
+    w = find(t, "write")
+    w.signature.not_nil!.params.map(&.name).should eq ["a", "b"]
+    Cond.all(w.conditions, linux).should be_true
+    Cond.all(w.conditions, Set{"win32"}).should be_false
+    m = find(t, "musl_only")
+    Cond.all(m.conditions, linux).should be_false
+    Cond.all(m.conditions, linux | Set{"musl"}).should be_true
+  end
+
+  it "gives no item for a def named by `{{ }}`" do
+    t = items_of("class F\n  {% begin %}\n    def {{name.id}}(x)\n    end\n  {% end %}\n  def ok; end\nend\n")
+    names = [] of String
+    t.each_item { |i| names << i.name }
+    names.should eq ["F", "ok"]
+  end
+
   it "recovers declarations from half-typed code" do
     ["x.", "if x", "y = "].each do |broken|
       t = items_of("module M\n  class A < B\n    def foo\n      #{broken}\n    end\n    def bar; end\n  end\n  def baz; end\nend\n")

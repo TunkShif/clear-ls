@@ -135,8 +135,11 @@ module ClearLS::Items
 
     # Lowers the statements of *body* into *dest*. *owner* is the enclosing
     # item kind (nil at top level), which changes meaning of some nodes.
-    private def lower_body(body : Syntax::Node, dest : Array(Item), owner : Item?) : Nil
-      pending_annotations = [] of String
+    #
+    # Annotations left pending at the end are returned (none are lost when
+    # *pending_annotations* is passed on to the next macro piece).
+    private def lower_body(body : Syntax::Node, dest : Array(Item), owner : Item?,
+                           pending_annotations = [] of String) : Array(String)
       body.named_children.each do |node|
         if node.kind.annotation_node?
           pending_annotations << annotation_text(node)
@@ -150,6 +153,7 @@ module ClearLS::Items
           pending_annotations = [] of String
         end
       end
+      pending_annotations
     end
 
     private def lower_stmt(node : Syntax::Node, dest : Array(Item), owner : Item?, vis : Visibility) : Nil
@@ -242,6 +246,9 @@ module ClearLS::Items
         lower_macro_call(node, dest, owner, vis)
       when .macro_if?, .macro_unless?
         lower_macro_if(node, dest, owner, vis)
+      when .macro_begin?
+        # `{% begin %} … {% end %}`: an unconditional macro block.
+        node.field(Syntax::Field::Body).try { |b| lower_macro_body(b, dest, owner, vis) }
       when .error?
         @recovered = true
         lower_error(node, dest, owner, vis)
@@ -476,27 +483,45 @@ module ClearLS::Items
       end
     end
 
-    # A macro block body: reparse its `macro_content` pieces as Crystal code;
-    # nested `{% if %}` are lowered recursively. Other macro expressions
-    # (`{{ }}`, `{% for %}`) are skipped: their output is unknown.
+    # A macro block body: its `macro_content` pieces are reparsed as Crystal
+    # code. Nested `{% if/unless/begin %}` are lowered recursively under
+    # their own condition; other macro nodes (`{{ }}`, `{% for %}`, `{% %}`)
+    # are skipped: their output is unknown.
+    #
+    # The pieces between nested blocks are parsed apart, except when one of
+    # them has errors alone and all of them parse cleanly as one text with
+    # the nested blocks left out as gaps: a nested `{% if %}` inside a
+    # statement (`def f(a, {% if c %} @[A] {% end %} b)`) splits it in two
+    # broken halves. A nested block's text is not spliced into the gapped
+    # parse (it's lowered on its own, under its condition).
     private def lower_macro_body(body : Syntax::Node, dest : Array(Item), owner : Item?, vis : Visibility) : Nil
-      ranges = [] of TextRange
-      flush = -> do
-        unless ranges.empty?
-          sub = parser.parse_ranges(@tree.text, ranges, @tree.line_index)
-          lower_body(sub.root, dest, owner)
-          ranges = [] of TextRange
-        end
-      end
+      pieces = [[] of TextRange]
       body.named_children.each do |child|
-        if child.kind.macro_content?
-          ranges << child.range
-        elsif child.kind.macro_if? || child.kind.macro_unless?
-          flush.call
-          lower_macro_if(child, dest, owner, vis)
+        if child.kind.macro_content? || child.kind.macro_expression?
+          pieces.last << child.range
+        elsif nested_block?(child)
+          pieces << [] of TextRange unless pieces.last.empty?
         end
       end
-      flush.call
+      pieces.reject!(&.empty?)
+      trees = pieces.map { |p| parser.parse_ranges(@tree.text, p, @tree.line_index) }
+      if trees.size > 1 && trees.any?(&.has_error?)
+        joined = parser.parse_ranges(@tree.text, pieces.flatten, @tree.line_index)
+        trees = [joined] unless joined.has_error?
+      end
+      pending = [] of String
+      trees.each { |t| pending = lower_body(t.root, dest, owner, pending) }
+      body.named_children.each do |child|
+        if child.kind.macro_if? || child.kind.macro_unless?
+          lower_macro_if(child, dest, owner, vis)
+        elsif child.kind.macro_begin?
+          child.field(Syntax::Field::Body).try { |b| lower_macro_body(b, dest, owner, vis) }
+        end
+      end
+    end
+
+    private def nested_block?(node : Syntax::Node) : Bool
+      node.kind.macro_if? || node.kind.macro_unless? || node.kind.macro_begin?
     end
 
     private def with_cond(cond : Cond, &) : Nil

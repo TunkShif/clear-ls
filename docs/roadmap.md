@@ -3252,6 +3252,38 @@ def that sits in a macro block of an open file (`Bodies` works on the
 file's tree; with Phase 20, which models macro nodes in bodies);
 `{% for %}`-generated declarations.
 
+**Step 1 (done, 0.19.1).** Decision 1 as planned did not hold over
+the whole stdlib: one gapped parse of every block lost `lib` funs
+whose pieces only recover alone (`intrinsics.cr`: 12 funs under
+nested `{% if flag?(:interpreted) %} @[Primitive(…)] {% end %}`), and
+left-out `{{ }}` joined lines (`X = {{ v }}` + `Y = 1` → one constant
+`X : Y = 1`). As landed (`Items::Lower#lower_macro_body`):
+
+- the pieces between nested `{% if/unless/begin %}` are parsed apart
+  as before; only when one of them has errors alone **and** all of
+  them parse cleanly as one text (nested blocks as gaps) is the joined
+  parse used. `{{ }}` stays in the parsed text (as before it was a gap
+  inside one piece); `{% for %}` / `{% %}` stay gaps;
+- annotations pending at the end of a piece carry to the next one
+  (`@[Link("llvm")]` followed by `{% if … %}` and `lib LibLLVM`);
+- `{% begin %}` (statement or nested) lowers like an unconditional
+  branch.
+
+Stdlib items diff (1440 files, against 0.19.0): +the 20 planned defs
+(`fiber.cr`'s `new`/`initialize` with their params, minus the gap
+param), plus `{% begin %}` constants and libs (`LibLLVM` ×3 with 21
+constants, `LibCrypto`/`LibSSL` `*_VERSION`, `HAS_RYU_PRINTF`,
+`BIGINT_LIMBS`, `Inits`), `{{ }}`-valued constants (`ANDROID_API`,
+`WIN32_WINNT`, `LibXML::VERSION`, `GC VERSION`), `set_stackbottom`,
+`map!` ×2, 2 `system_tcp_keepalive_idle*`, `TIOCGWINSZ` ×3 (Athena).
+`crystal/tracing.cr`: the 20 defs after the nested
+`{% if !flag?(:without_mt) … %}` now nest in `BufferIO` / `Tracing`
+(were at the outer module). No item lost. "recovered from parse
+errors" cleared in 5 files, newly set in 4 (`fiber.cr`, two
+`{% begin %} X = {{ }}` files, Athena's `alias X = {{ }}`): the joined
+or kept text has a remaining parse error; items are unaffected.
+clear-ls `src` and Marten unchanged. `make spec` 430 examples.
+
 ### Phase 20 — `{% if %}` inside method bodies
 
 Planned for later (decided after Phase 18's review; order relative to
