@@ -118,7 +118,7 @@ paths. Per-phase numbers are in the roadmap.
 | Completion / hover | 1–3 ms / 0.1–0.3 ms warm; semantic tokens ~4 ms on a 520-line file |
 | Compiler check | ~1.9 s this repo, ~0.7 s small project; hover during a check: median 0.2 ms |
 | DefMap rebuild | ~4 ms; with compiler facts 5–7 ms |
-| Grammar (`make grammar-check`) | 1635/1646 stdlib files parse cleanly |
+| Grammar (`make grammar-check`, `grammar-check-ext`) | 1645/1646 stdlib files parse cleanly (Phase 19; 1635 before); external set (`lib/`, Marten, Athena) 2068/2068 |
 | Spec suite (`make spec`) | 351 examples, ~1.7–2 min (Phase 13 case fixtures run the real compiler, the stdlib require round trip) |
 | Block form round trip (full stdlib) | 5195 blocks: 5109 convert, 86 refused, ~4 min with `BLOCK_FILES=9999 BLOCKS_PER_FILE=9999` |
 | Book parity (`tools/book_diff.py`) | 565 markers: 540 match, 25 accepted, 0 mismatches |

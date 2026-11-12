@@ -3047,6 +3047,44 @@ Steps (one commit each in this repository; grammar commits on
    stdlib), `grammar-check-ext`, types dump, Neovim checks; notes:
    "Known gaps" rewritten with the C list; README, status; 0.19.0.
 
+   *Done:* the 5 external failures left after B6 came down to two more
+   bugs, both fixed (scanner, local):
+   - grammar `4006e44 fix: }} inside macro
+     content is literal`: the macro-content scanner stopped at `}}`, so
+     `x = {2 => {3 => 1}}` inside a `macro` / `{% if %}` body broke (the
+     inner `}}` read as the end of a `{{ }}`). Crystal's macro lexer has
+     no `}}` token; macro content now consumes it. `{{ ... }}` itself is
+     parsed by grammar rules, not content, so it is unaffected. Upstream
+     todo "}} that doesn't end a macro expression" moved to a real case.
+     Athena `athena-dotenv_spec.cr`, `abstract_validator_test_case.cr`.
+   - grammar `16dacc8 fix: comment before the first named tuple entry`: the
+     brace lookahead that decides hash/tuple vs named tuple skipped
+     whitespace only, so `{\n  # doc\n  key: 1\n}` was a tuple with an
+     error. A new `advance_space_newline_and_comments` (not `#{`) in the
+     expression, type and after-range brace lookaheads. Upstream todo
+     "comments inside nested named tuples" moved to a real case. Athena
+     `service_container.cr`, both `bundle.cr`.
+
+   C3 (`\{% if Int{{n}} == X %}`, `big/big_int.cr`) tried once in the
+   scanner (consume `\{%`/`\{{` as content): it broke the corpus's
+   "escaped macro expression" tree and still left `\{% end %}` pairs
+   unbalanced; reverted, stays in C (needs escaped tags modelled in the
+   macro grammar).
+
+   Final: stdlib 1645/1646 (99.94%; target ≥1640), external 2068/2068;
+   corpus 250/250; Neovim checks (12), `verify-static`, `make spec` 427
+   examples; types dump: stdlib unchanged, repo no regressions. A
+   fresh clone builds from the pinned grammar with a C compiler only
+   (the CLI is used by `grammar-check*`/`grammar-test`, never by the
+   build). Notes rewritten (coverage, known gaps = C list, lowering
+   quirks after A2/A3/B5; the old splat and short-block quirks are
+   gone); README build section and docs list; development.md metrics.
+   0.19.0.
+
+Status: done; exit criterion met (A1–A4 parse, no stdlib or external
+file lost at any step, no regressions). Remaining gaps: C3, C5, C6
+(C1, C2 are not grammar bugs).
+
 Exit criterion: clear-ls builds from the pinned clear-ls grammar
 without Node or the CLI; A1–A3 parse (A4 parses or is recorded in C);
 no stdlib or external file lost; no regressions (`make spec`, `make

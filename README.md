@@ -177,9 +177,11 @@ cd clear-ls
 make release
 ```
 
-This fetches pinned versions of the Tree-sitter runtime and the
-`tree-sitter-crystal` grammar, builds them as static libraries, and builds an
-optimized `bin/clear-ls`. Put the binary on your `PATH`:
+This fetches pinned versions of the Tree-sitter runtime and clear-ls's own
+`tree-sitter-crystal` grammar (`GRAMMAR_REPO`/`GRAMMAR_REV` in the Makefile;
+for now a local clone at `../tree-sitter-crystal`), builds them as static
+libraries, and builds an optimized `bin/clear-ls`. Building needs a C
+compiler, not Node or the tree-sitter CLI. Put the binary on your `PATH`:
 
 ```sh
 ln -s "$PWD/bin/clear-ls" ~/.local/bin/clear-ls
@@ -395,8 +397,8 @@ types, and `lsp` maps it to JSON-RPC.
   invalidation and file format.
 - [Book gaps](docs/book-gaps.md): known differences from the language
   reference.
-- [Tree-sitter grammar notes](docs/tree-sitter-grammar-notes.md): known
-  parse gaps.
+- [Tree-sitter grammar notes](docs/tree-sitter-grammar-notes.md): changing
+  clear-ls's grammar, coverage and known parse gaps.
 - [Settings](docs/settings.md), [Roadmap](docs/roadmap.md),
   [Status](docs/status.md).
 

@@ -33,21 +33,28 @@ neither: `src/parser.c` is committed in the grammar repository).
 
 ## Coverage
 
-Parsing the Crystal 1.22.0 standard library (`share/crystal/src`, 1646 files,
-~9 MB) gives 1635 error-free files (99.33%) at about 4.3 MB/s on one thread.
-`make grammar-check` re-runs this and lists failures. Crystal 1.22.2
-(macOS, CLI 0.27.1; the vendored 0.26.9 runtime fails the same files):
-1634, the new failure being `crystal/event_loop/libevent/event.cr`,
-which 1.22.1/1.22.2 changed to use a setter call in a short block (below).
+Crystal 1.22.2 standard library (`share/crystal/src`, 1646 files, ~9 MB):
+1645 error-free files (99.94%) at about 3.8 MB/s on one thread. External
+set (`make grammar-check-ext`: `lib/`, Marten, Athena with specs): 2068 of
+2068. Before Phase 19 (upstream `50ca9e6`): 1635 and 2040.
+`make grammar-check` / `grammar-check-ext` re-run these and list failures;
+`tools/grammar/coverage.sh save|check` compares failing files across a
+grammar change.
 
 ## Known gaps
 
-| Construct | Example (stdlib location) |
-|---|---|
-| Short block with index-query | `filters1.try(&.pos[name]?)` (`semantic/filters.cr`) |
-| Underscore block-call argument | `each_abbrev(bytes, _) do \|abbrev\|` (`crystal/dwarf/abbrev.cr`) |
-| Unnamed proc-type `fun` parameter | `fun BIO_meth_set_create(BioMethod*, (Bio*) -> Int)` (`openssl/lib_crypto.cr`) |
-| Escaped macro inside macro | `\{% if Int{{n}} == LibGMP::SI %}` (`big/big_int.cr`) |
+What fails today (the deferred list C of Phase 19 in
+[roadmap.md](roadmap.md#phase-19--own-tree-sitter-crystal)):
+
+| Construct | Example | Why deferred |
+|---|---|---|
+| Escaped macro tag with a nested macro expression (C3) | `\{% if Int{{n}} == LibGMP::SI %}` (`big/big_int.cr`, the one stdlib failure) | `\{%` is literal text to Crystal's macro lexer, but the grammar reads `{%` as a macro statement; a scanner try (consume `\{%` as content) broke the corpus's "escaped macro expression" tree and still left the `{% end %}` pairs unbalanced. Needs a model of escaped tags in the macro grammar |
+| Keywords as names outside accessors (C5) | `def select`, `x.end`, named args `begin:` | upstream #132's scanner route; A3 covers `getter begin : T`. No failing file in the stdlib or external set |
+| Error recovery for half-typed code (C6) | `@[` alone, `@[JSON::` eating the next `def`, unclosed `def foo(` | recovery tuning; clear-ls works around (below) |
+
+Not grammar bugs (the compiler rejects them too): mixed hash/named-tuple
+keys `{1 => 2, b: 3}` (C1), `{{` as two tuple braces (C2),
+`{0 => f "a", 1 => 2}` (a parenless call swallows the next entry).
 
 ## Error recovery on incomplete code
 
@@ -90,7 +97,12 @@ grammar". Upstream PRs are not offered for now.
   or a `call` named `return` (statement-level `return` is fine). Body
   lowering maps these back to `return`/`next`/`break`.
 
-- `&.name = v` and `&.name += v` (short-block assignment, valid Crystal)
-  parse as `implicit_object_call` with the operator in an `ERROR` node and
-  the value as its `arguments`. Body lowering turns them into the setter
-  call `name=`.
+- `&.name = v` / `&.name += v` parse as `assign` / `op_assign` with an
+  `implicit_object_call` lhs; body lowering calls the setter `name=`.
+
+- `&.[i]` and `&.pos[i]?` parse as an `implicit_object_call` wrapping an
+  `index_call` (with the `pos` call as its receiver); body lowering makes
+  the `index_call` itself the implicit object call (`[]` / `[]?`).
+
+- Keyword accessor names (`getter begin : T`) arrive as one `var` token
+  `begin : ` (keyword and separator); lowering trims it.

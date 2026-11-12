@@ -4,7 +4,13 @@ Where development stands; update at every phase boundary (and when work
 stops mid-phase). History and per-phase details are in
 [roadmap.md](roadmap.md).
 
-- **Done:** Phases 0–18 (last: C bindings: `lib_c/<target>` require
+- **Done:** Phases 0–19 (last: clear-ls's own tree-sitter-crystal,
+  branch `clear-ls` in `../tree-sitter-crystal` pinned by commit: `self`
+  fun params, `&.x = v`, keyword accessor names, `#<` in regex, splats in
+  literals, `.[i]` continuation lines, unnamed proc fun params, `_`
+  arguments, `&.pos[i]?`, trailing commas after parenless calls, `}}` in
+  macro content, comments before named tuple entries; stdlib 1645/1646,
+  Marten + Athena 2068/2068; before that, C bindings: `lib_c/<target>` require
   path, funs/globals/fields navigate like methods, declaration hover,
   compiler pseudo-method docs and `Pointer(Void)`; before that, annotations: completion inside `@[`
   and its arguments, hover on built-in annotations and arguments,
@@ -50,12 +56,7 @@ stops mid-phase). History and per-phase details are in
 - **Also done:** hover/definition/highlight/tokens on type parameters
   and `forall` variables
   ([roadmap.md](roadmap.md#hover-and-definition-on-type-parameters-done)).
-- **Next:** Phase 19 — own tree-sitter-crystal
-  ([roadmap.md](roadmap.md#phase-19--own-tree-sitter-crystal)), split into
-  steps (grammar on branch `clear-ls` in `../tree-sitter-crystal`,
-  developed locally); steps 1–6 done (pin, A1 `self` fun param, A2
-  `&.x = v`, A3 keyword accessors, A4 `#<` in regex, B1–B6); next
-  step 7, verification and docs (0.19.0). Then declarations in `{% begin %}` and macro-split
+- **Next:** declarations in `{% begin %}` and macro-split
   signatures (`File.read`/`write`/`new`, `spawn`, `Socket.tcp`;
   [roadmap.md](roadmap.md#declarations-in--begin--and-macro-split-signatures));
   then Phase 20 — `{% if %}`
@@ -63,10 +64,10 @@ stops mid-phase). History and per-phase details are in
   compiler-defined constants, `:ditto:`/`:inherit:`/`:nodoc:` docs,
   generic args from class-method calls, named args to `@ivar` params
   ([roadmap.md](roadmap.md#phase-21--constant-hover-compiler-constants-doc-directives-generic-class-methods)).
-- **In progress:** Phase 19 steps 1–4 done (own grammar pinned, coverage
-  gate; `self` fun params; short-block assignment; keyword accessor
-  names); next: step 5 (A4 `#` in regex). Phases 16–19 on `dev/next`,
-  not merged into `main`.
+- **Branch:** `dev/next` (Phase 19 work after the earlier phases were
+  merged into `main`), not merged into `main`. The grammar is developed
+  in the local clone `../tree-sitter-crystal` (branch `clear-ls`; its
+  `origin` is the fork, not pushed to); `GRAMMAR_REV` pins it.
 
 ## Resume
 
