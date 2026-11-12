@@ -171,3 +171,31 @@ describe "phase 19 grammar: unnamed proc-type fun param (B3)" do
     funs[0].signature.not_nil!.params.map(&.restriction).should eq ["Bio*", "(Bio*) -> Int32"]
   end
 end
+
+describe "phase 19 grammar: underscore call argument (B4)" do
+  it "keeps the call's block and its param" do
+    src = <<-CR
+      class Abbrev
+        def code : Int32
+          1
+        end
+      end
+
+      def each_abbrev(bytes : Bytes, n, & : Abbrev ->) : Nil
+      end
+
+      def lookup(bytes : Bytes)
+        each_abbrev(bytes, _) do |abbrev|
+          c = abbrev.code
+        end
+      end
+      CR
+    tree = Syntax::Parser.new.parse(src)
+    tree.root.has_error?.should be_false
+    with_client({"src/app.cr" => src}, PRELUDE_FILES) do |c|
+      c.open("src/app.cr")
+      p19_hover(c, "c = ").not_nil!.should start_with("```crystal\nc : Int32\n```")
+      p19_defs(c, "each_abbrev(bytes, _)").should eq [7]
+    end
+  end
+end
