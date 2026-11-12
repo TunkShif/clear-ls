@@ -128,3 +128,28 @@ describe "phase 19 grammar: keywords as accessor names (A3)" do
     end
   end
 end
+
+describe "phase 19 grammar: `#<` inside a regex (A4)" do
+  src = <<-'CR'
+    class A
+      def a(x : String)
+        x =~ /\A#<A:0x\h+>\z/
+      end
+
+      def b; end
+    end
+
+    class After
+      def later; end
+    end
+    CR
+
+  it "keeps the regex closed and the items after it" do
+    tree = Syntax::Parser.new.parse(src)
+    tree.root.has_error?.should be_false
+    items = Items::Lower.lower(tree)
+    items.recovered.should be_false
+    items.items.map(&.name).should eq ["A", "After"]
+    items.items[0].children.select(&.kind.def?).map(&.name).should eq ["a", "b"]
+  end
+end

@@ -2954,6 +2954,26 @@ Steps (one commit each in this repository; grammar commits on
 5. **A4 regex `#`.** Try the grammar route once more; if it needs the
    scanner, do the smallest scanner change (regex body like percent
    literals) only if it stays local, else move it to C with notes.
+
+   *Done (grammar only, no scanner):* measured first: only `#<` fails
+   (`/#/`, `/#a/`, `/#>/`, `/a#b/` already parsed). The cause is not the
+   `comment` extra itself but the `#<loc:...>` pragma extras
+   (`loc_pragma_push/pop/location`, `token(prec(1, '#<loc:...'))`): at
+   `#<` the lexer prefers the pragma prefix over regex content (also
+   prec 1), the pragma doesn't match, and it falls back to `comment`,
+   which eats the line and leaves the regex unclosed. Grammar
+   `1b49dff fix: #< inside regex literal is content`: one more
+   `regex_literal_content` alternative, `token.immediate(prec(2,
+   '#<'))`. `/#<loc:push>/` is now regex content too (the compiler reads
+   it so). Percent-literal regexes (`%r(#<)`), strings, symbols and
+   commands were unaffected (scanner-lexed bodies). Corpus case "regexes
+   with #<" (247/247). `node-types.json` gains the anonymous `#<` token;
+   `kinds.cr` unchanged. Coverage: stdlib 4 → 4, external 20 → 17
+   (Athena ORM `entity_manager_spec.cr`, `mapping/class_spec.cr`,
+   `unit_of_work_spec.cr`). Types dump: repo and stdlib unchanged. Spec
+   (A4, 6): a def with `x =~ /\A#<A:0x\h+>\z/` keeps the next def and a
+   later class, no recovery (fails on `d45d3e6`). `make spec` 422
+   examples; Neovim checks and `verify-static` pass. C4 not needed. 0.18.7.
 6. **B1–B6**, one grammar commit each (or grouped when tiny), each
    with a corpus case; any that turns into a conflict storm or scanner
    change moves to C.
