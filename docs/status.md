@@ -53,8 +53,9 @@ stops mid-phase). History and per-phase details are in
 - **Next:** Phase 19 — own tree-sitter-crystal
   ([roadmap.md](roadmap.md#phase-19--own-tree-sitter-crystal)), split into
   steps (grammar on branch `clear-ls` in `../tree-sitter-crystal`,
-  developed locally); steps 1–5 done (pin, A1 `self` fun param, A2
-  `&.x = v`, A3 keyword accessors, A4 `#<` in regex); next step 6, B1–B6. Then declarations in `{% begin %}` and macro-split
+  developed locally); steps 1–6 done (pin, A1 `self` fun param, A2
+  `&.x = v`, A3 keyword accessors, A4 `#<` in regex, B1–B6); next
+  step 7, verification and docs (0.19.0). Then declarations in `{% begin %}` and macro-split
   signatures (`File.read`/`write`/`new`, `spawn`, `Socket.tcp`;
   [roadmap.md](roadmap.md#declarations-in--begin--and-macro-split-signatures));
   then Phase 20 — `{% if %}`

@@ -2977,6 +2977,72 @@ Steps (one commit each in this repository; grammar commits on
 6. **B1–B6**, one grammar commit each (or grouped when tiny), each
    with a corpus case; any that turns into a conflict storm or scanner
    change moves to C.
+
+   *Done:* one grammar commit each, each with a corpus case; two needed
+   small scanner changes that stayed local (B2, B6), so neither moved
+   to C. Two upstream `todo.txt` `:error` cases now parse and moved to
+   real cases ("splat in tuple", "fun declarations with proc
+   parameters"); "nillable implicit index" recorded the wrong tree and
+   was replaced.
+
+   - **B1** `314882e feat: splat elements in array and tuple
+     literals`: `array` and `tuple` elements may be `splat`
+     (`implicit_object_tuple`'s prefix shares the element choice, or
+     `when {a, *b, _}` conflicts). clear-ls: `add_elems` lowers the
+     `splat` node; the `ERROR("*")` rejoin and the regex-modifier
+     split (`*xs` read as modifier `x`) are removed with their notes;
+     `{1, *{"a", 2}}` (unrecoverable before) lowers. Athena
+     `helper/table.cr` parses.
+   - **B2** `316ddd9 fix: .[i] on a continuation line` (**scanner**):
+     at a newline followed by `.`, `scan_whitespace` consumed the `.`
+     and kept scanning when it wasn't `..`, so `[` lexed as an index
+     operator ending at the newline. Now it returns no token and the
+     internal lexer reads `.`; beginless ranges (`\n..b`) unchanged.
+     Only failed after a call with parens (`x.f(1)\n.[1]`). Marten
+     `generator/app.cr`, `auth.cr` parse.
+   - **B3** `fec13e3 feat: unnamed (T) -> R fun params`: a lib
+     `fun`'s unnamed param may be `(T) -> R` (`_type` had only the
+     0- and 2+-param parenthesised forms); aliased `proc_type`, same
+     shape as `alias F = (T*) -> R`. Bare `A -> B` stays rejected (the
+     compiler does). Items: restriction `(Bio*) -> Int32`.
+     `openssl/lib_crypto.cr` parses.
+   - **B4** `f2689ba feat: _ as a parenthesised call argument`: `_` in
+     `foo(a, _)` / with a block (the parser accepts it; the compiler
+     rejects reading it later). Not for parenless args or values
+     (`x = _` stays an error). clear-ls: lowered as an opaque
+     argument; the call keeps its arity and block.
+     `crystal/dwarf/abbrev.cr` parses.
+   - **B5** `f4829f8 feat: index on a short-block call &.pos[i]`:
+     `&.pos[k]` and `&.pos[k]?` were `pos([k])` (an array argument;
+     `]?` an error). New `implicit_object_postfix_index` (aliased
+     `index_call`, receiver = the implicit object call);
+     `_implicit_object_call` is right-associative so `x.try &.pos[1]`
+     indexes inside the block, as the compiler does. `&.bar [1]` (space)
+     is still an array argument (compiler agrees). clear-ls:
+     `lower_implicit_index` lowers the wrapped `index_call` as a `[]` /
+     `[]?` implicit object call; this also types `&.[0]` /
+     `&.[0]?`, which parsed already but stayed unknown. Types dump: repo
+     +5 improved, 1 changed (`Array(?)` → `Array(String)`).
+     `semantic/filters.cr` parses.
+   - **B6** `2fa84cb feat: trailing comma after parenless call args`
+     (**scanner**): the "hash entry value is a parenless call" gap was
+     really the trailing comma: `{0 => f "a",\n}` (the compiler
+     accepts it; `{0 => f "a", 1 => 2}` it rejects, still an error).
+     A new external `_trailing_comma`: a `,` followed (after spaces and
+     comments) by `}`, `]` or `)` ends the parenless argument list;
+     otherwise the scanner yields and `,` separates arguments as before
+     (`f 1,\n  y = 2` keeps both). Athena: 8 route fixtures,
+     `collection_validator_test_case.cr` parse.
+
+   Coverage: stdlib 4 → 1 (`big/big_int.cr`, C3), external 17 → 5
+   (Athena `service_container.cr`, `athena-dotenv_spec.cr`,
+   `framework/src/bundle.cr`, `security/src/bundle/bundle.cr`,
+   `abstract_validator_test_case.cr`: step 7 classifies them). No file
+   lost at any step. `kinds.cr` unchanged throughout. Corpus 250/250.
+   Types dump: stdlib unchanged; repo only B5's improvements. Specs: 4
+   more in `features_phase19_spec.cr` (B3–B6), B1's HIR spec rewritten.
+   `make spec` 427 examples; Neovim checks and `verify-static` pass.
+   0.18.9.
 7. **Verification and docs.** `make grammar-check` (expect ≥1640/1646
    stdlib), `grammar-check-ext`, types dump, Neovim checks; notes:
    "Known gaps" rewritten with the C list; README, status; 0.19.0.
