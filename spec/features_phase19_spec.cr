@@ -199,3 +199,34 @@ describe "phase 19 grammar: underscore call argument (B4)" do
     end
   end
 end
+
+describe "phase 19 grammar: index on a short-block call (B5)" do
+  it "types `&.pos[k]?` and `&.[i]` and navigates the indexed call" do
+    src = <<-CR
+      class F
+        def pos : Hash(String, Int32)
+          {"a" => 1}
+        end
+      end
+
+      def run(f : F?, fs : Array(F), xss : Array(Array(Int32)))
+        a = f.try(&.pos["a"]?)
+        b = fs.map &.pos["a"]
+        d = xss.map(&.[0])
+        e = xss.map(&.[0]?)
+      end
+      CR
+    Syntax::Parser.new.parse(src).root.has_error?.should be_false
+    c = FeatureClient.new({"src/app.cr" => src}, real_stdlib: true)
+    begin
+      c.open("src/app.cr")
+      p19_hover(c, "a = ").not_nil!.should start_with("```crystal\na : Int32?\n```")
+      p19_hover(c, "b = ").not_nil!.should start_with("```crystal\nb : Array(Int32)\n```")
+      p19_hover(c, "d = ").not_nil!.should start_with("```crystal\nd : Array(Int32)\n```")
+      p19_hover(c, "e = ").not_nil!.should start_with("```crystal\ne : Array(Int32?)\n```")
+      p19_defs(c, "pos[\"a\"]?").should eq [2]
+    ensure
+      c.cleanup
+    end
+  end
+end

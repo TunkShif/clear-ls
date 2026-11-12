@@ -331,6 +331,13 @@ module ClearLS::HIR
     # -- calls and blocks -----------------------------------------------------
 
     private def lower_call(node : Syntax::Node) : ExprId
+      # `&.[i]`, `&.pos[i]?`: an implicit_object_call wrapping an
+      # index_call (no own method). Lower the index call as the implicit
+      # object call: `[]` on the block arg, or on `pos` called on it.
+      if node.kind.implicit_object_call? && node.field(Syntax::Field::Method).nil? &&
+         (idx = node.named_children.find(&.kind.index_call?))
+        return lower_implicit_index(idx)
+      end
       if node.field(Syntax::Field::Receiver).nil? && (jump = JUMP_WORDS[node.field_text(Syntax::Field::Method) || ""]?)
         args = node.field(Syntax::Field::Arguments).try(&.named_children.map { |a| lower(a) }) || [] of ExprId
         return add(jump, node.range, syntax: node.kind, children: args)
@@ -398,6 +405,22 @@ module ClearLS::HIR
     end
 
     TYPE_ARG_METHODS = %w(as as? is_a? nilable? responds_to?).to_set
+
+    private def lower_implicit_index(idx : Syntax::Node) : ExprId
+      receiver = idx.field(Syntax::Field::Receiver).try { |r| lower(r) }
+      method = idx.field(Syntax::Field::Method)
+      close = idx.children.reverse_each.find { |c| !c.named? && c.type.starts_with?(']') }
+      name = "[]#{close.try(&.type.lchop(']'))}"
+      args = [] of ExprId
+      idx.field(Syntax::Field::Arguments).try &.named_children.each do |a|
+        next if a.kind.comment?
+        args << lower(a)
+      end
+      # Without a receiver the block arg is the receiver; with one (`pos`),
+      # the chain `pos` → `[]` leads up to the block (`implicit_receiver`).
+      add(ExprKind::Call, idx.range, syntax: Syntax::Kind::ImplicitObjectCall,
+        name: name, name_range: method.try(&.range), receiver: receiver, children: args)
+    end
 
     private def type_node?(n : Syntax::Node) : Bool
       n.kind.constant? || n.kind.generic_instance_type? || n.kind.union_type? || n.kind.nilable_type? ||
