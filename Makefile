@@ -27,7 +27,7 @@ TREE_SITTER_REV ?= v0.26.9
 # Until the remote fork exists, the repository is a local clone next to
 # this one; override GRAMMAR_REPO to build elsewhere.
 GRAMMAR_REPO ?= $(abspath ../tree-sitter-crystal)
-GRAMMAR_REV ?= 6aa6b29f5b90a9ed3cf93a244dde01b37cfaa584
+GRAMMAR_REV ?= d45d3e662f277b527ada6b47226e45f9cfd2ce84
 
 ROOT := $(abspath .)
 VENDOR := $(ROOT)/vendor

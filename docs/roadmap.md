@@ -2782,6 +2782,14 @@ there, offering fixes upstream where they fit. Branch `dev/next`.
 it and says so); until then the Makefile points at the local clone.
 Upstream PRs: not now.
 
+*Fork history rewritten (after step 4):* the clone's `clear-ls` commits
+were rewritten when the fork was published (`origin` =
+`TunkShif/tree-sitter-crystal`); trees are identical, hashes changed:
+`557ee42` → `227cdf4`, `f6381f4` → `7c4af09`, `37c0a06` → `3d04fe5`,
+`6aa6b29` → `d45d3e6`. `GRAMMAR_REV` re-pinned to `d45d3e6`; the step
+notes below use the new hashes. The grammar is still developed in the
+local clone only.
+
 **Decisions:**
 
 1. **Form: a fork, pinned by commit.** clear-ls commits on top of
@@ -2851,10 +2859,10 @@ Steps (one commit each in this repository; grammar commits on
    → bump `GRAMMAR_REV` → `make distclean`-free refresh of `vendor/` →
    `syntax-gen` → specs). Patch bump (grammar pin).
 
-   *Done:* grammar `clear-ls` branch: `557ee42 chore: regenerate with
+   *Done:* grammar `clear-ls` branch: `227cdf4 chore: regenerate with
    tree-sitter-cli 0.26.9` (`parser.c` banner, `tree_sitter/array.h`).
    Makefile: `GRAMMAR_REPO` = `$(abspath ../tree-sitter-crystal)`,
-   `GRAMMAR_REV` = `557ee42…`; `grammar-update` (fetches the pinned commit
+   `GRAMMAR_REV` = `227cdf4…`; `grammar-update` (fetches the pinned commit
    into the shallow `vendor/` clone, rebuilds the archive; `make`
    relinks); `grammar-test`; `grammar-check-ext` over `lib/`,
    `tools/external/marten/src`, `tools/external/athena/src` (Athena
@@ -2868,7 +2876,7 @@ Steps (one commit each in this repository; grammar commits on
    with a `self` param lowers with both params, hovers and types its
    call (`ts_language_symbol_name`).
 
-   *Done:* grammar `f6381f4 feat: allow self as a fun param name`
+   *Done:* grammar `7c4af09 feat: allow self as a fun param name`
    (`fun_param` name may be `self`, aliased to `identifier`; the compiler
    accepts it for `fun` in a lib and at top level, rejects it for `def`,
    whose rule is unchanged) + corpus case "fun params named self"
@@ -2884,7 +2892,7 @@ Steps (one commit each in this repository; grammar commits on
    `&.x=(v)`, `&.x += v` if cheap); clear-ls: setter references /
    rename include these uses; block-form conversion.
 
-   *Done:* grammar `37c0a06 feat: short-block assignment &.x = v`:
+   *Done:* grammar `3d04fe5 feat: short-block assignment &.x = v`:
    `block_argument` also takes `implicit_object_assign` /
    `implicit_object_operator_assign` (aliased `assign` / `op_assign`
    with an `implicit_object_call` lhs, also chained `&.a.b = v`, and
@@ -2908,7 +2916,7 @@ Steps (one commit each in this repository; grammar commits on
    `begin`/`end` accessors appear in items (stdlib `range.cr` parses),
    completion `r.be` → `begin`.
 
-   *Done:* grammar `6aa6b29 feat: keywords as accessor names`: a new
+   *Done:* grammar `d45d3e6 feat: keywords as accessor names`: a new
    `keyword_type_declaration` (aliased `type_declaration`) in call
    argument lists (all six `args` choices): one token
    `<keyword>[ \t]+:[ \t]` for 30 keywords (`begin end else elsif
@@ -2941,7 +2949,7 @@ Steps (one commit each in this repository; grammar commits on
    `grammar-test` ran the CLI's cached `~/.cache/tree-sitter/lib/
    crystal.so`, built from whichever checkout compiled it last; now
    `-r` (rebuild). Earlier step results were re-checked from clean
-   worktrees (557ee42: 11/28, f6381f4: 11/27, 37c0a06: 7/21): correct.
+   worktrees (227cdf4: 11/28, 7c4af09: 11/27, 3d04fe5: 7/21): correct.
    Specs: 2 more (5). `make spec` 420 examples. 0.18.5.
 5. **A4 regex `#`.** Try the grammar route once more; if it needs the
    scanner, do the smallest scanner change (regex body like percent
