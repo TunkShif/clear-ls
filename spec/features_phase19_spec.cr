@@ -230,3 +230,28 @@ describe "phase 19 grammar: index on a short-block call (B5)" do
     end
   end
 end
+
+describe "phase 19 grammar: trailing comma after a parenless call (B6)" do
+  it "keeps the hash and what follows" do
+    src = <<-CR
+      def f(x : String) : Int32
+        1
+      end
+
+      def run
+        h = {
+          "a" => f "x",
+        }
+      end
+
+      def after; end
+      CR
+    tree = Syntax::Parser.new.parse(src)
+    tree.root.has_error?.should be_false
+    Items::Lower.lower(tree).items.map(&.name).should eq ["f", "run", "after"]
+    with_client({"src/app.cr" => src}, PRELUDE_FILES) do |c|
+      c.open("src/app.cr")
+      p19_hover(c, "h = ").not_nil!.should start_with("```crystal\nh : Hash(String, Int32)\n```")
+    end
+  end
+end
